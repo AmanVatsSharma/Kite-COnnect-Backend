@@ -1,0 +1,388 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, In } from 'typeorm';
+import { Instrument } from '../../entities/instrument.entity';
+import { MarketData } from '../../entities/market-data.entity';
+import { Subscription } from '../../entities/subscription.entity';
+import { KiteConnectService } from '../../services/kite-connect.service';
+import { RedisService } from '../../services/redis.service';
+import { RequestBatchingService } from '../../services/request-batching.service';
+import { MarketDataGateway } from '../../gateways/market-data.gateway';
+
+@Injectable()
+export class StockService {
+  private readonly logger = new Logger(StockService.name);
+
+  constructor(
+    @InjectRepository(Instrument)
+    private instrumentRepository: Repository<Instrument>,
+    @InjectRepository(MarketData)
+    private marketDataRepository: Repository<MarketData>,
+    @InjectRepository(Subscription)
+    private subscriptionRepository: Repository<Subscription>,
+    private kiteConnectService: KiteConnectService,
+    private redisService: RedisService,
+    private requestBatchingService: RequestBatchingService,
+    private marketDataGateway: MarketDataGateway,
+  ) {}
+
+  async syncInstruments(exchange?: string): Promise<{ synced: number; updated: number }> {
+    try {
+      this.logger.log(`Starting instrument sync for exchange: ${exchange || 'all'}`);
+      
+      const kiteInstruments = await this.kiteConnectService.getInstruments(exchange);
+      let synced = 0;
+      let updated = 0;
+
+      for (const kiteInstrument of kiteInstruments) {
+        const existingInstrument = await this.instrumentRepository.findOne({
+          where: { instrument_token: kiteInstrument.instrument_token },
+        });
+
+        if (existingInstrument) {
+          // Update existing instrument
+          await this.instrumentRepository.update(
+            { instrument_token: kiteInstrument.instrument_token },
+            {
+              exchange_token: kiteInstrument.exchange_token,
+              tradingsymbol: kiteInstrument.tradingsymbol,
+              name: kiteInstrument.name,
+              last_price: kiteInstrument.last_price || 0,
+              expiry: kiteInstrument.expiry,
+              strike: kiteInstrument.strike || 0,
+              tick_size: kiteInstrument.tick_size || 0.05,
+              lot_size: kiteInstrument.lot_size || 1,
+              instrument_type: kiteInstrument.instrument_type,
+              segment: kiteInstrument.segment,
+              exchange: kiteInstrument.exchange,
+            }
+          );
+          updated++;
+        } else {
+          // Create new instrument
+          const newInstrument = this.instrumentRepository.create({
+            instrument_token: kiteInstrument.instrument_token,
+            exchange_token: kiteInstrument.exchange_token,
+            tradingsymbol: kiteInstrument.tradingsymbol,
+            name: kiteInstrument.name,
+            last_price: kiteInstrument.last_price || 0,
+            expiry: kiteInstrument.expiry,
+            strike: kiteInstrument.strike || 0,
+            tick_size: kiteInstrument.tick_size || 0.05,
+            lot_size: kiteInstrument.lot_size || 1,
+            instrument_type: kiteInstrument.instrument_type,
+            segment: kiteInstrument.segment,
+            exchange: kiteInstrument.exchange,
+          });
+          await this.instrumentRepository.save(newInstrument);
+          synced++;
+        }
+      }
+
+      this.logger.log(`Instrument sync completed. Synced: ${synced}, Updated: ${updated}`);
+      return { synced, updated };
+    } catch (error) {
+      this.logger.error('Error syncing instruments', error);
+      throw error;
+    }
+  }
+
+  async getInstruments(filters?: {
+    exchange?: string;
+    instrument_type?: string;
+    segment?: string;
+    is_active?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ instruments: Instrument[]; total: number }> {
+    try {
+      const queryBuilder = this.instrumentRepository.createQueryBuilder('instrument');
+
+      if (filters?.exchange) {
+        queryBuilder.andWhere('instrument.exchange = :exchange', { exchange: filters.exchange });
+      }
+
+      if (filters?.instrument_type) {
+        queryBuilder.andWhere('instrument.instrument_type = :instrument_type', { 
+          instrument_type: filters.instrument_type 
+        });
+      }
+
+      if (filters?.segment) {
+        queryBuilder.andWhere('instrument.segment = :segment', { segment: filters.segment });
+      }
+
+      if (filters?.is_active !== undefined) {
+        queryBuilder.andWhere('instrument.is_active = :is_active', { is_active: filters.is_active });
+      }
+
+      const total = await queryBuilder.getCount();
+
+      if (filters?.limit) {
+        queryBuilder.limit(filters.limit);
+      }
+
+      if (filters?.offset) {
+        queryBuilder.offset(filters.offset);
+      }
+
+      queryBuilder.orderBy('instrument.tradingsymbol', 'ASC');
+
+      const instruments = await queryBuilder.getMany();
+
+      return { instruments, total };
+    } catch (error) {
+      this.logger.error('Error fetching instruments', error);
+      throw error;
+    }
+  }
+
+  async getInstrumentByToken(instrumentToken: number): Promise<Instrument | null> {
+    try {
+      return await this.instrumentRepository.findOne({
+        where: { instrument_token: instrumentToken },
+      });
+    } catch (error) {
+      this.logger.error(`Error fetching instrument ${instrumentToken}`, error);
+      throw error;
+    }
+  }
+
+  async searchInstruments(query: string, limit: number = 20): Promise<Instrument[]> {
+    try {
+      return await this.instrumentRepository
+        .createQueryBuilder('instrument')
+        .where('instrument.tradingsymbol LIKE :query', { query: `%${query}%` })
+        .orWhere('instrument.name LIKE :query', { query: `%${query}%` })
+        .andWhere('instrument.is_active = :is_active', { is_active: true })
+        .limit(limit)
+        .orderBy('instrument.tradingsymbol', 'ASC')
+        .getMany();
+    } catch (error) {
+      this.logger.error('Error searching instruments', error);
+      throw error;
+    }
+  }
+
+  async getQuotes(instrumentTokens: number[]): Promise<any> {
+    try {
+      // Check cache first
+      const cachedQuotes = await this.redisService.getCachedQuote(
+        instrumentTokens.map(token => token.toString())
+      );
+
+      if (cachedQuotes) {
+        this.logger.log(`Returning cached quotes for ${instrumentTokens.length} instruments`);
+        return cachedQuotes;
+      }
+
+      // Use request batching service for efficient API calls
+      const quotes = await this.requestBatchingService.getQuote(
+        instrumentTokens.map(token => token.toString())
+      );
+
+      // Cache the result
+      await this.redisService.cacheQuote(
+        instrumentTokens.map(token => token.toString()),
+        quotes,
+        30
+      );
+
+      this.logger.log(`Fetched quotes for ${instrumentTokens.length} instruments`);
+      return quotes;
+    } catch (error) {
+      this.logger.error('Error fetching quotes', error);
+      throw error;
+    }
+  }
+
+  async getLTP(instrumentTokens: number[]): Promise<any> {
+    try {
+      const ltp = await this.requestBatchingService.getLTP(
+        instrumentTokens.map(token => token.toString())
+      );
+
+      this.logger.log(`Fetched LTP for ${instrumentTokens.length} instruments`);
+      return ltp;
+    } catch (error) {
+      this.logger.error('Error fetching LTP', error);
+      throw error;
+    }
+  }
+
+  async getOHLC(instrumentTokens: number[]): Promise<any> {
+    try {
+      const ohlc = await this.requestBatchingService.getOHLC(
+        instrumentTokens.map(token => token.toString())
+      );
+
+      this.logger.log(`Fetched OHLC for ${instrumentTokens.length} instruments`);
+      return ohlc;
+    } catch (error) {
+      this.logger.error('Error fetching OHLC', error);
+      throw error;
+    }
+  }
+
+  async getHistoricalData(
+    instrumentToken: number,
+    fromDate: string,
+    toDate: string,
+    interval: string,
+  ): Promise<any> {
+    try {
+      const historicalData = await this.kiteConnectService.getHistoricalData(
+        instrumentToken,
+        fromDate,
+        toDate,
+        interval
+      );
+
+      this.logger.log(`Fetched historical data for instrument ${instrumentToken}`);
+      return historicalData;
+    } catch (error) {
+      this.logger.error('Error fetching historical data', error);
+      throw error;
+    }
+  }
+
+  async storeMarketData(instrumentToken: number, data: any): Promise<void> {
+    try {
+      const marketData = this.marketDataRepository.create({
+        instrument_token: instrumentToken,
+        last_price: data.last_price || 0,
+        open: data.ohlc?.open || 0,
+        high: data.ohlc?.high || 0,
+        low: data.ohlc?.low || 0,
+        close: data.ohlc?.close || 0,
+        volume: data.volume || 0,
+        ohlc_open: data.ohlc?.open || 0,
+        ohlc_high: data.ohlc?.high || 0,
+        ohlc_low: data.ohlc?.low || 0,
+        ohlc_close: data.ohlc?.close || 0,
+        ohlc_volume: data.ohlc?.volume || 0,
+        timestamp: new Date(),
+        data_type: 'live',
+      });
+
+      await this.marketDataRepository.save(marketData);
+
+      // Cache the data
+      await this.redisService.cacheMarketData(instrumentToken, data, 60);
+
+      // Broadcast to WebSocket clients
+      await this.marketDataGateway.broadcastMarketData(instrumentToken, data);
+
+      this.logger.log(`Stored market data for instrument ${instrumentToken}`);
+    } catch (error) {
+      this.logger.error('Error storing market data', error);
+      throw error;
+    }
+  }
+
+  async getMarketDataHistory(
+    instrumentToken: number,
+    limit: number = 100,
+    offset: number = 0,
+  ): Promise<{ data: MarketData[]; total: number }> {
+    try {
+      const queryBuilder = this.marketDataRepository
+        .createQueryBuilder('marketData')
+        .where('marketData.instrument_token = :instrumentToken', { instrumentToken })
+        .orderBy('marketData.timestamp', 'DESC');
+
+      const total = await queryBuilder.getCount();
+
+      const data = await queryBuilder
+        .limit(limit)
+        .offset(offset)
+        .getMany();
+
+      return { data, total };
+    } catch (error) {
+      this.logger.error('Error fetching market data history', error);
+      throw error;
+    }
+  }
+
+  async subscribeToInstrument(
+    userId: string,
+    instrumentToken: number,
+    subscriptionType: 'live' | 'historical' | 'both' = 'live',
+  ): Promise<Subscription> {
+    try {
+      const existingSubscription = await this.subscriptionRepository.findOne({
+        where: {
+          user_id: userId,
+          instrument_token: instrumentToken,
+        },
+      });
+
+      if (existingSubscription) {
+        existingSubscription.is_active = true;
+        existingSubscription.subscription_type = subscriptionType;
+        return await this.subscriptionRepository.save(existingSubscription);
+      }
+
+      const subscription = this.subscriptionRepository.create({
+        user_id: userId,
+        instrument_token: instrumentToken,
+        subscription_type: subscriptionType,
+        is_active: true,
+      });
+
+      return await this.subscriptionRepository.save(subscription);
+    } catch (error) {
+      this.logger.error('Error creating subscription', error);
+      throw error;
+    }
+  }
+
+  async unsubscribeFromInstrument(userId: string, instrumentToken: number): Promise<void> {
+    try {
+      await this.subscriptionRepository.update(
+        { user_id: userId, instrument_token: instrumentToken },
+        { is_active: false }
+      );
+    } catch (error) {
+      this.logger.error('Error unsubscribing from instrument', error);
+      throw error;
+    }
+  }
+
+  async getUserSubscriptions(userId: string): Promise<Subscription[]> {
+    try {
+      return await this.subscriptionRepository.find({
+        where: { user_id: userId, is_active: true },
+        relations: ['instrument'],
+      });
+    } catch (error) {
+      this.logger.error('Error fetching user subscriptions', error);
+      throw error;
+    }
+  }
+
+  async getSystemStats(): Promise<any> {
+    try {
+      const [instrumentCount, marketDataCount, subscriptionCount] = await Promise.all([
+        this.instrumentRepository.count(),
+        this.marketDataRepository.count(),
+        this.subscriptionRepository.count({ where: { is_active: true } }),
+      ]);
+
+      const batchStats = this.requestBatchingService.getBatchStats();
+      const connectionStats = this.marketDataGateway.getConnectionStats();
+
+      return {
+        instruments: instrumentCount,
+        marketDataRecords: marketDataCount,
+        activeSubscriptions: subscriptionCount,
+        batchStats,
+        connectionStats,
+      };
+    } catch (error) {
+      this.logger.error('Error fetching system stats', error);
+      throw error;
+    }
+  }
+}

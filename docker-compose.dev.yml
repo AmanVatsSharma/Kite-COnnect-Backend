@@ -1,0 +1,113 @@
+npm install
+version: '3.8'
+
+services:
+  # Development Trading App Backend
+  trading-app-dev:
+    build:
+      context: .
+      target: builder
+    container_name: trading-app-dev
+    ports:
+      - "3000:3000"
+      - "9229:9229"  # Debug port
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=mysql-dev
+      - DB_PORT=3306
+      - DB_USERNAME=trading_user
+      - DB_PASSWORD=trading_password
+      - DB_DATABASE=trading_app_dev
+      - REDIS_HOST=redis-dev
+      - REDIS_PORT=6379
+      - KITE_API_KEY=${KITE_API_KEY}
+      - KITE_API_SECRET=${KITE_API_SECRET}
+      - KITE_ACCESS_TOKEN=${KITE_ACCESS_TOKEN}
+      - JWT_SECRET=dev_jwt_secret
+    depends_on:
+      mysql-dev:
+        condition: service_healthy
+      redis-dev:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - trading-dev-network
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: npm run start:debug
+
+  # Development MySQL Database
+  mysql-dev:
+    image: mysql:8.0
+    container_name: trading-mysql-dev
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=trading_app_dev
+      - MYSQL_USER=trading_user
+      - MYSQL_PASSWORD=trading_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - trading-dev-network
+
+  # Development Redis Cache
+  redis-dev:
+    image: redis:7-alpine
+    container_name: trading-redis-dev
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_dev_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - trading-dev-network
+
+  # Redis Commander (Redis GUI)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis-dev:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis-dev
+    restart: unless-stopped
+    networks:
+      - trading-dev-network
+
+  # phpMyAdmin (MySQL GUI)
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    environment:
+      - PMA_HOST=mysql-dev
+      - PMA_USER=trading_user
+      - PMA_PASSWORD=trading_password
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql-dev
+    restart: unless-stopped
+    networks:
+      - trading-dev-network
+
+volumes:
+  mysql_dev_data:
+  redis_dev_data:
+
+networks:
+  trading-dev-network:
+    driver: bridge
