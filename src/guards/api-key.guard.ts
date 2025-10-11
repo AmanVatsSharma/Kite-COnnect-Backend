@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, TooManyRequestsException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiKey } from '../entities/api-key.entity';
@@ -27,7 +27,7 @@ export class ApiKeyGuard implements CanActivate {
     const bucketKey = `ratelimit:${apiKey}:${new Date().getUTCFullYear()}${new Date().getUTCMonth()}${new Date().getUTCDate()}${new Date().getUTCHours()}${new Date().getUTCMinutes()}`;
     const current = (await this.redisService.get<number>(bucketKey)) || 0;
     if (current >= keyRecord.rate_limit_per_minute) {
-      throw new TooManyRequestsException('Rate limit exceeded');
+      throw new BadRequestException('Rate limit exceeded');
     }
 
     await this.redisService.set(bucketKey, current + 1, 65); // expire slightly > 1 minute
