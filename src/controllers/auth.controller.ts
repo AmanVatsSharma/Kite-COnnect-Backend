@@ -6,7 +6,7 @@ import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { KiteSession } from '../entities/kite-session.entity';
 import { RedisService } from '../services/redis.service';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags, ApiResponse } from '@nestjs/swagger';
 import { KiteConnectService } from '../services/kite-connect.service';
 
 @Controller('api/auth/kite')
@@ -21,6 +21,7 @@ export class AuthController {
 
   @Get('login')
   @ApiOperation({ summary: 'Get Kite login URL with CSRF state' })
+  @ApiResponse({ status: 200, description: 'Kite login URL', schema: { properties: { url: { type: 'string', example: 'https://kite.trade/connect/login?...' }, state: { type: 'string' } } } })
   async login(@Res() res: Response) {
     const apiKey = this.configService.get<string>('KITE_API_KEY');
     const apiSecret = this.configService.get<string>('KITE_API_SECRET');
@@ -37,6 +38,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Kite OAuth callback handler' })
   @ApiQuery({ name: 'request_token', required: true })
   @ApiQuery({ name: 'state', required: true })
+  @ApiResponse({ status: 200, description: 'OAuth success', schema: { properties: { success: { type: 'boolean', example: true } } } })
   async callback(@Query('request_token') requestToken: string, @Query('state') state: string) {
     const apiKey = this.configService.get<string>('KITE_API_KEY');
     const apiSecret = this.configService.get<string>('KITE_API_SECRET');

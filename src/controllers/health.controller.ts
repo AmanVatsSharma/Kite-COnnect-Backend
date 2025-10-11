@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { StockService } from '../modules/stock/stock.service';
 import { KiteConnectService } from '../services/kite-connect.service';
 import { RedisService } from '../services/redis.service';
@@ -18,6 +18,7 @@ export class HealthController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: 'Basic health' })
   async getHealth() {
     try {
       const [systemStats, streamingStatus] = await Promise.all([
@@ -47,6 +48,7 @@ export class HealthController {
   }
 
   @Get('detailed')
+  @ApiOperation({ summary: 'Detailed health' })
   async getDetailedHealth() {
     try {
       const [systemStats, streamingStatus] = await Promise.all([
@@ -96,6 +98,7 @@ export class HealthController {
   }
 
   @Get('metrics')
+  @ApiOperation({ summary: 'Prometheus metrics' })
   async getMetrics() {
     const reg = this.metricsService.getMetricsRegister();
     return reg.metrics();

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, UseGuards, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiSecurity } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiSecurity, ApiQuery, ApiBody } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiKey } from '../entities/api-key.entity';
@@ -8,7 +8,7 @@ import { ApiKeyService } from '../services/api-key.service';
 
 @Controller('api/admin')
 @ApiTags('admin')
-@ApiSecurity('apiKey')
+@ApiSecurity('admin')
 @UseGuards(AdminGuard)
 export class AdminController {
   constructor(
@@ -18,6 +18,7 @@ export class AdminController {
 
   @Post('apikeys')
   @ApiOperation({ summary: 'Create API key' })
+  @ApiBody({ schema: { properties: { key: { type: 'string', example: 'demo-key-1' }, tenant_id: { type: 'string', example: 'tenant-1' }, rate_limit_per_minute: { type: 'number', example: 600 }, connection_limit: { type: 'number', example: 2000 } } } })
   async createApiKey(@Body() body: { key: string; tenant_id: string; name?: string; rate_limit_per_minute?: number; connection_limit?: number }) {
     const entity = this.apiKeyRepo.create({
       key: body.key,
@@ -44,6 +45,7 @@ export class AdminController {
 
   @Get('usage')
   @ApiOperation({ summary: 'Get usage report for an API key' })
+  @ApiQuery({ name: 'key', required: true })
   async usageReport(@Query('key') key: string) {
     const result = await this.apiKeyService.getUsageReport(key);
     return result;

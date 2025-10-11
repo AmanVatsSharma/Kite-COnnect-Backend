@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
@@ -11,7 +12,7 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
    
   try {
-    const app = await NestFactory.create(AppModule);
+    const app = await NestFactory.create<NestExpressApplication>(AppModule);
     const configService = app.get(ConfigService);
 
     // Security middleware
@@ -50,6 +51,7 @@ async function bootstrap() {
       .setDescription('Kite-backed market data provider for NSE/MCX')
       .setVersion('1.0.0')
       .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'apiKey')
+      .addApiKey({ type: 'apiKey', name: 'x-admin-token', in: 'header' }, 'admin')
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
