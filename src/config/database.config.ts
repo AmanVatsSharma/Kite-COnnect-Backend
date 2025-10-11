@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Instrument } from '../entities/instrument.entity';
 import { MarketData } from '../entities/market-data.entity';
 import { Subscription } from '../entities/subscription.entity';
+import { KiteSession } from '../entities/kite-session.entity';
 
 export const getDatabaseConfig = (configService: ConfigService): TypeOrmModuleOptions => ({
   type: 'postgres',
@@ -11,7 +12,7 @@ export const getDatabaseConfig = (configService: ConfigService): TypeOrmModuleOp
   username: configService.get('DB_USERNAME', 'trading_user'),
   password: configService.get('DB_PASSWORD', 'trading_password'),
   database: configService.get('DB_DATABASE', 'trading_app'),
-  entities: [Instrument, MarketData, Subscription],
+  entities: [Instrument, MarketData, Subscription, KiteSession],
   synchronize: configService.get('NODE_ENV') === 'development',
   logging: configService.get('NODE_ENV') === 'development',
   migrations: ['dist/migrations/*.js'],

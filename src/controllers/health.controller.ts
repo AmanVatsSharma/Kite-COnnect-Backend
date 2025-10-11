@@ -1,10 +1,12 @@
 import { Controller, Get } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { StockService } from '../modules/stock/stock.service';
 import { KiteConnectService } from '../services/kite-connect.service';
 import { RedisService } from '../services/redis.service';
 import { MarketDataStreamService } from '../services/market-data-stream.service';
 
 @Controller('health')
+@ApiTags('health')
 export class HealthController {
   constructor(
     private stockService: StockService,

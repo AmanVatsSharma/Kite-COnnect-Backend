@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { TerminusModule } from '@nestjs/terminus';
 import { StockModule } from './modules/stock/stock.module';
 import { getDatabaseConfig } from './config/database.config';
 import { getRedisConfig } from './config/redis.config';
@@ -18,6 +19,7 @@ import { getRedisConfig } from './config/redis.config';
       useFactory: (configService: ConfigService) => getDatabaseConfig(configService),
       inject: [ConfigService],
     }),
+    TerminusModule,
     StockModule,
   ],
   controllers: [AppController],

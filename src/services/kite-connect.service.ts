@@ -1,22 +1,16 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KiteConnect } from 'kiteconnect';
-import { WebSocket } from 'ws';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { KiteTicker } = require('kiteconnect');
 
-export interface KiteTicker {
-  on(event: string, callback: (data: any) => void): void;
-  connect(): void;
-  disconnect(): void;
-  subscribe(tokens: number[]): void;
-  unsubscribe(tokens: number[]): void;
-  setMode(mode: string, tokens: number[]): void;
-}
+export type KiteTickerType = any;
 
 @Injectable()
 export class KiteConnectService implements OnModuleInit {
   private readonly logger = new Logger(KiteConnectService.name);
   private kite: KiteConnect;
-  private ticker: KiteTicker;
+  private ticker: KiteTickerType;
   private isConnected = false;
 
   constructor(private configService: ConfigService) {}
@@ -132,7 +126,7 @@ export class KiteConnectService implements OnModuleInit {
     }
   }
 
-  initializeTicker(): KiteTicker {
+  initializeTicker(): KiteTickerType {
     if (this.ticker) {
       return this.ticker;
     }
@@ -144,35 +138,41 @@ export class KiteConnectService implements OnModuleInit {
       throw new Error('Kite Connect credentials not found');
     }
 
-    // Note: This is a simplified implementation
-    // In a real implementation, you would use the actual KiteTicker from kiteconnect
-    this.ticker = {
-      on: (event: string, callback: (data: any) => void) => {
-        this.logger.log(`Ticker event listener registered: ${event}`);
-      },
-      connect: () => {
-        this.isConnected = true;
-        this.logger.log('Ticker connected');
-      },
-      disconnect: () => {
-        this.isConnected = false;
-        this.logger.log('Ticker disconnected');
-      },
-      subscribe: (tokens: number[]) => {
-        this.logger.log(`Subscribing to tokens: ${tokens.join(', ')}`);
-      },
-      unsubscribe: (tokens: number[]) => {
-        this.logger.log(`Unsubscribing from tokens: ${tokens.join(', ')}`);
-      },
-      setMode: (mode: string, tokens: number[]) => {
-        this.logger.log(`Setting mode ${mode} for tokens: ${tokens.join(', ')}`);
-      },
-    };
+    const ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
 
+    ticker.on('connect', () => {
+      this.isConnected = true;
+      this.logger.log('Kite ticker connected');
+    });
+
+    ticker.on('ticks', (ticks: any[]) => {
+      // ticks handled in MarketDataStreamService
+      this.logger.debug?.(`Received ${ticks?.length || 0} ticks`);
+    });
+
+    ticker.on('disconnect', () => {
+      this.isConnected = false;
+      this.logger.warn('Kite ticker disconnected');
+      // basic reconnect with jitter
+      const delayMs = 1000 + Math.floor(Math.random() * 2000);
+      setTimeout(() => {
+        try {
+          ticker.connect();
+        } catch (e) {
+          this.logger.error('Kite ticker reconnect failed', e);
+        }
+      }, delayMs);
+    });
+
+    ticker.on('error', (error: any) => {
+      this.logger.error('Kite ticker error', error);
+    });
+
+    this.ticker = ticker;
     return this.ticker;
   }
 
-  getTicker(): KiteTicker {
+  getTicker(): KiteTickerType {
     return this.ticker;
   }
 

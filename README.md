@@ -13,7 +13,7 @@ A comprehensive enterprise-grade trading application backend built with NestJS, 
 - **Subscription Management**: User-based instrument subscriptions
 - **Health Monitoring**: Comprehensive health checks and system statistics
 - **Enterprise Security**: JWT authentication, CORS, and security middleware
-- **Database Integration**: TypeORM with MySQL for data persistence
+- **Database Integration**: TypeORM with Postgres for data persistence
 - **Scheduled Tasks**: Automated instrument sync and data cleanup
 
 ## 🏗️ Architecture
@@ -33,7 +33,7 @@ A comprehensive enterprise-grade trading application backend built with NestJS, 
          ┌───────────────────────┼───────────────────────┐
          │                       │                       │
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Redis Cache   │    │   MySQL DB      │    │ Request Batching│
+│   Redis Cache   │    │  Postgres DB    │    │ Request Batching│
 │   Service       │    │   (TypeORM)     │    │   Service       │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
@@ -41,7 +41,7 @@ A comprehensive enterprise-grade trading application backend built with NestJS, 
 ## 📋 Prerequisites
 
 - Node.js (v16 or higher)
-- MySQL (v8.0 or higher)
+- Postgres (v15 or higher)
 - Redis (v6.0 or higher)
 - Kite Connect API credentials
 
@@ -93,9 +93,8 @@ NODE_ENV=development
 
 4. **Database Setup**
 ```bash
-# Create MySQL database
-mysql -u root -p
-CREATE DATABASE trading_app;
+# Create Postgres database
+psql -U trading_user -h localhost -c "CREATE DATABASE trading_app;"
 ```
 
 5. **Start the application**

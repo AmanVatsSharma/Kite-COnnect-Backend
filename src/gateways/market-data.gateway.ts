@@ -8,6 +8,8 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { createClient } from 'redis';
 import { Logger } from '@nestjs/common';
 import { RedisService } from '../services/redis.service';
 import { KiteConnectService } from '../services/kite-connect.service';
@@ -39,6 +41,20 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
 
   async handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
+
+    try {
+      // Attach Redis adapter lazily on first connection
+      if (!(this.server as any)._redisAdapterAttached) {
+        const pubClient = createClient({ url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}` });
+        const subClient = pubClient.duplicate();
+        await Promise.all([pubClient.connect(), subClient.connect()]);
+        this.server.adapter(createAdapter(pubClient, subClient));
+        (this.server as any)._redisAdapterAttached = true;
+        this.logger.log('Socket.IO Redis adapter attached');
+      }
+    } catch (e) {
+      this.logger.error('Failed to attach Socket.IO Redis adapter', e);
+    }
     
     // Initialize client subscription
     this.clientSubscriptions.set(client.id, {
@@ -96,6 +112,9 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       // Subscribe to Kite ticker if not already subscribed
       await this.subscribeToInstruments(instruments);
 
+      // Join instrument rooms for targeted broadcast
+      instruments.forEach(token => client.join(`instrument:${token}`));
+
       // Send confirmation
       client.emit('subscription_confirmed', {
         instruments: subscription.instruments,
@@ -136,6 +155,9 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       if (!stillSubscribed) {
         await this.unsubscribeFromInstruments(instruments);
       }
+
+      // Leave rooms
+      instruments.forEach(token => client.leave(`instrument:${token}`));
 
       client.emit('unsubscription_confirmed', {
         instruments: subscription.instruments,
@@ -267,9 +289,8 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
           timestamp: new Date().toISOString(),
         };
 
-        subscribedClients.forEach(subscription => {
-          this.server.to(subscription.socketId).emit('market_data', message);
-        });
+        // Room-based broadcast
+        this.server.to(`instrument:${instrumentToken}`).emit('market_data', message);
 
         this.logger.log(`Broadcasted market data for instrument ${instrumentToken} to ${subscribedClients.length} clients`);
       }
