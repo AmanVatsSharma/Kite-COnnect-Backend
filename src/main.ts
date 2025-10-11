@@ -41,6 +41,9 @@ async function bootstrap() {
     // Global prefix
     app.setGlobalPrefix('api');
 
+    // Serve static dashboard
+    app.useStaticAssets('src/public', { prefix: '/dashboard' });
+
     // Swagger setup
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Trading Data Provider API')

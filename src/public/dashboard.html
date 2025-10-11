@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading Data Provider - Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#0b1020; --card:#121735; --text:#e6ebff; --muted:#9aa4c4; --accent:#7c9eff; --ok:#2bd39b; --warn:#ffb648; --bad:#ff6b6b }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:linear-gradient(180deg,#0b1020 0%,#0d1430 100%);color:var(--text)}
+    .container{max-width:1100px;margin:32px auto;padding:0 16px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+    .title{font-weight:800;font-size:28px;letter-spacing:0.3px}
+    .pill{background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:999px;color:var(--muted);font-size:12px}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:16px;box-shadow:0 6px 24px rgba(0,0,0,0.25)}
+    .card h3{margin:0 0 8px 0;font-size:14px;color:var(--muted);font-weight:600}
+    .stat{font-size:28px;font-weight:800}
+    .row{display:flex;gap:8px;align-items:center}
+    .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+    .section{margin-top:24px}
+    input,button{border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:#0f1430;color:var(--text);padding:10px 12px}
+    button{background:var(--accent);border:none;font-weight:700;cursor:pointer}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+    .logs{height:180px;overflow:auto;background:#0b0f26;border-radius:10px;padding:10px;border:1px solid rgba(255,255,255,0.06)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title">📈 Trading Data Provider</div>
+      <div class="pill" id="env-pill">Loading…</div>
+    </header>
+
+    <div class="grid">
+      <div class="card"><h3>Connections</h3><div class="stat" id="conn">0</div></div>
+      <div class="card"><h3>Subscribed Tokens</h3><div class="stat" id="subs">0</div></div>
+      <div class="card"><h3>Kite Ticker</h3><div class="stat ok" id="kite">—</div></div>
+    </div>
+
+    <div class="grid section">
+      <div class="card">
+        <h3>Subscribe (WS)</h3>
+        <div class="row">
+          <input id="apiKey" placeholder="x-api-key" />
+          <input id="tokens" class="mono" placeholder="e.g. 738561,5633" />
+          <button id="btnSub">Subscribe</button>
+        </div>
+        <div class="logs mono" id="wsLog"></div>
+      </div>
+      <div class="card">
+        <h3>Quotes (REST)</h3>
+        <div class="row">
+          <input id="restTokens" class="mono" placeholder="e.g. 738561,5633" />
+          <button id="btnQuote">Fetch</button>
+        </div>
+        <pre class="logs mono" id="restOut"></pre>
+      </div>
+      <div class="card">
+        <h3>Health & Metrics</h3>
+        <div class="row"><button id="btnHealth">Health</button><button id="btnMetrics">Metrics</button></div>
+        <pre class="logs mono" id="healthOut"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" integrity="sha384-mVKp7p8Ps1VOs1obkPhMbG8rti+XoMLZQHc8OH5A1aQzWNcvH8o0FpcUe8u9+3DM" crossorigin="anonymous"></script>
+  <script>
+    const wsLog = document.getElementById('wsLog');
+    const restOut = document.getElementById('restOut');
+    const healthOut = document.getElementById('healthOut');
+
+    function log(el, m){ el.textContent += `${new Date().toISOString()} ${m}\n`; el.scrollTop = el.scrollHeight; }
+
+    async function refreshEnv(){
+      const r = await fetch('/api/health');
+      const j = await r.json();
+      document.getElementById('env-pill').textContent = j.status.toUpperCase();
+      document.getElementById('kite').textContent = j.services.kiteConnect === 'connected' ? 'Connected' : 'Disconnected';
+    }
+
+    async function refreshStats(){
+      const r = await fetch('/api/stock/stats', { headers: keyHeaders() });
+      const j = await r.json();
+      document.getElementById('conn').textContent = j.data.connectionStats.totalConnections;
+      let subCount = 0; (j.data.connectionStats.subscriptions||[]).forEach(s=> subCount += s.instrumentCount);
+      document.getElementById('subs').textContent = subCount;
+    }
+
+    function keyHeaders(){
+      const key = document.getElementById('apiKey').value; return key ? { 'x-api-key': key, 'Content-Type':'application/json' } : { 'Content-Type':'application/json' };
+    }
+
+    document.getElementById('btnSub').onclick = () => {
+      const key = document.getElementById('apiKey').value;
+      const tokens = document.getElementById('tokens').value.split(',').map(s => parseInt(s.trim())).filter(Boolean);
+      const socket = io('/market-data', { extraHeaders: { 'x-api-key': key } });
+      socket.on('connect', () => log(wsLog, 'WS connected'));
+      socket.on('market_data', (d) => log(wsLog, JSON.stringify(d)));
+      socket.on('connected', () => socket.emit('subscribe_instruments', { instruments: tokens, type: 'live' }));
+      socket.on('error', (e)=> log(wsLog, 'Error: ' + JSON.stringify(e)));
+    };
+
+    document.getElementById('btnQuote').onclick = async () => {
+      const tokens = document.getElementById('restTokens').value.split(',').map(s => parseInt(s.trim())).filter(Boolean);
+      const r = await fetch('/api/stock/quotes', { method:'POST', headers: keyHeaders(), body: JSON.stringify({ instruments: tokens }) });
+      const j = await r.json(); restOut.textContent = JSON.stringify(j, null, 2);
+    };
+
+    document.getElementById('btnHealth').onclick = async () => {
+      const r = await fetch('/api/health'); const j = await r.json(); healthOut.textContent = JSON.stringify(j, null, 2);
+    };
+    document.getElementById('btnMetrics').onclick = async () => {
+      const r = await fetch('/health/metrics'); const t = await r.text(); healthOut.textContent = t;
+    };
+
+    refreshEnv(); refreshStats(); setInterval(()=>{ refreshEnv(); refreshStats(); }, 8000);
+  </script>
+</body>
+</html>
