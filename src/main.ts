@@ -42,7 +42,7 @@ async function bootstrap() {
     app.setGlobalPrefix('api');
 
     // Serve static dashboard
-    app.useStaticAssets('src/public', { prefix: '/dashboard' });
+    app.useStaticAssets('src/public', { prefix: '/dashboard', index: ['dashboard.html'] });
 
     // Swagger setup
     const swaggerConfig = new DocumentBuilder()
