@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import * as helmet from 'helmet';
 import * as compression from 'compression';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -25,6 +26,9 @@ async function bootstrap() {
         transform: true,
       }),
     );
+
+    // Metrics interceptor
+    app.useGlobalInterceptors(app.get(MetricsInterceptor));
 
     // CORS configuration
     app.enableCors({

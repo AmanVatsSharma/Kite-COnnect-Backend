@@ -97,7 +97,7 @@ export class HealthController {
 
   @Get('metrics')
   async getMetrics() {
-    const registry = this.metricsService.getRegistry();
-    return registry.metrics();
+    const reg = this.metricsService.getMetricsRegister();
+    return reg.metrics();
   }
 }

@@ -18,13 +18,16 @@ import { HealthController } from '../../controllers/health.controller';
 import { AuthController } from '../../controllers/auth.controller';
 import { MetricsService } from '../../services/metrics.service';
 import { ApiKeyService } from '../../services/api-key.service';
+import { AdminController } from '../../controllers/admin.controller';
+import { AdminGuard } from '../../guards/admin.guard';
+import { MetricsInterceptor } from '../../interceptors/metrics.interceptor';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Instrument, MarketData, Subscription, ApiKey, KiteSession]),
     ScheduleModule.forRoot(),
   ],
-  controllers: [StockController, HealthController, AuthController],
+  controllers: [StockController, HealthController, AuthController, AdminController],
   providers: [
     StockService,
     KiteConnectService,
@@ -35,6 +38,8 @@ import { ApiKeyService } from '../../services/api-key.service';
     MarketDataStreamService,
     ApiKeyGuard,
     MetricsService,
+    AdminGuard,
+    MetricsInterceptor,
   ],
   exports: [StockService, MarketDataGateway, MarketDataStreamService],
 })
