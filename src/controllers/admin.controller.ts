@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiSecurity } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -29,6 +29,12 @@ export class AdminController {
     return await this.apiKeyRepo.save(entity);
   }
 
+  @Get('apikeys')
+  @ApiOperation({ summary: 'List API keys' })
+  async listApiKeys() {
+    return this.apiKeyRepo.find({ order: { created_at: 'DESC' } });
+  }
+
   @Post('apikeys/deactivate')
   @ApiOperation({ summary: 'Deactivate API key' })
   async deactivate(@Body() body: { key: string }) {
@@ -38,8 +44,8 @@ export class AdminController {
 
   @Get('usage')
   @ApiOperation({ summary: 'Get usage report for an API key' })
-  async usageReport(@Body() body: { key: string }) {
-    const result = await this.apiKeyService.getUsageReport(body.key);
+  async usageReport(@Query('key') key: string) {
+    const result = await this.apiKeyService.getUsageReport(key);
     return result;
   }
 }

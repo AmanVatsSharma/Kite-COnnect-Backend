@@ -424,6 +424,28 @@ export class StockController {
     }
   }
 
+  @Get('market-data/:token/last')
+  @ApiOperation({ summary: 'Get last cached tick for an instrument' })
+  async getLastTick(@Param('token') token: string) {
+    try {
+      const instrumentToken = parseInt(token);
+      if (isNaN(instrumentToken)) {
+        throw new HttpException(
+          { success: false, message: 'Invalid instrument token' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const tick = await this.stockService.getLastTick(instrumentToken);
+      return { success: true, data: tick };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Failed to fetch last tick', error: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('subscribe')
   @ApiOperation({ summary: 'Subscribe current user to an instrument' })
   @ApiBody({ schema: { properties: { instrumentToken: { type: 'number', example: 738561 }, subscriptionType: { type: 'string', example: 'live' } } } })
