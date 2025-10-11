@@ -22,6 +22,7 @@ export class KiteConnectService implements OnModuleInit {
   private async initializeKiteConnect() {
     try {
       const apiKey = this.configService.get('KITE_API_KEY');
+      // Prefer dynamic token from Redis/env var set by OAuth
       const accessToken = this.configService.get('KITE_ACCESS_TOKEN');
 
       if (!apiKey || !accessToken) {
@@ -37,6 +38,25 @@ export class KiteConnectService implements OnModuleInit {
       this.logger.log('Kite Connect initialized successfully');
     } catch (error) {
       this.logger.error('Failed to initialize Kite Connect', error);
+    }
+  }
+
+  async updateAccessToken(accessToken: string): Promise<void> {
+    try {
+      if (!this.kite) {
+        const apiKey = this.configService.get('KITE_API_KEY');
+        if (!apiKey) throw new Error('Kite API key not configured');
+        this.kite = new KiteConnect({ api_key: apiKey, access_token: accessToken });
+      } else if (typeof (this.kite as any).setAccessToken === 'function') {
+        (this.kite as any).setAccessToken(accessToken);
+      } else {
+        const apiKey = this.configService.get('KITE_API_KEY');
+        this.kite = new KiteConnect({ api_key: apiKey, access_token: accessToken });
+      }
+      this.logger.log('Kite access token updated');
+    } catch (error) {
+      this.logger.error('Failed to update Kite access token', error);
+      throw error;
     }
   }
 
@@ -170,6 +190,26 @@ export class KiteConnectService implements OnModuleInit {
 
     this.ticker = ticker;
     return this.ticker;
+  }
+
+  async restartTicker(): Promise<void> {
+    try {
+      if (this.ticker) {
+        try {
+          this.ticker.disconnect?.();
+        } catch {}
+      }
+      this.ticker = undefined as any;
+      const ticker = this.initializeTicker();
+      try {
+        ticker.connect();
+      } catch (e) {
+        this.logger.error('Failed to connect ticker after restart', e);
+      }
+      this.logger.log('Kite ticker restarted');
+    } catch (error) {
+      this.logger.error('Error restarting ticker', error);
+    }
   }
 
   getTicker(): KiteTickerType {

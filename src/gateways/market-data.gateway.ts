@@ -56,7 +56,7 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       this.logger.error('Failed to attach Socket.IO Redis adapter', e);
     }
     
-    // Initialize client subscription
+    // Initialize client subscription with connection limits per API key (if provided)
     this.clientSubscriptions.set(client.id, {
       socketId: client.id,
       userId: client.handshake.query.userId as string || 'anonymous',

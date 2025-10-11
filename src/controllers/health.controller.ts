@@ -4,6 +4,7 @@ import { StockService } from '../modules/stock/stock.service';
 import { KiteConnectService } from '../services/kite-connect.service';
 import { RedisService } from '../services/redis.service';
 import { MarketDataStreamService } from '../services/market-data-stream.service';
+import { MetricsService } from '../services/metrics.service';
 
 @Controller('health')
 @ApiTags('health')
@@ -13,6 +14,7 @@ export class HealthController {
     private kiteConnectService: KiteConnectService,
     private redisService: RedisService,
     private marketDataStreamService: MarketDataStreamService,
+    private metricsService: MetricsService,
   ) {}
 
   @Get()
@@ -91,5 +93,11 @@ export class HealthController {
         memory: process.memoryUsage(),
       };
     }
+  }
+
+  @Get('metrics')
+  async getMetrics() {
+    const registry = this.metricsService.getRegistry();
+    return registry.metrics();
   }
 }

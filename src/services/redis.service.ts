@@ -79,6 +79,33 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async incr(key: string): Promise<number> {
+    try {
+      return await this.client.incr(key);
+    } catch (error) {
+      this.logger.error(`Error incrementing key ${key}`, error);
+      throw error;
+    }
+  }
+
+  async decr(key: string): Promise<number> {
+    try {
+      return await this.client.decr(key);
+    } catch (error) {
+      this.logger.error(`Error decrementing key ${key}`, error);
+      throw error;
+    }
+  }
+
+  async expire(key: string, seconds: number): Promise<void> {
+    try {
+      await this.client.expire(key, seconds);
+    } catch (error) {
+      this.logger.error(`Error setting expire for key ${key}`, error);
+      throw error;
+    }
+  }
+
   async get<T>(key: string): Promise<T | null> {
     try {
       const value = await this.client.get(key);

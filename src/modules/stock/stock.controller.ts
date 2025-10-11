@@ -15,9 +15,10 @@ import {
 import { StockService } from './stock.service';
 import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiResponse, ApiSecurity } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
+import { ApiKeyGuard } from '../../guards/api-key.guard';
 
 @Controller('api/stock')
-@UseGuards(JwtAuthGuard)
+@UseGuards(ApiKeyGuard)
 @ApiTags('stock')
 @ApiSecurity('apiKey')
 export class StockController {
