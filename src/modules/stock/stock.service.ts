@@ -270,6 +270,9 @@ export class StockService {
       // Cache the data
       await this.redisService.cacheMarketData(instrumentToken, data, 60);
 
+      // Also cache last tick plain for quick dashboard access
+      await this.redisService.set(`last_tick:${instrumentToken}`, data, 300);
+
       // Broadcast to WebSocket clients
       await this.marketDataGateway.broadcastMarketData(instrumentToken, data);
 
@@ -277,6 +280,15 @@ export class StockService {
     } catch (error) {
       this.logger.error('Error storing market data', error);
       throw error;
+    }
+  }
+
+  async getLastTick(instrumentToken: number): Promise<any> {
+    try {
+      return await this.redisService.get(`last_tick:${instrumentToken}`);
+    } catch (e) {
+      this.logger.error('Error fetching last tick', e);
+      return null;
     }
   }
 

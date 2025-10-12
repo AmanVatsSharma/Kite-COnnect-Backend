@@ -13,14 +13,20 @@ import {
   Request,
 } from '@nestjs/common';
 import { StockService } from './stock.service';
+import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiResponse, ApiSecurity } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
+import { ApiKeyGuard } from '../../guards/api-key.guard';
 
 @Controller('api/stock')
-@UseGuards(JwtAuthGuard)
+@UseGuards(ApiKeyGuard)
+@ApiTags('stock')
+@ApiSecurity('apiKey')
 export class StockController {
   constructor(private readonly stockService: StockService) {}
 
   @Post('instruments/sync')
+  @ApiOperation({ summary: 'Sync instruments from Kite Connect' })
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
   async syncInstruments(@Query('exchange') exchange?: string) {
     try {
       const result = await this.stockService.syncInstruments(exchange);
@@ -42,6 +48,13 @@ export class StockController {
   }
 
   @Get('instruments')
+  @ApiOperation({ summary: 'List instruments with optional filters' })
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
+  @ApiQuery({ name: 'instrument_type', required: false, example: 'EQ' })
+  @ApiQuery({ name: 'segment', required: false, example: 'NSE' })
+  @ApiQuery({ name: 'is_active', required: false, example: true })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiQuery({ name: 'offset', required: false, example: 0 })
   async getInstruments(
     @Query('exchange') exchange?: string,
     @Query('instrument_type') instrumentType?: string,
@@ -78,6 +91,9 @@ export class StockController {
   }
 
   @Get('instruments/search')
+  @ApiOperation({ summary: 'Search instruments by symbol or name' })
+  @ApiQuery({ name: 'q', required: true, example: 'RELIANCE' })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
   async searchInstruments(
     @Query('q') query: string,
     @Query('limit') limit?: number,
@@ -115,6 +131,7 @@ export class StockController {
   }
 
   @Get('instruments/:token')
+  @ApiOperation({ summary: 'Get instrument by token' })
   async getInstrumentByToken(@Param('token') token: string) {
     try {
       const instrumentToken = parseInt(token);
@@ -159,6 +176,9 @@ export class StockController {
   }
 
   @Post('quotes')
+  @ApiOperation({ summary: 'Get quotes for instruments' })
+  @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
+  @ApiResponse({ status: 200, description: 'Quote data response' })
   async getQuotes(@Body() body: { instruments: number[] }) {
     try {
       const { instruments } = body;
@@ -204,6 +224,8 @@ export class StockController {
   }
 
   @Post('ltp')
+  @ApiOperation({ summary: 'Get LTP for instruments' })
+  @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
   async getLTP(@Body() body: { instruments: number[] }) {
     try {
       const { instruments } = body;
@@ -249,6 +271,8 @@ export class StockController {
   }
 
   @Post('ohlc')
+  @ApiOperation({ summary: 'Get OHLC for instruments' })
+  @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
   async getOHLC(@Body() body: { instruments: number[] }) {
     try {
       const { instruments } = body;
@@ -294,6 +318,10 @@ export class StockController {
   }
 
   @Get('historical/:token')
+  @ApiOperation({ summary: 'Get historical data for an instrument' })
+  @ApiQuery({ name: 'from', required: true, example: '2024-01-01' })
+  @ApiQuery({ name: 'to', required: true, example: '2024-01-31' })
+  @ApiQuery({ name: 'interval', required: false, example: 'day' })
   async getHistoricalData(
     @Param('token') token: string,
     @Query('from') fromDate: string,
@@ -396,7 +424,31 @@ export class StockController {
     }
   }
 
+  @Get('market-data/:token/last')
+  @ApiOperation({ summary: 'Get last cached tick for an instrument' })
+  async getLastTick(@Param('token') token: string) {
+    try {
+      const instrumentToken = parseInt(token);
+      if (isNaN(instrumentToken)) {
+        throw new HttpException(
+          { success: false, message: 'Invalid instrument token' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const tick = await this.stockService.getLastTick(instrumentToken);
+      return { success: true, data: tick };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Failed to fetch last tick', error: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('subscribe')
+  @ApiOperation({ summary: 'Subscribe current user to an instrument' })
+  @ApiBody({ schema: { properties: { instrumentToken: { type: 'number', example: 738561 }, subscriptionType: { type: 'string', example: 'live' } } } })
   async subscribeToInstrument(
     @Request() req: any,
     @Body() body: { instrumentToken: number; subscriptionType?: 'live' | 'historical' | 'both' },
@@ -442,6 +494,7 @@ export class StockController {
   }
 
   @Delete('subscribe/:token')
+  @ApiOperation({ summary: 'Unsubscribe current user from instrument' })
   async unsubscribeFromInstrument(
     @Request() req: any,
     @Param('token') token: string,
@@ -482,6 +535,7 @@ export class StockController {
   }
 
   @Get('subscriptions')
+  @ApiOperation({ summary: 'Get user subscriptions' })
   async getUserSubscriptions(@Request() req: any) {
     try {
       const userId = req.user?.id || 'anonymous';
@@ -504,6 +558,7 @@ export class StockController {
   }
 
   @Get('stats')
+  @ApiOperation({ summary: 'Get system stats' })
   async getSystemStats() {
     try {
       const stats = await this.stockService.getSystemStats();

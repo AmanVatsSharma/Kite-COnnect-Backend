@@ -13,8 +13,8 @@ services:
       - "9229:9229"  # Debug port
     environment:
       - NODE_ENV=development
-      - DB_HOST=mysql-dev
-      - DB_PORT=3306
+      - DB_HOST=postgres-dev
+      - DB_PORT=5432
       - DB_USERNAME=trading_user
       - DB_PASSWORD=trading_password
       - DB_DATABASE=trading_app_dev
@@ -25,7 +25,7 @@ services:
       - KITE_ACCESS_TOKEN=${KITE_ACCESS_TOKEN}
       - JWT_SECRET=dev_jwt_secret
     depends_on:
-      mysql-dev:
+      postgres-dev:
         condition: service_healthy
       redis-dev:
         condition: service_healthy
@@ -37,23 +37,23 @@ services:
       - /app/node_modules
     command: npm run start:debug
 
-  # Development MySQL Database
-  mysql-dev:
-    image: mysql:8.0
-    container_name: trading-mysql-dev
+  # Development Postgres Database
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: trading-postgres-dev
     environment:
-      - MYSQL_ROOT_PASSWORD=root_password
-      - MYSQL_DATABASE=trading_app_dev
-      - MYSQL_USER=trading_user
-      - MYSQL_PASSWORD=trading_password
+      - POSTGRES_DB=trading_app_dev
+      - POSTGRES_USER=trading_user
+      - POSTGRES_PASSWORD=trading_password
     ports:
-      - "3307:3306"
+      - "5433:5432"
     volumes:
-      - mysql_dev_data:/var/lib/mysql
+      - postgres_dev_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     restart: unless-stopped
     networks:
       - trading-dev-network
@@ -88,24 +88,23 @@ services:
     networks:
       - trading-dev-network
 
-  # phpMyAdmin (MySQL GUI)
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin
-    container_name: phpmyadmin
+  # pgAdmin (Postgres GUI)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
     environment:
-      - PMA_HOST=mysql-dev
-      - PMA_USER=trading_user
-      - PMA_PASSWORD=trading_password
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
     ports:
       - "8080:80"
     depends_on:
-      - mysql-dev
+      - postgres-dev
     restart: unless-stopped
     networks:
       - trading-dev-network
 
 volumes:
-  mysql_dev_data:
+  postgres_dev_data:
   redis_dev_data:
 
 networks:

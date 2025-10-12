@@ -50,8 +50,12 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         this.isStreaming = false;
       });
 
-      // Connect to ticker
-      ticker.connect();
+      // Connect to ticker with safe guard
+      try {
+        ticker.connect();
+      } catch (e) {
+        this.logger.error('Error connecting Kite ticker', e);
+      }
 
       this.logger.log('Market data streaming service initialized');
     } catch (error) {

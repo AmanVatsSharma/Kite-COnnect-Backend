@@ -8,9 +8,12 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { createClient } from 'redis';
 import { Logger } from '@nestjs/common';
 import { RedisService } from '../services/redis.service';
 import { KiteConnectService } from '../services/kite-connect.service';
+import { ApiKeyService } from '../services/api-key.service';
 
 interface ClientSubscription {
   socketId: string;
@@ -35,12 +38,51 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
   constructor(
     private redisService: RedisService,
     private kiteConnectService: KiteConnectService,
+    private apiKeyService: ApiKeyService,
   ) {}
 
   async handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
+
+    try {
+      // Attach Redis adapter lazily on first connection
+      if (!(this.server as any)._redisAdapterAttached) {
+        const pubClient = createClient({ url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}` });
+        const subClient = pubClient.duplicate();
+        await Promise.all([pubClient.connect(), subClient.connect()]);
+        this.server.adapter(createAdapter(pubClient, subClient));
+        (this.server as any)._redisAdapterAttached = true;
+        this.logger.log('Socket.IO Redis adapter attached');
+      }
+    } catch (e) {
+      this.logger.error('Failed to attach Socket.IO Redis adapter', e);
+    }
     
-    // Initialize client subscription
+    // API key validation and connection limit enforcement
+    try {
+      const headerKey = (client.handshake.headers['x-api-key'] as string) || '';
+      const queryKey = (client.handshake.query['api_key'] as string) || '';
+      const apiKey = headerKey || queryKey;
+      if (!apiKey) {
+        client.emit('error', { message: 'Missing x-api-key' });
+        client.disconnect(true);
+        return;
+      }
+      const record = await this.apiKeyService.validateApiKey(apiKey);
+      if (!record) {
+        client.emit('error', { message: 'Invalid API key' });
+        client.disconnect(true);
+        return;
+      }
+      await this.apiKeyService.trackWsConnection(apiKey, record.connection_limit);
+      (client.data as any).apiKey = apiKey;
+    } catch (err) {
+      this.logger.warn(`Connection rejected for ${client.id}: ${err?.message || err}`);
+      client.disconnect(true);
+      return;
+    }
+
+    // Initialize client subscription with connection limits per API key (if provided)
     this.clientSubscriptions.set(client.id, {
       socketId: client.id,
       userId: client.handshake.query.userId as string || 'anonymous',
@@ -67,6 +109,16 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       }
       
       this.clientSubscriptions.delete(client.id);
+    }
+
+    // Untrack WS connection for API key
+    try {
+      const apiKey = (client.data as any)?.apiKey;
+      if (apiKey) {
+        await this.apiKeyService.untrackWsConnection(apiKey);
+      }
+    } catch (e) {
+      this.logger.warn(`Failed to untrack ws connection for ${client.id}`);
     }
   }
 
@@ -95,6 +147,9 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
 
       // Subscribe to Kite ticker if not already subscribed
       await this.subscribeToInstruments(instruments);
+
+      // Join instrument rooms for targeted broadcast
+      instruments.forEach(token => client.join(`instrument:${token}`));
 
       // Send confirmation
       client.emit('subscription_confirmed', {
@@ -136,6 +191,9 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       if (!stillSubscribed) {
         await this.unsubscribeFromInstruments(instruments);
       }
+
+      // Leave rooms
+      instruments.forEach(token => client.leave(`instrument:${token}`));
 
       client.emit('unsubscription_confirmed', {
         instruments: subscription.instruments,
@@ -267,9 +325,8 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
           timestamp: new Date().toISOString(),
         };
 
-        subscribedClients.forEach(subscription => {
-          this.server.to(subscription.socketId).emit('market_data', message);
-        });
+        // Room-based broadcast
+        this.server.to(`instrument:${instrumentToken}`).emit('market_data', message);
 
         this.logger.log(`Broadcasted market data for instrument ${instrumentToken} to ${subscribedClients.length} clients`);
       }

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading Data Provider - Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --bg:#0b1020; --card:#121735; --text:#e6ebff; --muted:#9aa4c4; --accent:#7c9eff; --ok:#2bd39b; --warn:#ffb648; --bad:#ff6b6b }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:linear-gradient(180deg,#0b1020 0%,#0d1430 100%);color:var(--text)}
+    .container{max-width:1200px;margin:32px auto;padding:0 16px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+    .title{font-weight:800;font-size:28px;letter-spacing:0.3px}
+    .pill{background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:999px;color:var(--muted);font-size:12px}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:16px;box-shadow:0 6px 24px rgba(0,0,0,0.25)}
+    .card h3{margin:0 0 8px 0;font-size:14px;color:var(--muted);font-weight:600}
+    .stat{font-size:28px;font-weight:800}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+    .section{margin-top:24px}
+    input,button,select{border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:#0f1430;color:var(--text);padding:10px 12px}
+    button{background:var(--accent);border:none;font-weight:700;cursor:pointer}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+    .logs{height:180px;overflow:auto;background:#0b0f26;border-radius:10px;padding:10px;border:1px solid rgba(255,255,255,0.06)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.08);font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title">📈 Trading Data Provider</div>
+      <div class="pill" id="env-pill">Loading…</div>
+    </header>
+
+    <div class="grid">
+      <div class="card"><h3>Connections</h3><div class="stat" id="conn">0</div></div>
+      <div class="card"><h3>Subscribed Tokens</h3><div class="stat" id="subs">0</div></div>
+      <div class="card"><h3>Kite Ticker</h3><div class="stat ok" id="kite">—</div></div>
+    </div>
+
+    <div class="grid section">
+      <div class="card">
+        <h3>Admin: API Keys</h3>
+        <div class="row">
+          <input id="adminToken" placeholder="x-admin-token" />
+          <button id="btnKeys">List</button>
+          <input id="newKey" placeholder="new api key" />
+          <input id="newTenant" placeholder="tenant id" />
+          <button id="btnCreateKey">Create</button>
+        </div>
+        <table id="keysTbl"><thead><tr><th>Key</th><th>Tenant</th><th>Active</th><th>Rate/min</th><th>Conn</th><th>Actions</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h3>Market: Instruments & Last Tick</h3>
+        <div class="row">
+          <input id="apiKey" placeholder="x-api-key" />
+          <input id="searchQ" placeholder="search symbol e.g. RELIANCE" />
+          <button id="btnSearch">Search</button>
+        </div>
+        <table id="instTbl"><thead><tr><th>Token</th><th>Symbol</th><th>Segment</th><th>Last Tick</th><th>Actions</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h3>OHLC Chart</h3>
+        <div class="row">
+          <input id="chartToken" class="mono" placeholder="instrument token" />
+          <select id="chartInterval"><option>minute</option><option>5minute</option><option>15minute</option><option selected>day</option></select>
+          <button id="btnLoadChart">Load</button>
+        </div>
+        <canvas id="ohlc" height="140"></canvas>
+      </div>
+    </div>
+
+    <div class="grid section">
+      <div class="card">
+        <h3>Subscribe (WS)</h3>
+        <div class="row">
+          <input id="tokens" class="mono" placeholder="e.g. 738561,5633" />
+          <button id="btnSub">Subscribe</button>
+        </div>
+        <div class="logs mono" id="wsLog"></div>
+      </div>
+      <div class="card">
+        <h3>Quotes (REST)</h3>
+        <div class="row">
+          <input id="restTokens" class="mono" placeholder="e.g. 738561,5633" />
+          <button id="btnQuote">Fetch</button>
+        </div>
+        <pre class="logs mono" id="restOut"></pre>
+      </div>
+      <div class="card">
+        <h3>Health & Metrics</h3>
+        <div class="row"><button id="btnHealth">Health</button><button id="btnMetrics">Metrics</button></div>
+        <pre class="logs mono" id="healthOut"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
+  <script>
+    const wsLog = document.getElementById('wsLog');
+    const restOut = document.getElementById('restOut');
+    const healthOut = document.getElementById('healthOut');
+    const keysTbl = document.querySelector('#keysTbl tbody');
+    const instTbl = document.querySelector('#instTbl tbody');
+    let socket;
+
+    function log(el, m){ el.textContent += `${new Date().toISOString()} ${m}\n`; el.scrollTop = el.scrollHeight; }
+    function keyHeaders(){
+      const key = document.getElementById('apiKey').value; return key ? { 'x-api-key': key, 'Content-Type':'application/json' } : { 'Content-Type':'application/json' };
+    }
+    function adminHeaders(){
+      const t = document.getElementById('adminToken').value; return t ? { 'x-admin-token': t, 'Content-Type':'application/json' } : { 'Content-Type':'application/json' };
+    }
+
+    async function refreshEnv(){
+      const r = await fetch('/api/health');
+      const j = await r.json();
+      document.getElementById('env-pill').textContent = j.status.toUpperCase();
+      document.getElementById('kite').textContent = j.services.kiteConnect === 'connected' ? 'Connected' : 'Disconnected';
+    }
+    async function refreshStats(){
+      const r = await fetch('/api/stock/stats', { headers: keyHeaders() });
+      const j = await r.json();
+      document.getElementById('conn').textContent = j.data.connectionStats.totalConnections;
+      let subCount = 0; (j.data.connectionStats.subscriptions||[]).forEach(s=> subCount += s.instrumentCount);
+      document.getElementById('subs').textContent = subCount;
+    }
+
+    // Admin: API keys
+    document.getElementById('btnKeys').onclick = async () => {
+      const r = await fetch('/api/admin/apikeys', { headers: adminHeaders() });
+      const arr = await r.json(); keysTbl.innerHTML='';
+      arr.forEach(k => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class=mono>${k.key}</td><td>${k.tenant_id}</td><td>${k.is_active}</td><td>${k.rate_limit_per_minute}</td><td>${k.connection_limit}</td><td><button data-k="${k.key}" class="deact">Deactivate</button></td>`;
+        keysTbl.appendChild(tr);
+      });
+      keysTbl.querySelectorAll('.deact').forEach(btn => btn.onclick = async (e) => {
+        const key = e.target.getAttribute('data-k');
+        await fetch('/api/admin/apikeys/deactivate', { method:'POST', headers: adminHeaders(), body: JSON.stringify({ key }) });
+        e.target.closest('tr').querySelector('td:nth-child(3)').textContent = 'false';
+      });
+    };
+    document.getElementById('btnCreateKey').onclick = async () => {
+      const key = document.getElementById('newKey').value; const tenant = document.getElementById('newTenant').value;
+      await fetch('/api/admin/apikeys', { method:'POST', headers: adminHeaders(), body: JSON.stringify({ key, tenant_id: tenant }) });
+      document.getElementById('btnKeys').click();
+    };
+
+    // Market: search and last tick table
+    document.getElementById('btnSearch').onclick = async () => {
+      const q = document.getElementById('searchQ').value; if (!q) return;
+      const r = await fetch(`/api/stock/instruments/search?q=${encodeURIComponent(q)}&limit=20`, { headers: keyHeaders() });
+      const arr = (await r.json()).data || [];
+      instTbl.innerHTML='';
+      for (const it of arr) {
+        const tickResp = await fetch(`/api/stock/market-data/${it.instrument_token}/last`, { headers: keyHeaders() });
+        const tick = (await tickResp.json()).data || null;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class=mono>${it.instrument_token}</td><td>${it.tradingsymbol}</td><td>${it.segment}</td><td class=mono>${tick? tick.last_price: '—'}</td><td><button data-t="${it.instrument_token}" class="chart">Chart</button><button data-t="${it.instrument_token}" class="sub">Sub</button></td>`;
+        instTbl.appendChild(tr);
+      }
+      instTbl.querySelectorAll('.chart').forEach(btn => btn.onclick = (e)=>{
+        document.getElementById('chartToken').value = e.target.getAttribute('data-t');
+        document.getElementById('btnLoadChart').click();
+      });
+      instTbl.querySelectorAll('.sub').forEach(btn => btn.onclick = (e)=>{
+        const t = e.target.getAttribute('data-t');
+        ensureSocket(); socket.emit('subscribe_instruments', { instruments: [parseInt(t)], type: 'live' });
+      });
+    };
+
+    // OHLC Chart
+    let chart;
+    document.getElementById('btnLoadChart').onclick = async () => {
+      const token = document.getElementById('chartToken').value.trim(); if (!token) return;
+      const interval = document.getElementById('chartInterval').value;
+      const to = new Date(); const from = new Date(Date.now() - 14*24*3600*1000);
+      const params = new URLSearchParams({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), interval });
+      const r = await fetch(`/api/stock/historical/${token}?${params.toString()}`, { headers: keyHeaders() });
+      const j = await r.json();
+      const data = (j.data?.candles || []).map(([time, open, high, low, close]) => ({ x: time, o: open, h: high, l: low, c: close }));
+      const ctx = document.getElementById('ohlc').getContext('2d');
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: data.map(d => d.x),
+          datasets: [{ label: 'Close', data: data.map(d => d.c), borderColor: '#7c9eff', tension: .2 }]
+        },
+        options: { responsive: true, scales: { x: { display: false } } }
+      });
+    };
+
+    // WebSocket subscribe
+    function ensureSocket(){
+      if (socket) return socket;
+      const key = document.getElementById('apiKey').value;
+      socket = io('/market-data', { extraHeaders: { 'x-api-key': key } });
+      socket.on('connect', () => log(wsLog, 'WS connected'));
+      socket.on('market_data', (d) => log(wsLog, JSON.stringify(d)));
+      socket.on('connected', () => log(wsLog, 'Connected event'));
+      socket.on('error', (e)=> log(wsLog, 'Error: ' + JSON.stringify(e)));
+      return socket;
+    }
+    document.getElementById('btnSub').onclick = () => {
+      ensureSocket();
+      const tokens = document.getElementById('tokens').value.split(',').map(s => parseInt(s.trim())).filter(Boolean);
+      socket.emit('subscribe_instruments', { instruments: tokens, type: 'live' });
+    };
+
+    // Quotes & Health
+    document.getElementById('btnQuote').onclick = async () => {
+      const tokens = document.getElementById('restTokens').value.split(',').map(s => parseInt(s.trim())).filter(Boolean);
+      const r = await fetch('/api/stock/quotes', { method:'POST', headers: keyHeaders(), body: JSON.stringify({ instruments: tokens }) });
+      const j = await r.json(); restOut.textContent = JSON.stringify(j, null, 2);
+    };
+    document.getElementById('btnHealth').onclick = async () => {
+      const r = await fetch('/api/health'); const j = await r.json(); healthOut.textContent = JSON.stringify(j, null, 2);
+    };
+    document.getElementById('btnMetrics').onclick = async () => {
+      const r = await fetch('/health/metrics'); const t = await r.text(); healthOut.textContent = t;
+    };
+
+    refreshEnv(); refreshStats(); setInterval(()=>{ refreshEnv(); refreshStats(); }, 8000);
+  </script>
+</body>
+</html>

@@ -1,19 +1,24 @@
 import { Controller, Get } from '@nestjs/common';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { StockService } from '../modules/stock/stock.service';
 import { KiteConnectService } from '../services/kite-connect.service';
 import { RedisService } from '../services/redis.service';
 import { MarketDataStreamService } from '../services/market-data-stream.service';
+import { MetricsService } from '../services/metrics.service';
 
 @Controller('health')
+@ApiTags('health')
 export class HealthController {
   constructor(
     private stockService: StockService,
     private kiteConnectService: KiteConnectService,
     private redisService: RedisService,
     private marketDataStreamService: MarketDataStreamService,
+    private metricsService: MetricsService,
   ) {}
 
   @Get()
+  @ApiOperation({ summary: 'Basic health' })
   async getHealth() {
     try {
       const [systemStats, streamingStatus] = await Promise.all([
@@ -43,6 +48,7 @@ export class HealthController {
   }
 
   @Get('detailed')
+  @ApiOperation({ summary: 'Detailed health' })
   async getDetailedHealth() {
     try {
       const [systemStats, streamingStatus] = await Promise.all([
@@ -89,5 +95,12 @@ export class HealthController {
         memory: process.memoryUsage(),
       };
     }
+  }
+
+  @Get('metrics')
+  @ApiOperation({ summary: 'Prometheus metrics' })
+  async getMetrics() {
+    const reg = this.metricsService.getMetricsRegister();
+    return reg.metrics();
   }
 }

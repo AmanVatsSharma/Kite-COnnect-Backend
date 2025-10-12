@@ -1,15 +1,18 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import * as helmet from 'helmet';
 import * as compression from 'compression';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
    
   try {
-    const app = await NestFactory.create(AppModule);
+    const app = await NestFactory.create<NestExpressApplication>(AppModule);
     const configService = app.get(ConfigService);
 
     // Security middleware
@@ -25,6 +28,9 @@ async function bootstrap() {
       }),
     );
 
+    // Metrics interceptor
+    app.useGlobalInterceptors(app.get(MetricsInterceptor));
+
     // CORS configuration
     app.enableCors({
       origin: configService.get('CORS_ORIGIN', '*'),
@@ -36,11 +42,27 @@ async function bootstrap() {
     // Global prefix
     app.setGlobalPrefix('api');
 
+    // Serve static dashboard
+    app.useStaticAssets('src/public', { prefix: '/dashboard', index: ['dashboard.html'] });
+
+    // Swagger setup
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Trading Data Provider API')
+      .setDescription('Kite-backed market data provider for NSE/MCX')
+      .setVersion('1.0.0')
+      .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'apiKey')
+      .addApiKey({ type: 'apiKey', name: 'x-admin-token', in: 'header' }, 'admin')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document);
+
     const port = configService.get('PORT', 3000);
     await app.listen(port);
 
     logger.log(`🚀 Trading App Backend is running on port ${port}`);
     logger.log(`📊 Health check available at http://localhost:${port}/api/health`);
+    logger.log(`📘 Swagger docs at http://localhost:${port}/api/docs`);
     logger.log(`📈 WebSocket available at ws://localhost:${port}/market-data`);
   } catch (error) {
     logger.error('❌ Failed to start application', error);
