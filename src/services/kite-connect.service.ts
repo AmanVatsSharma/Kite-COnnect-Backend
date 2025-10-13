@@ -26,7 +26,8 @@ export class KiteConnectService implements OnModuleInit {
       const accessToken = this.configService.get('KITE_ACCESS_TOKEN');
 
       if (!apiKey || !accessToken) {
-        this.logger.warn('Kite Connect credentials not found. Please set KITE_API_KEY and KITE_ACCESS_TOKEN');
+        this.logger.warn('Kite Connect credentials not found. Starting without Kite.');
+        this.logger.warn('Use /api/auth/kite/login to authenticate and enable ticker.');
         return;
       }
 
@@ -155,7 +156,9 @@ export class KiteConnectService implements OnModuleInit {
     const accessToken = this.configService.get('KITE_ACCESS_TOKEN');
 
     if (!apiKey || !accessToken) {
-      throw new Error('Kite Connect credentials not found');
+      // Do not throw; allow app to run without ticker
+      this.logger.warn('Kite credentials missing; ticker not initialized');
+      return undefined as any;
     }
 
     const ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });

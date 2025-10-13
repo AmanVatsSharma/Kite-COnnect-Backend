@@ -15,6 +15,17 @@ async function bootstrap() {
     const app = await NestFactory.create<NestExpressApplication>(AppModule);
     const configService = app.get(ConfigService);
 
+    // Guidance: if Kite credentials are not configured, keep app running and guide user to login
+    const kiteApiKey = configService.get('KITE_API_KEY');
+    const kiteAccessToken = configService.get('KITE_ACCESS_TOKEN');
+    if (!kiteApiKey || !kiteAccessToken) {
+      logger.warn('Kite credentials not configured (KITE_API_KEY / KITE_ACCESS_TOKEN)');
+      logger.warn('The server will start without live ticker. To connect Kite:');
+      logger.warn('1) Set KITE_API_KEY and KITE_API_SECRET in .env');
+      logger.warn('2) Open GET /api/auth/kite/login to obtain the OAuth URL and complete login');
+      logger.warn('3) After callback, ticker will auto-restart with the new access token');
+    }
+
     // Security middleware
     // app.use(helmet());
     app.use(compression());
@@ -64,6 +75,9 @@ async function bootstrap() {
     logger.log(`📊 Health check available at http://localhost:${port}/api/health`);
     logger.log(`📘 Swagger docs at http://localhost:${port}/api/docs`);
     logger.log(`📈 WebSocket available at ws://localhost:${port}/market-data`);
+    if (!kiteApiKey || !kiteAccessToken) {
+      logger.log('🟡 Kite is disconnected. Visit http://localhost:' + port + '/api/api/auth/kite/login to start OAuth');
+    }
   } catch (error) {
     logger.error('❌ Failed to start application', error);
     process.exit(1);

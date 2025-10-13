@@ -90,6 +90,29 @@ export class StockController {
     }
   }
 
+  @Get('resolve')
+  @ApiOperation({ summary: 'Resolve trading symbol to instrument token (e.g., NSE:SBIN or SBIN-EQ)' })
+  @ApiQuery({ name: 'symbol', required: true, example: 'NSE:SBIN' })
+  @ApiQuery({ name: 'segment', required: false, example: 'NSE' })
+  async resolveSymbol(@Query('symbol') symbol: string, @Query('segment') seg?: string) {
+    try {
+      if (!symbol) {
+        throw new HttpException(
+          { success: false, message: 'symbol is required' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const { instrument, candidates } = await this.stockService.resolveSymbol(symbol, seg);
+      return { success: true, data: { instrument, candidates } };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Failed to resolve symbol', error: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Get('instruments/search')
   @ApiOperation({ summary: 'Search instruments by symbol or name' })
   @ApiQuery({ name: 'q', required: true, example: 'RELIANCE' })
