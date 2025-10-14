@@ -91,8 +91,8 @@ export class StockController {
   }
 
   @Get('resolve')
-  @ApiOperation({ summary: 'Resolve trading symbol to instrument token (e.g., NSE:SBIN or SBIN-EQ)' })
-  @ApiQuery({ name: 'symbol', required: true, example: 'NSE:SBIN' })
+  @ApiOperation({ summary: 'Resolve trading symbol to instrument token (e.g., NSE:SBIN, NSE_SBIN, SBIN-EQ)' })
+  @ApiQuery({ name: 'symbol', required: true, example: 'NSE_SBIN' })
   @ApiQuery({ name: 'segment', required: false, example: 'NSE' })
   async resolveSymbol(@Query('symbol') symbol: string, @Query('segment') seg?: string) {
     try {
@@ -122,6 +122,14 @@ export class StockController {
     @Query('limit') limit?: number,
   ) {
     try {
+      // Accept NSE:SBIN or NSE_SBIN as a direct lookup
+      if (/^(NSE|BSE|NFO|CDS|MCX)[:_]/i.test(query)) {
+        const resolved = await this.stockService.resolveSymbol(query);
+        return {
+          success: true,
+          data: resolved.instrument ? [resolved.instrument] : resolved.candidates,
+        };
+      }
       if (!query) {
         throw new HttpException(
           {
@@ -243,6 +251,59 @@ export class StockController {
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  @Get('tickers/search')
+  @ApiOperation({ summary: 'Search human tickers and return live price + metadata' })
+  @ApiQuery({ name: 'q', required: true, example: 'NSE_SBIN' })
+  async searchTickers(@Query('q') q: string) {
+    try {
+      if (!q) {
+        throw new HttpException({ success: false, message: 'q is required' }, HttpStatus.BAD_REQUEST);
+      }
+      const { instrument, candidates } = await this.stockService.resolveSymbol(q);
+      const items = instrument ? [instrument] : candidates;
+      const tokens = items.map(i => i.instrument_token);
+      const ltp = tokens.length ? await this.stockService.getLTP(tokens) : {};
+      return {
+        success: true,
+        data: items.map(i => ({
+          instrument_token: i.instrument_token,
+          symbol: i.tradingsymbol,
+          segment: i.segment,
+          instrument_type: i.instrument_type,
+          last_price: ltp?.[i.instrument_token]?.last_price ?? i.last_price ?? null,
+        })),
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException({ success: false, message: 'Failed to search tickers', error: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('tickers/:symbol')
+  @ApiOperation({ summary: 'Get live price and metadata by human ticker (e.g., NSE_SBIN)' })
+  async getTickerBySymbol(@Param('symbol') symbol: string) {
+    try {
+      const { instrument } = await this.stockService.resolveSymbol(symbol);
+      if (!instrument) {
+        throw new HttpException({ success: false, message: 'Symbol not found' }, HttpStatus.NOT_FOUND);
+      }
+      const ltp = await this.stockService.getLTP([instrument.instrument_token]);
+      return {
+        success: true,
+        data: {
+          instrument_token: instrument.instrument_token,
+          symbol: instrument.tradingsymbol,
+          segment: instrument.segment,
+          instrument_type: instrument.instrument_type,
+          last_price: ltp?.[instrument.instrument_token]?.last_price ?? instrument.last_price ?? null,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException({ success: false, message: 'Failed to fetch ticker', error: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 

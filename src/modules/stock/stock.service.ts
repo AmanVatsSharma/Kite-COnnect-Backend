@@ -173,8 +173,8 @@ export class StockService {
     const raw = symbol.trim().toUpperCase();
     let seg: string | undefined = segmentHint?.toUpperCase();
     let sym = raw;
-    // Parse segment prefix e.g., NSE:SBIN
-    const prefixMatch = raw.match(/^(NSE|BSE|NFO|CDS|MCX)[:]/);
+    // Parse segment prefix e.g., NSE:SBIN or NSE_SBIN
+    const prefixMatch = raw.match(/^(NSE|BSE|NFO|CDS|MCX)[:_]/);
     if (prefixMatch) {
       seg = prefixMatch[1];
       sym = raw.slice(prefixMatch[0].length);
