@@ -164,6 +164,57 @@ export class StockService {
     }
   }
 
+  /**
+   * Resolve a human symbol to a stored instrument.
+   * Accepts forms like "NSE:SBIN", "SBIN", or "SBIN-EQ" with optional segment.
+   * Returns best match and candidate list for disambiguation.
+   */
+  async resolveSymbol(symbol: string, segmentHint?: string): Promise<{ instrument: Instrument | null; candidates: Instrument[] }>{
+    const raw = symbol.trim().toUpperCase();
+    let seg: string | undefined = segmentHint?.toUpperCase();
+    let sym = raw;
+    // Parse segment prefix e.g., NSE:SBIN or NSE_SBIN
+    const prefixMatch = raw.match(/^(NSE|BSE|NFO|CDS|MCX)[:_]/);
+    if (prefixMatch) {
+      seg = prefixMatch[1];
+      sym = raw.slice(prefixMatch[0].length);
+    }
+    // Allow SBIN-EQ form => symbol=SBIN, instrument_type=EQ
+    let instrumentType: string | undefined;
+    const hyphen = sym.split('-');
+    if (hyphen.length === 2) {
+      sym = hyphen[0];
+      instrumentType = hyphen[1];
+    }
+
+    // Build query
+    const qb = this.instrumentRepository.createQueryBuilder('i')
+      .where('i.tradingsymbol = :sym', { sym })
+      .orWhere('i.tradingsymbol LIKE :like', { like: `${sym}-%` });
+    if (seg) qb.andWhere('i.segment = :seg', { seg });
+    if (instrumentType) qb.andWhere('i.instrument_type = :it', { it: instrumentType });
+    qb.orderBy('i.segment', 'ASC');
+
+    const list = await qb.getMany();
+    if (list.length === 0) {
+      // fallback fuzzy
+      const fuzzy = await this.instrumentRepository.createQueryBuilder('i')
+        .where('i.tradingsymbol LIKE :q', { q: `%${sym}%` })
+        .andWhere('i.is_active = :ia', { ia: true })
+        .limit(10)
+        .getMany();
+      return { instrument: null, candidates: fuzzy };
+    }
+
+    // Prefer exact segment if provided, else first
+    let best = list[0];
+    if (seg) {
+      const exactSeg = list.find(i => i.segment?.toUpperCase() === seg);
+      if (exactSeg) best = exactSeg;
+    }
+    return { instrument: best, candidates: list };
+  }
+
   async getQuotes(instrumentTokens: number[]): Promise<any> {
     try {
       // Check cache first

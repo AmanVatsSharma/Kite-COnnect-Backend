@@ -31,30 +31,34 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       const ticker = this.kiteConnectService.initializeTicker();
       
       // Set up ticker event handlers
-      ticker.on('ticks', (ticks: any[]) => {
-        this.handleTicks(ticks);
-      });
+      if (ticker?.on) {
+        ticker.on('ticks', (ticks: any[]) => {
+          this.handleTicks(ticks);
+        });
 
-      ticker.on('connect', () => {
-        this.logger.log('Kite ticker connected');
-        this.isStreaming = true;
-      });
+        ticker.on('connect', () => {
+          this.logger.log('Kite ticker connected');
+          this.isStreaming = true;
+        });
 
-      ticker.on('disconnect', () => {
-        this.logger.log('Kite ticker disconnected');
-        this.isStreaming = false;
-      });
+        ticker.on('disconnect', () => {
+          this.logger.log('Kite ticker disconnected');
+          this.isStreaming = false;
+        });
 
-      ticker.on('error', (error: any) => {
-        this.logger.error('Kite ticker error', error);
-        this.isStreaming = false;
-      });
+        ticker.on('error', (error: any) => {
+          this.logger.error('Kite ticker error', error);
+          this.isStreaming = false;
+        });
 
-      // Connect to ticker with safe guard
-      try {
-        ticker.connect();
-      } catch (e) {
-        this.logger.error('Error connecting Kite ticker', e);
+        // Connect to ticker with safe guard
+        try {
+          ticker.connect();
+        } catch (e) {
+          this.logger.error('Error connecting Kite ticker', e);
+        }
+      } else {
+        this.logger.warn('Ticker not initialized; start OAuth via /api/auth/kite/login');
       }
 
       this.logger.log('Market data streaming service initialized');
