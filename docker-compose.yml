@@ -14,6 +14,8 @@ services:
       - DB_USERNAME=trading_user
       - DB_PASSWORD=trading_password
       - DB_DATABASE=trading_app
+      - DB_MIGRATIONS_RUN=${DB_MIGRATIONS_RUN:-true}
+      - DB_SSL=${DB_SSL:-false}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - KITE_API_KEY=${KITE_API_KEY}
@@ -39,11 +41,13 @@ services:
       - POSTGRES_DB=trading_app
       - POSTGRES_USER=trading_user
       - POSTGRES_PASSWORD=trading_password
-    ports:
-      - "5432:5432"
+    # Do not publish in production; internal-only network access
+    # ports:
+    #   - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      # Optional: provide init SQL by mounting a file at runtime
+      # - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -57,8 +61,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: trading-redis
-    ports:
-      - "6379:6379"
+    # Do not publish in production; internal-only network access
+    # ports:
+    #   - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -69,21 +74,7 @@ services:
     networks:
       - trading-network
 
-  # Nginx Reverse Proxy (Optional)
-  nginx:
-    image: nginx:alpine
-    container_name: trading-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./docker/nginx/ssl:/etc/nginx/ssl
-    depends_on:
-      - trading-app
-    restart: unless-stopped
-    networks:
-      - trading-network
+  # Nginx is recommended to run on the host (see DEPLOY_EC2.md)
 
 volumes:
   postgres_data:

@@ -67,11 +67,11 @@ cp env.example .env
 
 Update the `.env` file with your configuration:
 ```env
-# Database Configuration
+# Database Configuration (Postgres)
 DB_HOST=localhost
-DB_PORT=3306
-DB_USERNAME=root
-DB_PASSWORD=your_password
+DB_PORT=5432
+DB_USERNAME=trading_user
+DB_PASSWORD=trading_password
 DB_DATABASE=trading_app
 
 # Redis Configuration
@@ -279,21 +279,21 @@ curl http://localhost:3000/api/stock/stats
 
 ### Docker Deployment
 ```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "run", "start:prod"]
+# See Dockerfile in repo for multi-stage optimized build
 ```
 
 ### Environment Variables for Production
 ```env
 NODE_ENV=production
-DB_HOST=your_production_db_host
-REDIS_HOST=your_production_redis_host
+DB_HOST=postgres
+DB_PORT=5432
+DB_USERNAME=trading_user
+DB_PASSWORD=trading_password
+DB_DATABASE=trading_app
+DB_MIGRATIONS_RUN=true
+DB_SSL=false
+REDIS_HOST=redis
+REDIS_PORT=6379
 KITE_API_KEY=your_production_kite_key
 JWT_SECRET=your_secure_jwt_secret
 ```
