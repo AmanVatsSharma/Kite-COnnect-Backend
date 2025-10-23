@@ -33,6 +33,8 @@ Required env:
 - DB_USERNAME=trading_user
 - DB_PASSWORD=trading_password
 - DB_DATABASE=trading_app
+- DB_MIGRATIONS_RUN=true   # auto-run TypeORM migrations on boot
+- DB_SSL=false              # set true if using managed Postgres with SSL
 - REDIS_HOST=redis
 - REDIS_PORT=6379
 - KITE_API_KEY=...
@@ -55,7 +57,7 @@ Check logs:
 docker logs -f trading-app-backend
 ```
 
-## 5) Nginx reverse proxy + SSL
+## 5) Nginx reverse proxy + SSL (handles WebSockets)
 Create `/etc/nginx/sites-available/trading.conf`:
 ```nginx
 server {
@@ -76,6 +78,13 @@ server {
   ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
   ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
 
+  # Increase timeouts for long-lived WebSocket connections
+  proxy_read_timeout 86400s;
+  proxy_send_timeout 86400s;
+  proxy_connect_timeout 60s;
+  keepalive_timeout 75s;
+  tcp_nodelay on;
+
   location /api/ {
     proxy_pass http://localhost:3000/api/;
     proxy_set_header Host $host;
@@ -83,6 +92,16 @@ server {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
   }
+  # Socket.IO handshake path (required for WebSockets)
+  location /socket.io/ {
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "Upgrade";
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass http://localhost:3000/socket.io/;
+  }
+  # Optional: namespace route convenience (not used by the handshake)
   location /market-data/ {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;

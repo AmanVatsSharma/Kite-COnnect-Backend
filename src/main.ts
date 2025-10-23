@@ -3,8 +3,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
-import * as helmet from 'helmet';
-import * as compression from 'compression';
+import helmet from 'helmet';
+import compression from 'compression';
+import * as path from 'path';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 
@@ -27,7 +28,9 @@ async function bootstrap() {
     }
 
     // Security middleware
-    // app.use(helmet());
+    if (configService.get('NODE_ENV') === 'production') {
+      app.use(helmet());
+    }
     app.use(compression());
 
     // Global validation pipe
@@ -46,15 +49,18 @@ async function bootstrap() {
     app.enableCors({
       origin: configService.get('CORS_ORIGIN', '*'),
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'x-admin-token'],
       credentials: true,
     });
 
     // Global prefix
     app.setGlobalPrefix('api');
 
-    // Serve static dashboard
-    app.useStaticAssets('src/public', { prefix: '/dashboard', index: ['dashboard.html'] });
+    // Serve static dashboard from compiled dist in production, src in dev
+    const staticRoot = configService.get('NODE_ENV') === 'production'
+      ? path.join(__dirname, 'public')
+      : path.join(process.cwd(), 'src', 'public');
+    app.useStaticAssets(staticRoot, { prefix: '/dashboard', index: ['dashboard.html'] });
 
     // Swagger setup
     const swaggerConfig = new DocumentBuilder()

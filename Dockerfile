@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Install all dependencies (include dev deps for build)
+RUN npm ci && npm cache clean --force
 
 # Copy source code
 COPY . .
@@ -37,6 +37,9 @@ RUN npm ci --only=production && npm cache clean --force
 
 # Copy built application from builder stage
 COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
+# Copy static assets and healthcheck into dist (not part of TS build)
+COPY --from=builder --chown=nestjs:nodejs /app/src/public ./dist/public
+COPY --from=builder --chown=nestjs:nodejs /app/src/health-check.js ./dist/health-check.js
 
 # Switch to non-root user
 USER nestjs

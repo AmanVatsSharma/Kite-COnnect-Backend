@@ -19,6 +19,17 @@ export const getDatabaseConfig = (configService: ConfigService): TypeOrmModuleOp
   synchronize: configService.get('NODE_ENV') === 'development',
   logging: configService.get('NODE_ENV') === 'development',
   migrations: ['dist/migrations/*.js'],
-  migrationsRun: false,
-  ssl: configService.get('NODE_ENV') === 'production' ? { rejectUnauthorized: false } : false,
+  // Allow enabling migrations on boot via env in production
+  migrationsRun: (() => {
+    const run = configService.get<string | boolean>('DB_MIGRATIONS_RUN', 'false');
+    return String(run).toLowerCase() === 'true';
+  })(),
+  // SSL can be toggled via DB_SSL env for hosted Postgres providers
+  ssl: (() => {
+    const ssl = configService.get<string | boolean>('DB_SSL', false as unknown as string);
+    if (String(ssl).toLowerCase() === 'true') {
+      return { rejectUnauthorized: false } as unknown as boolean;
+    }
+    return false;
+  })(),
 });
