@@ -12,14 +12,17 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import { Logger } from '@nestjs/common';
 import { RedisService } from '../services/redis.service';
-import { KiteConnectService } from '../services/kite-connect.service';
+import { MarketDataProviderResolverService } from '../services/market-data-provider-resolver.service';
 import { ApiKeyService } from '../services/api-key.service';
+import { MarketDataStreamService } from '../services/market-data-stream.service';
+import { Inject, forwardRef } from '@nestjs/common';
 
 interface ClientSubscription {
   socketId: string;
   userId: string;
   instruments: number[];
   subscriptionType: 'live' | 'historical' | 'both';
+  modeByInstrument: Map<number, 'ltp' | 'ohlcv' | 'full'>;
 }
 
 @WebSocketGateway({
@@ -37,8 +40,9 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
 
   constructor(
     private redisService: RedisService,
-    private kiteConnectService: KiteConnectService,
+    private providerResolver: MarketDataProviderResolverService,
     private apiKeyService: ApiKeyService,
+    @Inject(forwardRef(() => MarketDataStreamService)) private streamService: MarketDataStreamService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -88,6 +92,7 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       userId: client.handshake.query.userId as string || 'anonymous',
       instruments: [],
       subscriptionType: 'live',
+      modeByInstrument: new Map(),
     });
 
     // Send connection confirmation
@@ -124,14 +129,20 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
 
   @SubscribeMessage('subscribe_instruments')
   async handleSubscribeInstruments(
-    @MessageBody() data: { instruments: number[]; type?: 'live' | 'historical' | 'both' },
+    @MessageBody() data: { instruments: number[]; type?: 'live' | 'historical' | 'both'; mode?: 'ltp' | 'ohlcv' | 'full' },
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      const { instruments, type = 'live' } = data;
+      const { instruments, type = 'live', mode = 'ltp' } = data;
       
       if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
         client.emit('error', { message: 'Invalid instruments array' });
+        return;
+      }
+
+      // Validate mode parameter
+      if (!['ltp', 'ohlcv', 'full'].includes(mode)) {
+        client.emit('error', { message: 'Invalid mode. Must be ltp, ohlcv, or full' });
         return;
       }
 
@@ -141,24 +152,41 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
         return;
       }
 
-      // Update subscription
+      // Ensure streaming is active before delegating
+      try {
+        const status = await this.streamService.getStreamingStatus();
+        if (!status?.isStreaming) {
+          client.emit('error', { message: 'Streaming is not active. Ask admin to set provider and start stream: POST /api/admin/provider/global, then /api/admin/provider/stream/start' });
+          return;
+        }
+      } catch (e) {
+        this.logger.warn('Failed to read streaming status', e as any);
+      }
+
+      // Update subscription with mode tracking per instrument
       subscription.instruments = [...new Set([...subscription.instruments, ...instruments])];
       subscription.subscriptionType = type;
+      
+      // Store mode for each instrument
+      instruments.forEach(token => {
+        subscription.modeByInstrument.set(token, mode);
+      });
 
-      // Subscribe to Kite ticker if not already subscribed
-      await this.subscribeToInstruments(instruments);
+      // Delegate subscription to streaming service with mode support and client tracking
+      await this.subscribeToInstruments(instruments, mode, client.id);
 
       // Join instrument rooms for targeted broadcast
       instruments.forEach(token => client.join(`instrument:${token}`));
 
-      // Send confirmation
+      // Send confirmation with mode information
       client.emit('subscription_confirmed', {
         instruments: subscription.instruments,
         type: subscription.subscriptionType,
+        mode,
         timestamp: new Date().toISOString(),
       });
 
-      this.logger.log(`Client ${client.id} subscribed to ${instruments.length} instruments`);
+      this.logger.log(`Client ${client.id} subscribed to ${instruments.length} instruments with mode=${mode}`);
     } catch (error) {
       this.logger.error('Error handling instrument subscription', error);
       client.emit('error', { message: 'Failed to subscribe to instruments' });
@@ -189,7 +217,7 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
         .some(sub => sub.instruments.some(token => instruments.includes(token)));
 
       if (!stillSubscribed) {
-        await this.unsubscribeFromInstruments(instruments);
+        await this.unsubscribeFromInstruments(instruments, client.id);
       }
 
       // Leave rooms
@@ -234,8 +262,9 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
         return;
       }
 
-      // Fetch from Kite API
-      const quotes = await this.kiteConnectService.getQuote(
+      // Fetch via resolved HTTP provider (header routing is ignored for WS; global applies)
+      const provider = await this.providerResolver.resolveForWebsocket();
+      const quotes = await provider.getQuote(
         instruments.map(token => token.toString())
       );
 
@@ -270,7 +299,8 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
     try {
       const { instrumentToken, fromDate, toDate, interval } = data;
 
-      const historicalData = await this.kiteConnectService.getHistoricalData(
+      const provider = await this.providerResolver.resolveForWebsocket();
+      const historicalData = await provider.getHistoricalData(
         instrumentToken,
         fromDate,
         toDate,
@@ -288,33 +318,38 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
     }
   }
 
-  private async subscribeToInstruments(instruments: number[]) {
+  private async subscribeToInstruments(instruments: number[], mode: 'ltp' | 'ohlcv' | 'full' = 'ltp', clientId?: string) {
     try {
-      const ticker = this.kiteConnectService.getTicker();
-      if (ticker) {
-        ticker.subscribe(instruments);
-        this.logger.log(`Subscribed to ${instruments.length} instruments`);
+      const status = await this.streamService.getStreamingStatus();
+      if (!status?.isStreaming) {
+        this.logger.warn('subscribeToInstruments ignored: streaming not active');
+        return;
       }
+      await this.streamService.subscribeToInstruments(instruments, mode, clientId);
+      this.logger.log(`[Gateway] Queued subscription for ${instruments.length} instruments with mode=${mode} for client=${clientId}`);
     } catch (error) {
-      this.logger.error('Error subscribing to instruments', error);
+      this.logger.error('Error queuing instrument subscriptions', error);
     }
   }
 
-  private async unsubscribeFromInstruments(instruments: number[]) {
+  private async unsubscribeFromInstruments(instruments: number[], clientId?: string) {
     try {
-      const ticker = this.kiteConnectService.getTicker();
-      if (ticker) {
-        ticker.unsubscribe(instruments);
-        this.logger.log(`Unsubscribed from ${instruments.length} instruments`);
+      const status = await this.streamService.getStreamingStatus();
+      if (!status?.isStreaming) {
+        this.logger.warn('unsubscribeFromInstruments ignored: streaming not active');
+        return;
       }
+      await this.streamService.unsubscribeFromInstruments(instruments, clientId);
+      this.logger.log(`[Gateway] Queued unsubscription for ${instruments.length} instruments for client=${clientId}`);
     } catch (error) {
-      this.logger.error('Error unsubscribing from instruments', error);
+      this.logger.error('Error queuing instrument unsubscriptions', error);
     }
   }
 
   // Method to broadcast market data to subscribed clients
   async broadcastMarketData(instrumentToken: number, data: any) {
     try {
+      const startTime = Date.now();
       const subscribedClients = Array.from(this.clientSubscriptions.values())
         .filter(sub => sub.instruments.includes(instrumentToken));
 
@@ -328,10 +363,11 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
         // Room-based broadcast
         this.server.to(`instrument:${instrumentToken}`).emit('market_data', message);
 
-        this.logger.log(`Broadcasted market data for instrument ${instrumentToken} to ${subscribedClients.length} clients`);
+        const broadcastTime = Date.now() - startTime;
+        this.logger.log(`[Gateway] Broadcasted tick ${instrumentToken} to ${subscribedClients.length} clients in ${broadcastTime}ms`);
       }
     } catch (error) {
-      this.logger.error('Error broadcasting market data', error);
+      this.logger.error('[Gateway] Error broadcasting market data', error);
     }
   }
 

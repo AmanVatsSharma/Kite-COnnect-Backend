@@ -3,11 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Instrument } from '../../entities/instrument.entity';
 import { MarketData } from '../../entities/market-data.entity';
+import { InstrumentMapping } from '../../entities/instrument-mapping.entity';
 import { Subscription } from '../../entities/subscription.entity';
-import { KiteConnectService } from '../../services/kite-connect.service';
+import { MarketDataProviderResolverService } from '../../services/market-data-provider-resolver.service';
+import { MarketDataProvider } from '../../providers/market-data.provider';
 import { RedisService } from '../../services/redis.service';
 import { RequestBatchingService } from '../../services/request-batching.service';
 import { MarketDataGateway } from '../../gateways/market-data.gateway';
+import { Inject, forwardRef } from '@nestjs/common';
 
 @Injectable()
 export class StockService {
@@ -20,21 +23,27 @@ export class StockService {
     private marketDataRepository: Repository<MarketData>,
     @InjectRepository(Subscription)
     private subscriptionRepository: Repository<Subscription>,
-    private kiteConnectService: KiteConnectService,
+    @InjectRepository(InstrumentMapping)
+    private mappingRepository: Repository<InstrumentMapping>,
+    private providerResolver: MarketDataProviderResolverService,
     private redisService: RedisService,
     private requestBatchingService: RequestBatchingService,
-    private marketDataGateway: MarketDataGateway,
+    @Inject(forwardRef(() => MarketDataGateway)) private marketDataGateway: MarketDataGateway,
   ) {}
 
-  async syncInstruments(exchange?: string): Promise<{ synced: number; updated: number }> {
+  async syncInstruments(exchange?: string, opts?: { provider?: 'kite' | 'vortex'; csv_url?: string; headers?: Record<string, any>; apiKey?: string }): Promise<{ synced: number; updated: number }> {
     try {
-      this.logger.log(`Starting instrument sync for exchange: ${exchange || 'all'}`);
-      
-      const kiteInstruments = await this.kiteConnectService.getInstruments(exchange);
+      const httpHeaders = opts?.headers || {};
+      const providerInstance = await this.providerResolver.resolveForHttp(httpHeaders, opts?.apiKey);
+      const providerName = ((httpHeaders['x-provider'] || opts?.provider) as string | undefined)?.toString().toLowerCase();
+      const effectiveProvider: 'kite' | 'vortex' = providerName === 'vortex' ? 'vortex' : 'kite';
+      this.logger.log(`Starting instrument sync for exchange=${exchange || 'all'} via provider=${providerName}`);
+
+      const instruments = await providerInstance.getInstruments(exchange, { csvUrl: opts?.csv_url });
       let synced = 0;
       let updated = 0;
 
-      for (const kiteInstrument of kiteInstruments) {
+      for (const kiteInstrument of instruments) {
         const existingInstrument = await this.instrumentRepository.findOne({
           where: { instrument_token: kiteInstrument.instrument_token },
         });
@@ -76,6 +85,29 @@ export class StockService {
           });
           await this.instrumentRepository.save(newInstrument);
           synced++;
+        }
+        // Upsert instrument mapping: provider_token
+        // - For kite: instrument_token as string
+        // - For vortex: prefer `${exchange}-${instrument_token}` when exchange present
+        try {
+          const providerToken = effectiveProvider === 'vortex'
+            ? `${(kiteInstrument.exchange || kiteInstrument.segment || 'NSE_EQ').toString()}-${kiteInstrument.instrument_token}`
+            : String(kiteInstrument.instrument_token);
+          const existingMap = await this.mappingRepository.findOne({ where: { provider: effectiveProvider, provider_token: providerToken } });
+          if (existingMap) {
+            if (existingMap.instrument_token !== kiteInstrument.instrument_token) {
+              existingMap.instrument_token = kiteInstrument.instrument_token;
+              await this.mappingRepository.save(existingMap);
+            }
+          } else {
+            await this.mappingRepository.save(this.mappingRepository.create({
+              provider: effectiveProvider,
+              provider_token: providerToken,
+              instrument_token: kiteInstrument.instrument_token,
+            }));
+          }
+        } catch (e) {
+          this.logger.warn(`Mapping upsert failed for token ${kiteInstrument.instrument_token}`, e as any);
         }
       }
 
@@ -215,7 +247,7 @@ export class StockService {
     return { instrument: best, candidates: list };
   }
 
-  async getQuotes(instrumentTokens: number[]): Promise<any> {
+  async getQuotes(instrumentTokens: number[], headers?: Record<string, any>, apiKey?: string): Promise<any> {
     try {
       // Check cache first
       const cachedQuotes = await this.redisService.getCachedQuote(
@@ -228,8 +260,10 @@ export class StockService {
       }
 
       // Use request batching service for efficient API calls
+      const provider = await this.providerResolver.resolveForHttp(headers || {}, apiKey);
       const quotes = await this.requestBatchingService.getQuote(
-        instrumentTokens.map(token => token.toString())
+        instrumentTokens.map(token => token.toString()),
+        provider,
       );
 
       // Cache the result
@@ -247,10 +281,12 @@ export class StockService {
     }
   }
 
-  async getLTP(instrumentTokens: number[]): Promise<any> {
+  async getLTP(instrumentTokens: number[], headers?: Record<string, any>, apiKey?: string): Promise<any> {
     try {
+      const provider = await this.providerResolver.resolveForHttp(headers || {}, apiKey);
       const ltp = await this.requestBatchingService.getLTP(
-        instrumentTokens.map(token => token.toString())
+        instrumentTokens.map(token => token.toString()),
+        provider,
       );
 
       this.logger.log(`Fetched LTP for ${instrumentTokens.length} instruments`);
@@ -261,10 +297,12 @@ export class StockService {
     }
   }
 
-  async getOHLC(instrumentTokens: number[]): Promise<any> {
+  async getOHLC(instrumentTokens: number[], headers?: Record<string, any>, apiKey?: string): Promise<any> {
     try {
+      const provider = await this.providerResolver.resolveForHttp(headers || {}, apiKey);
       const ohlc = await this.requestBatchingService.getOHLC(
-        instrumentTokens.map(token => token.toString())
+        instrumentTokens.map(token => token.toString()),
+        provider,
       );
 
       this.logger.log(`Fetched OHLC for ${instrumentTokens.length} instruments`);
@@ -280,13 +318,16 @@ export class StockService {
     fromDate: string,
     toDate: string,
     interval: string,
+    headers?: Record<string, any>,
+    apiKey?: string,
   ): Promise<any> {
     try {
-      const historicalData = await this.kiteConnectService.getHistoricalData(
+      const provider = await this.providerResolver.resolveForHttp(headers || {}, apiKey);
+      const historicalData = await provider.getHistoricalData(
         instrumentToken,
         fromDate,
         toDate,
-        interval
+        interval,
       );
 
       this.logger.log(`Fetched historical data for instrument ${instrumentToken}`);

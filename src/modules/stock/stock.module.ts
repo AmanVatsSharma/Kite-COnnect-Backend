@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { StockController } from './stock.controller';
@@ -9,28 +9,34 @@ import { Subscription } from '../../entities/subscription.entity';
 import { ApiKey } from '../../entities/api-key.entity';
 import { KiteSession } from '../../entities/kite-session.entity';
 import { ApiKeyGuard } from '../../guards/api-key.guard';
-import { KiteConnectService } from '../../services/kite-connect.service';
+import { KiteProviderService } from '../../providers/kite-provider.service';
 import { RedisService } from '../../services/redis.service';
 import { RequestBatchingService } from '../../services/request-batching.service';
 import { MarketDataGateway } from '../../gateways/market-data.gateway';
 import { MarketDataStreamService } from '../../services/market-data-stream.service';
 import { HealthController } from '../../controllers/health.controller';
-import { AuthController } from '../../controllers/auth.controller';
+import { AuthController, VortexAuthController } from '../../controllers/auth.controller';
 import { MetricsService } from '../../services/metrics.service';
 import { ApiKeyService } from '../../services/api-key.service';
 import { AdminController } from '../../controllers/admin.controller';
 import { AdminGuard } from '../../guards/admin.guard';
 import { MetricsInterceptor } from '../../interceptors/metrics.interceptor';
+import { MarketDataProviderResolverService } from '../../services/market-data-provider-resolver.service';
+import { VortexProviderService } from '../../providers/vortex-provider.service';
+import { InstrumentMapping } from '../../entities/instrument-mapping.entity';
+import { VortexSession } from '../../entities/vortex-session.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Instrument, MarketData, Subscription, ApiKey, KiteSession]),
+    TypeOrmModule.forFeature([Instrument, MarketData, Subscription, ApiKey, KiteSession, InstrumentMapping, VortexSession]),
     ScheduleModule.forRoot(),
   ],
-  controllers: [StockController, HealthController, AuthController, AdminController],
+  controllers: [StockController, HealthController, AuthController, VortexAuthController, AdminController],
   providers: [
     StockService,
-    KiteConnectService,
+    KiteProviderService,
+    VortexProviderService,
+    MarketDataProviderResolverService,
     RedisService,
     ApiKeyService,
     RequestBatchingService,

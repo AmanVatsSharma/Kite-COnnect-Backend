@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, Res, BadRequestException, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { KiteConnect } from 'kiteconnect';
@@ -6,16 +6,24 @@ import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { KiteSession } from '../entities/kite-session.entity';
 import { RedisService } from '../services/redis.service';
-import { ApiOperation, ApiQuery, ApiTags, ApiResponse } from '@nestjs/swagger';
-import { KiteConnectService } from '../services/kite-connect.service';
+import { ApiOperation, ApiQuery, ApiTags, ApiResponse, ApiOkResponse, ApiBadRequestResponse } from '@nestjs/swagger';
+import { KiteProviderService } from '../providers/kite-provider.service';
+import axios from 'axios';
+import { VortexProviderService } from '../providers/vortex-provider.service';
+import { MarketDataStreamService } from '../services/market-data-stream.service';
+import { VortexSession } from '../entities/vortex-session.entity';
+import { MarketDataProviderResolverService } from '../services/market-data-provider-resolver.service';
 
-@Controller('api/auth/kite')
+// Fallback in-memory store for OAuth state when Redis is unavailable
+const kiteStateMemory = new Map<string, number>(); // state -> createdAt (ms)
+
+@Controller('auth/kite')
 @ApiTags('auth')
 export class AuthController {
   constructor(
     private configService: ConfigService,
     private redisService: RedisService,
-    private kiteConnectService: KiteConnectService,
+    private kiteProvider: KiteProviderService,
     @InjectRepository(KiteSession) private kiteSessionRepo: Repository<KiteSession>,
   ) {}
 
@@ -29,8 +37,15 @@ export class AuthController {
 
     const kite = new KiteConnect({ api_key: apiKey });
     const state = Math.random().toString(36).slice(2);
-    await this.redisService.set(`kite_oauth_state:${state}`, { createdAt: Date.now() }, 300);
-    const url = kite.getLoginURL({ state });
+    if (this.redisService.isRedisAvailable()) {
+      await this.redisService.set(`kite_oauth_state:${state}`, { createdAt: Date.now() }, 300);
+    } else {
+      // Memory fallback with 5 min TTL
+      kiteStateMemory.set(state, Date.now());
+    }
+    // Ensure compatibility: append state param if SDK doesn't accept object arg
+    const baseUrl = (kite as any).getLoginURL?.() || '';
+    const url = baseUrl ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}state=${state}` : baseUrl;
     return res.json({ url, state });
   }
 
@@ -44,11 +59,23 @@ export class AuthController {
     const apiSecret = this.configService.get<string>('KITE_API_SECRET');
     if (!apiKey || !apiSecret) throw new BadRequestException('Kite API creds not configured');
 
-    const expected = await this.redisService.get(`kite_oauth_state:${state}`);
-    if (!expected) throw new BadRequestException('Invalid or expired state');
+    let stateValid = false;
+    if (this.redisService.isRedisAvailable()) {
+      const expected = await this.redisService.get(`kite_oauth_state:${state}`);
+      stateValid = !!expected;
+    } else {
+      const createdAt = kiteStateMemory.get(state);
+      if (createdAt && Date.now() - createdAt < 5 * 60 * 1000) stateValid = true;
+    }
+    if (!stateValid) throw new BadRequestException('Invalid or expired state');
 
     const kite = new KiteConnect({ api_key: apiKey });
-    const session = await kite.generateSession(requestToken, apiSecret);
+    let session: any;
+    try {
+      session = await kite.generateSession(requestToken, apiSecret);
+    } catch (e: any) {
+      throw new BadRequestException(`Kite OAuth failed: ${e?.message || 'unknown error'}`);
+    }
     const entity = this.kiteSessionRepo.create({
       access_token: session.access_token,
       public_token: session.public_token,
@@ -67,9 +94,179 @@ export class AuthController {
     await this.redisService.set('kite:access_token', session.access_token, 24 * 3600);
 
     // update in-memory client and restart ticker
-    await this.kiteConnectService.updateAccessToken(session.access_token);
-    await this.kiteConnectService.restartTicker();
+    await this.kiteProvider.updateAccessToken(session.access_token);
+    await this.kiteProvider.restartTicker();
+
+    // Invalidate state after successful callback
+    try {
+      if (this.redisService.isRedisAvailable()) await this.redisService.del(`kite_oauth_state:${state}`);
+      kiteStateMemory.delete(state);
+    } catch {}
 
     return { success: true };
+  }
+}
+
+@Controller('auth/vortex')
+@ApiTags('auth')
+export class VortexAuthController {
+  private readonly logger = new Logger(VortexAuthController.name);
+
+  constructor(
+    private configService: ConfigService,
+    private redisService: RedisService,
+    private vortexProvider: VortexProviderService,
+    private streamService: MarketDataStreamService,
+    private resolver: MarketDataProviderResolverService,
+    @InjectRepository(VortexSession) private vortexSessionRepo: Repository<VortexSession>,
+  ) {}
+
+  @Get('login')
+  @ApiOperation({ summary: 'Get Vortex login URL', description: 'Returns the Rupeezy Vortex OAuth login URL generated from your VORTEX_APP_ID.' })
+  @ApiOkResponse({ description: 'Vortex login URL', schema: { type: 'object', properties: { url: { type: 'string', example: 'https://flow.rupeezy.in?applicationId=YOUR_APP_ID' } } } })
+  @ApiBadRequestResponse({ description: 'Missing configuration', schema: { type: 'object', properties: { statusCode: { type: 'number', example: 400 }, message: { type: 'string', example: 'Vortex applicationId (VORTEX_APP_ID) not configured' }, error: { type: 'string', example: 'Bad Request' } } } })
+  async login(@Res() res: Response) {
+    const appId = this.configService.get<string>('VORTEX_APP_ID');
+    if (!appId) throw new BadRequestException('Vortex applicationId (VORTEX_APP_ID) not configured');
+    const url = `https://flow.rupeezy.in?applicationId=${encodeURIComponent(appId)}`;
+    return res.json({ url });
+  }
+
+  @Get('callback')
+  @ApiOperation({ summary: 'Vortex callback handler (exchanges auth->access_token)', description: 'Handles redirect from Rupeezy Vortex. Reads the auth query param, computes checksum, calls Create Session API, and persists the access_token to the database.' })
+  @ApiQuery({ name: 'auth', required: true })
+  @ApiOkResponse({ description: 'Session created', schema: { type: 'object', properties: { success: { type: 'boolean', example: true } }, example: { success: true } } })
+  @ApiBadRequestResponse({ description: 'Exchange failed or misconfigured', schema: { type: 'object', properties: { statusCode: { type: 'number', example: 400 }, message: { type: 'string', example: 'Vortex session creation failed: ...' }, error: { type: 'string', example: 'Bad Request' } } } })
+  async callback(@Query('auth') auth: string) {
+    this.logger.log(`[Vortex] Callback received with auth parameter: ${auth ? 'present' : 'missing'}`);
+    
+    const appId = this.configService.get<string>('VORTEX_APP_ID');
+    const apiKey = this.configService.get<string>('VORTEX_API_KEY');
+    const baseUrl = (this.configService.get<string>('VORTEX_BASE_URL') || 'https://vortex-api.rupeezy.in/v2').replace(/\/$/, '');
+    const createSessionUrl = `${baseUrl}/user/session`;
+    
+    this.logger.log(`[Vortex] Configuration: appId=${appId ? 'present' : 'missing'}, apiKey=${apiKey ? 'present' : 'missing'}, baseUrl=${baseUrl}`);
+    
+    if (!appId || !apiKey) {
+      throw new BadRequestException('Vortex envs missing: VORTEX_APP_ID, VORTEX_API_KEY');
+    }
+    if (!auth) throw new BadRequestException('Missing auth parameter');
+
+    // checksum = sha256(appId + auth + apiKey) hex-lowercase
+    const crypto = await import('crypto');
+    const checksum = crypto.createHash('sha256').update(`${appId}${auth}${apiKey}`).digest('hex');
+    this.logger.log(`[Vortex] Generated checksum for session creation`);
+
+    let sessionResp: any;
+    try {
+      this.logger.log(`[Vortex] Creating session at ${createSessionUrl.replace(apiKey, '***')}`);
+      sessionResp = await axios.post(createSessionUrl, {
+        checksum,
+        applicationId: appId,
+        token: auth,
+      }, {
+        headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        timeout: 10000,
+      });
+      this.logger.log(`[Vortex] Session creation successful, received access_token`);
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const body = e?.response?.data;
+      const sanitizedUrl = createSessionUrl.replace(apiKey, '***');
+      const msg = body || e?.message || 'unknown error';
+      this.logger.error(`[Vortex] Session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'})`);
+      throw new BadRequestException(`Vortex session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'} url=${sanitizedUrl})`);
+    }
+
+    const data = sessionResp?.data?.data || {};
+    const accessToken: string | undefined = data?.access_token;
+    if (!accessToken) throw new BadRequestException('Vortex session did not return access_token');
+    this.logger.log(`[Vortex] Access token extracted, length: ${accessToken.length}`);
+
+    // Determine TTL from JWT exp if present
+    let ttl = 24 * 3600; // fallback 24h
+    try {
+      const parts = accessToken.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+        if (payload?.exp) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const remain = Math.max(60, payload.exp - nowSec);
+          ttl = remain;
+          this.logger.log(`[Vortex] JWT TTL calculated: ${remain}s (expires at ${new Date(payload.exp * 1000).toISOString()})`);
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`[Vortex] Failed to parse JWT TTL, using fallback: ${ttl}s`);
+    }
+
+    // Persist session in DB; deactivate previous
+    this.logger.log(`[Vortex] Deactivating previous sessions and saving new session`);
+    await this.vortexSessionRepo.createQueryBuilder()
+      .update(VortexSession)
+      .set({ is_active: false })
+      .where('is_active = :active', { active: true })
+      .execute();
+    const expiresAt = ((): Date | null => {
+      try {
+        const parts = accessToken.split('.');
+        if (parts.length >= 2) {
+          const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+          if (payload?.exp) return new Date(payload.exp * 1000);
+        }
+      } catch {}
+      return null;
+    })();
+    const entity = this.vortexSessionRepo.create({ access_token: accessToken, is_active: true, expires_at: expiresAt, metadata: data });
+    await this.vortexSessionRepo.save(entity);
+    this.logger.log(`[Vortex] Session saved to database with ID: ${entity.id}`);
+
+    // Cache token in Redis for cross-process readers with JWT-derived TTL
+    try {
+      if (this.redisService.isRedisAvailable?.()) {
+        await this.redisService.set('vortex:access_token', accessToken, ttl);
+        this.logger.log(`[Vortex] Token cached in Redis with TTL: ${ttl}s`);
+      } else {
+        this.logger.warn(`[Vortex] Redis not available, skipping token cache`);
+      }
+    } catch (e) {
+      this.logger.error(`[Vortex] Failed to cache token in Redis`, e as any);
+    }
+
+    // Update in-memory provider to pick latest token
+    try {
+      if (typeof (this.vortexProvider as any).updateAccessToken === 'function') {
+        await (this.vortexProvider as any).updateAccessToken(accessToken);
+        this.logger.log('[Vortex] Updated access token in provider');
+      }
+    } catch (e) {
+      this.logger.error('[Vortex] Failed to update access token in provider', e as any);
+    }
+
+    // Auto-set global provider to vortex after successful login
+    try {
+      await this.resolver.setGlobalProviderName('vortex');
+      this.logger.log('[Vortex] Auto-set global provider to vortex');
+    } catch (e) {
+      this.logger.error('[Vortex] Failed to set global provider', e as any);
+    }
+
+    // Auto-start streaming if not already active
+    try {
+      const status = await this.streamService.getStreamingStatus();
+      if (!status?.isStreaming) {
+        await this.streamService.startStreaming();
+        this.logger.log('[Vortex] Auto-started streaming after successful login');
+      } else {
+        this.logger.log('[Vortex] Streaming already active, reconnecting with new token');
+        if (typeof (this.streamService as any).reconnectIfStreaming === 'function') {
+          await (this.streamService as any).reconnectIfStreaming();
+        }
+      }
+    } catch (e) {
+      this.logger.error('[Vortex] Failed to start/reconnect streaming', e as any);
+    }
+
+    return { success: true } as any;
   }
 }

@@ -35,10 +35,19 @@ DB_DATABASE=trading_app
 # REDIS_PORT=6379
 # REDIS_PASSWORD=
 
+# Provider Selection
+DATA_PROVIDER=kite
+
 # Kite Connect Configuration
 KITE_API_KEY=your_kite_api_key
 KITE_API_SECRET=your_kite_api_secret
 KITE_ACCESS_TOKEN=your_kite_access_token
+
+# Vortex Configuration (optional)
+VORTEX_API_KEY=
+VORTEX_SECRET=
+VORTEX_STREAM_URL=
+VORTEX_INSTRUMENTS_CSV_URL=
 
 # JWT Configuration
 JWT_SECRET=your_jwt_secret_key

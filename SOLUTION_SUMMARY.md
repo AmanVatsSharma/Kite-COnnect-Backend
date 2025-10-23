@@ -1,3 +1,31 @@
+## CHANGELOG (Pluggable Providers)
+
+- Added provider abstraction (`src/providers/market-data.provider.ts`).
+- Implemented `KiteProviderService` and `VortexProviderService` (stubs, CSV instruments, no-op ticker).
+- Added `MarketDataProviderResolverService` with HTTP and global WS resolution.
+- Refactored batching, streaming, stock service, gateway, health, and auth to use the provider system.
+- Added `instrument_mappings` entity and a migration to add `api_keys.provider`.
+- Updated Swagger docs (headers), env example, README, and local development docs.
+- Dashboard updated to pass `x-provider` for HTTP and include provider in instrument sync.
+
+## Flowchart (Provider Resolution)
+
+HTTP request provider selection:
+
+1) x-provider header (kite|vortex) → use it
+2) API key record provider (nullable) → use if set
+3) Global override (Redis key provider:global) → use if set
+4) DATA_PROVIDER env (default kite) → fallback
+
+WebSocket provider selection:
+
+- Use global override if set, else DATA_PROVIDER.
+- Resolver initializes provider ticker; on change: disconnect old ticker, init new ticker.
+
+## Notes
+
+- Missing Kite access token: app boots; logs guidance to use `/api/auth/kite/login` and no crash.
+- Missing Vortex creds/CSV: provider returns stubbed data and a no-op ticker; logs guidance.
 # ✅ Solution Summary - Redis Optional Configuration
 
 ## 🎯 Objective Achieved

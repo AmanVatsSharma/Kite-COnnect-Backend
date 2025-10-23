@@ -77,9 +77,99 @@ export interface MarketDataProvider {
 - WS semantics may differ: reconnection/backoff and subscription model must be aligned.
 - Data field alignment (OHLC arrays vs objects) needs careful normalization.
 
-## Next Steps for the Implementer
-- Obtain Vortex API docs/SDK and credentials.
-- Add envs to `env.example`, create `VortexProviderService` file, implement methods.
-- Add a resolver and replace direct Kite usages with the provider in services.
-- Provide smoke tests: quotes, LTP, OHLC, historical, stream ticks.
-- Update Swagger with provider notes and dashboard toggle if desired.
+## Auto-Setup Flow (Implemented)
+
+After successful Vortex login callback, the system automatically:
+
+1. **Sets Global Provider**: `providerResolver.setGlobalProviderName('vortex')`
+2. **Starts Streaming**: `streamService.startStreaming()` 
+3. **Connects WebSocket**: Initializes VortexTicker and connects to `wss://wire.rupeezy.in/ws`
+4. **Updates Token**: Provider uses the new access token for all API calls
+
+### Complete Flow Diagram
+
+```
+User Login → OAuth Callback → Auto-Setup → WebSocket Ready
+     ↓              ↓              ↓              ↓
+GET /auth/vortex/login → User Auth → POST /auth/vortex/callback → Auto Provider Setup
+     ↓              ↓              ↓              ↓
+Returns URL → Rupeezy Login → Token Exchange → Global Provider = 'vortex'
+     ↓              ↓              ↓              ↓
+User visits → User authorizes → Session saved → Streaming started
+     ↓              ↓              ↓              ↓
+Redirect to → Auth param → DB + Redis → WebSocket connected
+callback URL → extracted → cache → Ready for subscriptions
+```
+
+### Manual Control (Admin APIs)
+
+```bash
+# Set global provider manually
+POST /api/admin/provider/global { "provider": "vortex" }
+
+# Start/stop streaming manually  
+POST /api/admin/provider/stream/start
+POST /api/admin/provider/stream/stop
+
+# Check status
+GET /api/admin/stream/status
+GET /api/admin/debug/vortex
+```
+
+---
+
+## Implementation Status (Updated)
+
+### ✅ Completed Features
+- **Provider Interface**: Created at `src/providers/market-data.provider.ts`
+- **Kite Provider**: Implements interface; existing behavior preserved
+- **Vortex Provider**: Complete implementation with WebSocket streaming
+- **Auto-Setup**: Callback automatically sets provider and starts streaming
+- **Exchange Fallback**: NSE_EQ fallback when instruments not synced
+- **WebSocket URL Fallback**: Hardcoded fallback to `wss://wire.rupeezy.in/ws`
+- **Comprehensive Logging**: Detailed logs throughout the flow
+- **Resolver Service**: Selects provider for HTTP/WS with priority order
+- **Request Batching**: Batches multiple requests to single API calls
+- **Subscription Batching**: Batches WebSocket subscriptions every 500ms
+- **Binary Parser**: Parses Vortex binary tick format (22/62/266 bytes)
+- **Admin Endpoints**: Provider control and debug information
+- **Documentation**: Complete setup guide and troubleshooting
+
+### 🔧 Key Implementation Details
+
+1. **VortexTicker Class**: 
+   - WebSocket connection with auto-reconnect
+   - Binary tick parsing per Vortex spec
+   - Subscription management with exchange mapping
+   - Heartbeat and error handling
+
+2. **Exchange Mapping**:
+   - Database lookup for instrument → exchange mapping
+   - NSE_EQ fallback for unmapped tokens
+   - Support for NSE_EQ, NSE_FO, NSE_CUR, MCX_FO
+
+3. **Auto-Setup Logic**:
+   - Callback sets global provider to 'vortex'
+   - Automatically starts streaming if not active
+   - Reconnects existing stream with new token
+
+4. **Error Handling**:
+   - Graceful degradation when credentials missing
+   - Comprehensive logging for debugging
+   - Fallback mechanisms throughout
+
+### 📋 Testing Checklist
+
+1. **Login Flow**: `/auth/vortex/login` → OAuth → callback success
+2. **Auto-Setup**: Verify provider set and streaming started
+3. **WebSocket**: Connect to `/market-data` namespace
+4. **Subscription**: Subscribe to token 26000 (Nifty 50)
+5. **Ticks**: Verify binary ticks received and parsed
+6. **Broadcast**: Verify ticks broadcasted to clients
+
+### 📚 Documentation
+
+- **Setup Guide**: `src/providers/VORTEX_SETUP_GUIDE.md`
+- **API Usage**: `Vortex_api_usage.md` 
+- **WebSocket Spec**: `vortex_live.md`
+- **Integration Context**: This file (updated)

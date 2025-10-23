@@ -3,293 +3,1472 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Trading Data Provider - Dashboard</title>
+  <title>Ultimate Trading Data Provider Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
-    :root { --bg:#0b1020; --card:#121735; --text:#e6ebff; --muted:#9aa4c4; --accent:#7c9eff; --ok:#2bd39b; --warn:#ffb648; --bad:#ff6b6b }
+    :root { 
+      --bg: #0b1020; 
+      --card: #121735; 
+      --text: #e6ebff; 
+      --muted: #9aa4c4; 
+      --accent: #7c9eff; 
+      --ok: #2bd39b; 
+      --warn: #ffb648; 
+      --bad: #ff6b6b;
+      --border: rgba(255,255,255,0.06);
+      --hover: rgba(255,255,255,0.08);
+    }
     *{box-sizing:border-box}
-    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:linear-gradient(180deg,#0b1020 0%,#0d1430 100%);color:var(--text)}
-    .container{max-width:1200px;margin:32px auto;padding:0 16px}
-    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-    .title{font-weight:800;font-size:28px;letter-spacing:0.3px}
-    .pill{background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:999px;color:var(--muted);font-size:12px}
-    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-    .card{background:var(--card);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:16px;box-shadow:0 6px 24px rgba(0,0,0,0.25)}
-    .card h3{margin:0 0 8px 0;font-size:14px;color:var(--muted);font-weight:600}
-    .stat{font-size:28px;font-weight:800}
-    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
-    .section{margin-top:24px}
-    input,button,select{border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:#0f1430;color:var(--text);padding:10px 12px}
-    button{background:var(--accent);border:none;font-weight:700;cursor:pointer}
-    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
-    .logs{height:180px;overflow:auto;background:#0b0f26;border-radius:10px;padding:10px;border:1px solid rgba(255,255,255,0.06)}
-    table{width:100%;border-collapse:collapse}
-    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.08);font-size:13px}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:linear-gradient(180deg,#0b1020 0%,#0d1430 100%);color:var(--text);min-height:100vh}
+    .container{max-width:1400px;margin:0 auto;padding:0 16px}
+    
+    /* Header */
+    .header{display:flex;align-items:center;justify-content:space-between;padding:24px 0;border-bottom:1px solid var(--border)}
+    .title{font-weight:800;font-size:32px;letter-spacing:0.3px;display:flex;align-items:center;gap:12px}
+    .title::before{content:'📈';font-size:28px}
+    
+    /* Status Indicators */
+    .status-indicators{display:flex;gap:16px;align-items:center}
+    .status-pill{background:var(--border);padding:8px 16px;border-radius:999px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:8px}
+    .status-pill.ok{background:rgba(43,211,155,0.1);color:var(--ok)}
+    .status-pill.warn{background:rgba(255,182,72,0.1);color:var(--warn)}
+    .status-pill.bad{background:rgba(255,107,107,0.1);color:var(--bad)}
+    .status-dot{width:8px;height:8px;border-radius:50%;background:currentColor;animation:pulse 2s infinite}
+    
+    /* Grid Layout */
+    .grid{display:grid;gap:20px}
+    .grid-2{grid-template-columns:repeat(2,1fr)}
+    .grid-3{grid-template-columns:repeat(3,1fr)}
+    .grid-4{grid-template-columns:repeat(4,1fr)}
+    
+    /* Cards */
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,0.3)}
+    .card-header{display:flex;align-items:center;justify-content:between;margin-bottom:16px}
+    .card-title{font-size:16px;font-weight:700;color:var(--text);margin:0}
+    .card-subtitle{font-size:12px;color:var(--muted);margin:4px 0 0 0}
+    
+    /* Forms */
+    .form-group{margin-bottom:16px}
+    .form-label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+    .form-input,.form-select{border-radius:12px;border:1px solid var(--border);background:rgba(15,20,48,0.5);color:var(--text);padding:12px 16px;width:100%;font-size:14px}
+    .form-input:focus,.form-select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,158,255,0.1)}
+    
+    /* Buttons */
+    .btn{background:var(--accent);border:none;border-radius:12px;color:white;padding:12px 24px;font-weight:600;cursor:pointer;font-size:14px;transition:all 0.2s}
+    .btn:hover{background:#6b8eff;transform:translateY(-1px)}
+    .btn:disabled{background:var(--muted);cursor:not-allowed;transform:none}
+    .btn-secondary{background:var(--border);color:var(--text)}
+    .btn-success{background:var(--ok)}
+    .btn-warning{background:var(--warn)}
+    .btn-danger{background:var(--bad)}
+    .btn-sm{padding:8px 16px;font-size:12px}
+    
+    /* Tables */
+    .table{width:100%;border-collapse:collapse;margin-top:16px}
+    .table th,.table td{padding:12px;border-bottom:1px solid var(--border);text-align:left;font-size:13px}
+    .table th{background:rgba(255,255,255,0.02);font-weight:600;color:var(--muted)}
+    .table td{color:var(--text)}
+    .table .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    
+    /* Logs */
+    .logs{height:200px;overflow:auto;background:rgba(11,16,32,0.8);border-radius:12px;padding:16px;border:1px solid var(--border);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:12px;line-height:1.4}
+    .log-entry{margin-bottom:4px;color:var(--text)}
+    .log-error{color:var(--bad)}
+    .log-warn{color:var(--warn)}
+    .log-info{color:var(--accent)}
+    .log-success{color:var(--ok)}
+    
+    /* Wizard */
+    .wizard{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:24px}
+    .wizard-header{display:flex;align-items:center;justify-content:between;margin-bottom:20px}
+    .wizard-title{font-size:20px;font-weight:700;margin:0}
+    .wizard-steps{display:flex;gap:8px;margin-bottom:24px}
+    .wizard-step{flex:1;padding:12px;background:var(--border);border-radius:8px;text-align:center;font-size:12px;font-weight:600;color:var(--muted)}
+    .wizard-step.active{background:var(--accent);color:white}
+    .wizard-step.completed{background:var(--ok);color:white}
+    .wizard-content{min-height:300px}
+    .wizard-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:20px}
+    
+    /* Metrics */
+    .metric{text-align:center}
+    .metric-value{font-size:28px;font-weight:800;margin:0;color:var(--text)}
+    .metric-label{font-size:12px;color:var(--muted);margin:4px 0 0 0}
+    .metric-change{font-size:10px;margin-left:8px}
+    .metric-change.positive{color:var(--ok)}
+    .metric-change.negative{color:var(--bad)}
+    
+    /* Charts */
+    .chart-container{position:relative;height:200px;margin-top:16px}
+    
+    /* Tabs */
+    .tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:20px}
+    .tab{padding:12px 20px;background:none;border:none;color:var(--muted);cursor:pointer;font-weight:600;border-bottom:2px solid transparent;transition:all 0.2s}
+    .tab.active{color:var(--text);border-bottom-color:var(--accent)}
+    .tab:hover{color:var(--text)}
+    .tab-content{display:none}
+    .tab-content.active{display:block}
+    
+    /* Animations */
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+    @keyframes slideIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+    .animate-slide-in{animation:slideIn 0.3s ease-out}
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      .grid-2,.grid-3,.grid-4{grid-template-columns:1fr}
+      .header{flex-direction:column;gap:16px;text-align:center}
+      .status-indicators{flex-wrap:wrap;justify-content:center}
+    }
+    
+    /* Utilities */
+    .hidden{display:none!important}
+    .text-center{text-align:center}
+    .text-right{text-align:right}
+    .mb-0{margin-bottom:0}
+    .mt-16{margin-top:16px}
+    .p-0{padding:0}
+    .flex{display:flex}
+    .gap-8{gap:8px}
+    .items-center{align-items:center}
+    .justify-between{justify-content:space-between}
   </style>
 </head>
 <body>
   <div class="container">
-    <header>
-      <div class="title">📈 Trading Data Provider</div>
-      <div class="row">
-        <select id="provider">
-          <option value="kite" selected>Kite</option>
-          <option value="vortex">Vortex (future)</option>
-        </select>
-        <div class="pill" id="env-pill">Loading…</div>
+    <!-- Header -->
+    <header class="header">
+      <div class="title">Ultimate Trading Data Provider</div>
+      <div class="status-indicators">
+        <div class="status-pill" id="env-status">
+          <div class="status-dot"></div>
+          <span>Loading...</span>
+        </div>
+        <div class="status-pill" id="kite-status">
+          <div class="status-dot"></div>
+          <span>Kite</span>
+        </div>
+        <div class="status-pill" id="vortex-status">
+          <div class="status-dot"></div>
+          <span>Vortex</span>
+        </div>
       </div>
     </header>
 
-    <div class="grid">
-      <div class="card"><h3>Connections</h3><div class="stat" id="conn">0</div></div>
-      <div class="card"><h3>Subscribed Tokens</h3><div class="stat" id="subs">0</div></div>
-      <div class="card"><h3>Kite Ticker</h3><div class="stat ok" id="kite">—</div></div>
+    <!-- Main Content -->
+    <main style="margin-top: 24px;">
+      <!-- Tabs Navigation -->
+      <div class="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="auth">Authentication</button>
+        <button class="tab" data-tab="admin">Admin Controls</button>
+        <button class="tab" data-tab="monitoring">Monitoring</button>
+        <button class="tab" data-tab="testing">Testing</button>
     </div>
 
-    <div class="grid section">
-      <div class="card">
-        <h3>Admin: API Keys</h3>
-        <div class="row">
-          <input id="adminToken" placeholder="x-admin-token" />
-          <button id="btnKeys">List</button>
-          <input id="newKey" placeholder="new api key" />
-          <input id="newTenant" placeholder="tenant id" />
-          <button id="btnCreateKey">Create</button>
+      <!-- Overview Tab -->
+      <div class="tab-content active" id="overview">
+        <!-- Metrics Grid -->
+        <div class="grid grid-4" style="margin-bottom: 24px;">
+          <div class="card metric">
+            <div class="metric-value" id="total-connections">0</div>
+            <div class="metric-label">Total Connections</div>
+          </div>
+          <div class="card metric">
+            <div class="metric-value" id="active-subscriptions">0</div>
+            <div class="metric-label">Active Subscriptions</div>
+          </div>
+          <div class="card metric">
+            <div class="metric-value" id="instruments-count">0</div>
+            <div class="metric-label">Instruments</div>
+          </div>
+          <div class="card metric">
+            <div class="metric-value" id="provider-status">—</div>
+            <div class="metric-label">Provider Status</div>
+          </div>
         </div>
-        <table id="keysTbl"><thead><tr><th>Key</th><th>Tenant</th><th>Active</th><th>Rate/min</th><th>Conn</th><th>Actions</th></tr></thead><tbody></tbody></table>
+
+        <!-- Provider Status Cards -->
+        <div class="grid grid-2" style="margin-bottom: 24px;">
+      <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Kite Connect Status</h3>
+        </div>
+            <div class="status-pill mb-0" id="kite-detail">
+              <div class="status-dot"></div>
+              <span>Disconnected</span>
+            </div>
+            <div class="card-subtitle" id="kite-session-info">No active session</div>
       </div>
       <div class="card">
-        <h3>Market: Instruments & Last Tick</h3>
-        <div class="row">
-          <input id="apiKey" placeholder="x-api-key" />
-          <input id="searchQ" placeholder="search symbol e.g. RELIANCE" />
-          <button id="btnSearch">Search</button>
+            <div class="card-header">
+              <h3 class="card-title">Vortex Status</h3>
         </div>
-        <div class="row" style="margin-top:8px">
-          <input id="syncExchange" placeholder="exchange (optional, e.g. NSE)" />
-          <button id="btnSync">Sync Instruments</button>
+            <div class="status-pill mb-0" id="vortex-detail">
+              <div class="status-dot"></div>
+              <span>Disconnected</span>
         </div>
-        <table id="instTbl"><thead><tr><th>Token</th><th>Symbol</th><th>Segment</th><th>Last Tick</th><th>Actions</th></tr></thead><tbody></tbody></table>
+            <div class="card-subtitle" id="vortex-session-info">No active session</div>
+      </div>
+        </div>
+
+        <!-- Real-time Charts -->
+        <div class="grid grid-2">
+      <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Connection Trends</h3>
+              <div class="card-subtitle">Last 5 minutes</div>
+        </div>
+            <div class="chart-container">
+              <canvas id="connectionsChart"></canvas>
+            </div>
       </div>
       <div class="card">
-        <h3>OHLC Chart</h3>
-        <div class="row">
-          <input id="chartToken" class="mono" placeholder="instrument token" />
-          <select id="chartInterval"><option>minute</option><option>5minute</option><option>15minute</option><option selected>day</option></select>
-          <button id="btnLoadChart">Load</button>
+            <div class="card-header">
+              <h3 class="card-title">Tick Rate</h3>
+              <div class="card-subtitle">Ticks per second</div>
         </div>
-        <canvas id="ohlc" height="140"></canvas>
-      </div>
-      <div class="card">
-        <h3>Ticker Search (Human)</h3>
-        <div class="row">
-          <input id="tickerQ" class="mono" placeholder="e.g. NSE_SBIN, NSE:RELIANCE, SBIN-EQ" />
-          <button id="btnTickerSearch">Search Ticker</button>
-        </div>
-        <table id="tickerTbl"><thead><tr><th>Symbol</th><th>Segment</th><th>Type</th><th>Token</th><th>Last Price</th><th>Actions</th></tr></thead><tbody></tbody></table>
+            <div class="chart-container">
+              <canvas id="tickRateChart"></canvas>
+            </div>
+          </div>
       </div>
     </div>
 
-    <div class="grid section">
-      <div class="card">
-        <h3>Subscribe (WS)</h3>
-        <div class="row">
-          <input id="tokens" class="mono" placeholder="e.g. 738561,5633" />
-          <button id="btnSub">Subscribe</button>
+      <!-- Authentication Tab -->
+      <div class="tab-content" id="auth">
+        <!-- Kite Authentication Wizard -->
+        <div class="wizard">
+          <div class="wizard-header">
+            <h3 class="wizard-title">Kite Connect Authentication</h3>
+          </div>
+          <div class="wizard-steps">
+            <div class="wizard-step" id="kite-step-1">1. Login</div>
+            <div class="wizard-step" id="kite-step-2">2. Authorize</div>
+            <div class="wizard-step" id="kite-step-3">3. Test</div>
+          </div>
+          <div class="wizard-content" id="kite-wizard-content">
+            <div class="form-group">
+              <label class="form-label">API Key</label>
+              <input type="text" class="form-input" id="kite-api-key" placeholder="Your Kite API Key" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">API Secret</label>
+              <input type="password" class="form-input" id="kite-api-secret" placeholder="Your Kite API Secret" />
+            </div>
+            <button class="btn" id="kite-login-btn">Start Kite Authentication</button>
+          </div>
+          <div class="wizard-actions" id="kite-wizard-actions" style="display: none;">
+            <button class="btn btn-secondary" id="kite-test-btn">Test Connection</button>
+            <button class="btn btn-danger" id="kite-logout-btn">Logout</button>
+          </div>
         </div>
-        <div class="logs mono" id="wsLog"></div>
-      </div>
-      <div class="card">
-        <h3>Quotes (REST)</h3>
-        <div class="row">
-          <input id="restTokens" class="mono" placeholder="e.g. 738561,5633" />
-          <button id="btnQuote">Fetch</button>
+
+        <!-- Vortex Authentication Wizard -->
+        <div class="wizard">
+          <div class="wizard-header">
+            <h3 class="wizard-title">Vortex Authentication</h3>
+          </div>
+          <div class="wizard-steps">
+            <div class="wizard-step" id="vortex-step-1">1. Setup</div>
+            <div class="wizard-step" id="vortex-step-2">2. Login</div>
+            <div class="wizard-step" id="vortex-step-3">3. Verify</div>
+          </div>
+          <div class="wizard-content" id="vortex-wizard-content">
+            <div class="form-group">
+              <label class="form-label">Application ID</label>
+              <input type="text" class="form-input" id="vortex-app-id" placeholder="Your Vortex Application ID" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">API Key</label>
+              <input type="text" class="form-input" id="vortex-api-key" placeholder="Your Vortex API Key" />
+            </div>
+            <button class="btn" id="vortex-login-btn">Start Vortex Authentication</button>
+          </div>
+          <div class="wizard-actions" id="vortex-wizard-actions" style="display: none;">
+            <button class="btn btn-secondary" id="vortex-test-http">Test HTTP API</button>
+            <button class="btn btn-secondary" id="vortex-test-ws">Test WebSocket</button>
+            <button class="btn btn-danger" id="vortex-logout-btn">Logout</button>
+          </div>
         </div>
-        <pre class="logs mono" id="restOut"></pre>
       </div>
+
+      <!-- Admin Controls Tab -->
+      <div class="tab-content" id="admin">
+        <div class="grid grid-2">
+          <!-- Provider Management -->
       <div class="card">
-        <h3>Health & Metrics</h3>
-        <div class="row"><button id="btnHealth">Health</button><button id="btnMetrics">Metrics</button></div>
-        <pre class="logs mono" id="healthOut"></pre>
+            <div class="card-header">
+              <h3 class="card-title">Provider Management</h3>
+              <div class="card-subtitle">Global provider settings</div>
+        </div>
+            <div class="form-group">
+              <label class="form-label">Current Provider</label>
+              <select class="form-select" id="global-provider">
+                <option value="kite">Kite Connect</option>
+                <option value="vortex">Vortex</option>
+              </select>
       </div>
+            <div class="form-group">
+              <label class="form-label">Admin Token</label>
+              <input type="password" class="form-input" id="admin-token" placeholder="x-admin-token" />
+            </div>
+            <div class="flex gap-8">
+              <button class="btn" id="set-provider-btn">Set Provider</button>
+              <button class="btn btn-success" id="start-stream-btn">Start Stream</button>
+              <button class="btn btn-warning" id="stop-stream-btn">Stop Stream</button>
+            </div>
+          </div>
+
+          <!-- Session Management -->
+      <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Active Sessions</h3>
+              <div class="card-subtitle">Current authentication sessions</div>
+        </div>
+            <div class="table" id="sessions-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>Status</th>
+                    <th>Expires</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="sessions-tbody">
+                  <tr>
+                    <td colspan="4" class="text-center">No active sessions</td>
+                  </tr>
+                </tbody>
+              </table>
+      </div>
+          </div>
+        </div>
+
+        <!-- API Key Management -->
+        <div class="card" style="margin-top: 20px;">
+          <div class="card-header">
+            <h3 class="card-title">API Key Management</h3>
+            <div class="card-subtitle">Manage API keys and rate limits</div>
+          </div>
+          <div class="grid grid-2">
+            <div>
+              <div class="form-group">
+                <label class="form-label">New API Key</label>
+                <input type="text" class="form-input" id="new-api-key" placeholder="api-key-name" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Tenant ID</label>
+                <input type="text" class="form-input" id="new-tenant-id" placeholder="tenant-1" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Rate Limit (per minute)</label>
+                <input type="number" class="form-input" id="rate-limit" placeholder="600" value="600" />
+              </div>
+              <button class="btn btn-success" id="create-api-key-btn">Create API Key</button>
+            </div>
+            <div>
+              <button class="btn btn-secondary" id="list-api-keys-btn">Refresh API Keys</button>
+              <div class="table" id="api-keys-table" style="margin-top: 16px;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Key</th>
+                      <th>Tenant</th>
+                      <th>Active</th>
+                      <th>Rate Limit</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="api-keys-tbody">
+                    <tr>
+                      <td colspan="5" class="text-center">Click "Refresh API Keys" to load</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monitoring Tab -->
+      <div class="tab-content" id="monitoring">
+        <div class="grid grid-2">
+          <!-- Connection Stats -->
+      <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Connection Statistics</h3>
+      </div>
+            <div class="table">
+              <table>
+                <tbody id="connection-stats">
+                  <tr><td>WebSocket Connections</td><td class="mono" id="ws-connections">0</td></tr>
+                  <tr><td>Active Subscriptions</td><td class="mono" id="active-subs">0</td></tr>
+                  <tr><td>Unique Instruments</td><td class="mono" id="unique-instruments">0</td></tr>
+                  <tr><td>Provider Calls</td><td class="mono" id="provider-calls">0</td></tr>
+                  <tr><td>Batching Efficiency</td><td class="mono" id="batching-efficiency">0%</td></tr>
+                </tbody>
+              </table>
     </div>
+          </div>
+
+          <!-- Health Status -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Health Status</h3>
+            </div>
+            <div class="table">
+              <table>
+                <tbody id="health-stats">
+                  <tr><td>Database</td><td class="mono" id="db-status">Unknown</td></tr>
+                  <tr><td>Redis</td><td class="mono" id="redis-status">Unknown</td></tr>
+                  <tr><td>Kite HTTP</td><td class="mono" id="kite-http-status">Unknown</td></tr>
+                  <tr><td>Kite WebSocket</td><td class="mono" id="kite-ws-status">Unknown</td></tr>
+                  <tr><td>Vortex HTTP</td><td class="mono" id="vortex-http-status">Unknown</td></tr>
+                  <tr><td>Vortex WebSocket</td><td class="mono" id="vortex-ws-status">Unknown</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Real-time Logs -->
+        <div class="card" style="margin-top: 20px;">
+          <div class="card-header">
+            <h3 class="card-title">Real-time Logs</h3>
+            <div class="card-subtitle">Live system logs and events</div>
+          </div>
+          <div class="flex gap-8" style="margin-bottom: 16px;">
+            <button class="btn btn-sm" id="clear-logs-btn">Clear Logs</button>
+            <button class="btn btn-sm btn-secondary" id="pause-logs-btn">Pause</button>
+            <select class="form-select" id="log-filter" style="width: auto;">
+              <option value="all">All Logs</option>
+              <option value="error">Errors Only</option>
+              <option value="warn">Warnings</option>
+              <option value="info">Info</option>
+            </select>
+          </div>
+          <div class="logs" id="real-time-logs">
+            <div class="log-entry log-info">Dashboard initialized. Ready to monitor system activity.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Testing Tab -->
+      <div class="tab-content" id="testing">
+        <div class="grid grid-2">
+          <!-- WebSocket Testing -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">WebSocket Testing</h3>
+              <div class="card-subtitle">Test real-time subscriptions</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">API Key</label>
+              <input type="text" class="form-input" id="ws-api-key" placeholder="x-api-key" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Instrument Tokens</label>
+              <input type="text" class="form-input" id="ws-tokens" placeholder="738561,5633,26000" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mode</label>
+              <select class="form-select" id="ws-mode">
+                <option value="ltp">LTP (Last Trade Price)</option>
+                <option value="ohlcv">OHLCV (OHLC + Volume)</option>
+                <option value="full">Full (OHLCV + Depth)</option>
+              </select>
+            </div>
+            <div class="flex gap-8">
+              <button class="btn btn-success" id="ws-connect-btn">Connect & Subscribe</button>
+              <button class="btn btn-warning" id="ws-disconnect-btn">Disconnect</button>
+            </div>
+            <div class="logs" id="ws-logs" style="height: 150px; margin-top: 16px;">
+              <div class="log-entry log-info">WebSocket logs will appear here</div>
+            </div>
+          </div>
+
+          <!-- REST API Testing -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">REST API Testing</h3>
+              <div class="card-subtitle">Test HTTP endpoints</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">API Key</label>
+              <input type="text" class="form-input" id="rest-api-key" placeholder="x-api-key" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Instrument Tokens</label>
+              <input type="text" class="form-input" id="rest-tokens" placeholder="738561,5633" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mode</label>
+              <select class="form-select" id="rest-mode">
+                <option value="full">Full</option>
+                <option value="ltp">LTP</option>
+                <option value="ohlc">OHLC</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Provider</label>
+              <select class="form-select" id="rest-provider">
+                <option value="">Auto (Global)</option>
+                <option value="kite">Kite</option>
+                <option value="vortex">Vortex</option>
+              </select>
+            </div>
+            <button class="btn" id="rest-quote-btn">Get Quotes</button>
+            <div class="logs" id="rest-logs" style="height: 150px; margin-top: 16px;">
+              <div class="log-entry log-info">REST API responses will appear here</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Instrument Search -->
+        <div class="card" style="margin-top: 20px;">
+          <div class="card-header">
+            <h3 class="card-title">Instrument Search & Testing</h3>
+            <div class="card-subtitle">Search and test with real instruments</div>
+          </div>
+          <div class="grid grid-2">
+            <div>
+              <div class="form-group">
+                <label class="form-label">Search Symbol</label>
+                <input type="text" class="form-input" id="search-symbol" placeholder="RELIANCE, SBIN, NIFTY" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">API Key</label>
+                <input type="text" class="form-input" id="search-api-key" placeholder="x-api-key" />
+              </div>
+              <button class="btn" id="search-instruments-btn">Search Instruments</button>
+            </div>
+            <div>
+              <div class="table" id="search-results-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Token</th>
+                      <th>Exchange</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="search-results-tbody">
+                    <tr>
+                      <td colspan="4" class="text-center">Search for instruments to see results</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
   </div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
   <script>
-    const wsLog = document.getElementById('wsLog');
-    const restOut = document.getElementById('restOut');
-    const healthOut = document.getElementById('healthOut');
-    const keysTbl = document.querySelector('#keysTbl tbody');
-    const instTbl = document.querySelector('#instTbl tbody');
-    let socket;
-
-    function log(el, m){ el.textContent += `${new Date().toISOString()} ${m}\n`; el.scrollTop = el.scrollHeight; }
-    function currentProvider(){
-      return (document.getElementById('provider')?.value || 'kite');
-    }
-    function keyHeaders(){
-      const key = document.getElementById('apiKey').value;
-      const headers = { 'Content-Type':'application/json', 'x-provider': currentProvider() };
-      if (key) headers['x-api-key'] = key;
-      return headers;
-    }
-    function adminHeaders(){
-      const t = document.getElementById('adminToken').value;
-      const headers = { 'Content-Type':'application/json', 'x-provider': currentProvider() };
-      if (t) headers['x-admin-token'] = t;
-      return headers;
-    }
-
-    async function refreshEnv(){
-      const r = await fetch('/api/health');
-      const j = await r.json();
-      document.getElementById('env-pill').textContent = j.status.toUpperCase();
-      document.getElementById('kite').textContent = j.services.kiteConnect === 'connected' ? 'Connected' : 'Disconnected';
-    }
-    async function refreshStats(){
-      const r = await fetch('/api/stock/stats', { headers: keyHeaders() });
-      const j = await r.json();
-      document.getElementById('conn').textContent = j.data.connectionStats.totalConnections;
-      let subCount = 0; (j.data.connectionStats.subscriptions||[]).forEach(s=> subCount += s.instrumentCount);
-      document.getElementById('subs').textContent = subCount;
-    }
-
-    // Admin: API keys
-    document.getElementById('btnKeys').onclick = async () => {
-      const r = await fetch('/api/admin/apikeys', { headers: adminHeaders() });
-      const arr = await r.json(); keysTbl.innerHTML='';
-      arr.forEach(k => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td class=mono>${k.key}</td><td>${k.tenant_id}</td><td>${k.is_active}</td><td>${k.rate_limit_per_minute}</td><td>${k.connection_limit}</td><td><button data-k="${k.key}" class="deact">Deactivate</button></td>`;
-        keysTbl.appendChild(tr);
-      });
-      keysTbl.querySelectorAll('.deact').forEach(btn => btn.onclick = async (e) => {
-        const key = e.target.getAttribute('data-k');
-        await fetch('/api/admin/apikeys/deactivate', { method:'POST', headers: adminHeaders(), body: JSON.stringify({ key }) });
-        e.target.closest('tr').querySelector('td:nth-child(3)').textContent = 'false';
-      });
-    };
-    document.getElementById('btnCreateKey').onclick = async () => {
-      const key = document.getElementById('newKey').value; const tenant = document.getElementById('newTenant').value;
-      await fetch('/api/admin/apikeys', { method:'POST', headers: adminHeaders(), body: JSON.stringify({ key, tenant_id: tenant }) });
-      document.getElementById('btnKeys').click();
+    // Global state
+    let socket = null;
+    let charts = {};
+    let logPaused = false;
+    let wsConnected = false;
+    let realTimeData = {
+      connections: [],
+      tickRate: [],
+      lastUpdate: Date.now()
     };
 
-    // Market: search and last tick table
-    document.getElementById('btnSearch').onclick = async () => {
-      const q = document.getElementById('searchQ').value; if (!q) return;
-      console.log('[Dashboard] instruments/search', q);
-      const r = await fetch(`/api/stock/instruments/search?q=${encodeURIComponent(q)}&limit=20`, { headers: keyHeaders() });
-      const arr = (await r.json()).data || [];
-      instTbl.innerHTML='';
-      for (const it of arr) {
-        const tickResp = await fetch(`/api/stock/market-data/${it.instrument_token}/last`, { headers: keyHeaders() });
-        const tick = (await tickResp.json()).data || null;
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td class=mono>${it.instrument_token}</td><td>${it.tradingsymbol}</td><td>${it.segment}</td><td class=mono>${tick? tick.last_price: '—'}</td><td><button data-t="${it.instrument_token}" class="chart">Chart</button><button data-t="${it.instrument_token}" class="sub">Sub</button></td>`;
-        instTbl.appendChild(tr);
+    // Utility functions
+    function log(containerId, message, type = 'info') {
+      if (logPaused) return;
+      
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = document.createElement('div');
+      logEntry.className = `log-entry log-${type}`;
+      logEntry.textContent = `[${timestamp}] ${message}`;
+      
+      container.appendChild(logEntry);
+      container.scrollTop = container.scrollHeight;
+      
+      // Keep only last 100 entries
+      while (container.children.length > 100) {
+        container.removeChild(container.firstChild);
       }
-      instTbl.querySelectorAll('.chart').forEach(btn => btn.onclick = (e)=>{
-        document.getElementById('chartToken').value = e.target.getAttribute('data-t');
-        document.getElementById('btnLoadChart').click();
-      });
-      instTbl.querySelectorAll('.sub').forEach(btn => btn.onclick = (e)=>{
-        const t = e.target.getAttribute('data-t');
-        ensureSocket(); socket.emit('subscribe_instruments', { instruments: [parseInt(t)], type: 'live' });
-      });
-    };
+    }
 
-    // Sync Instruments
-    document.getElementById('btnSync').onclick = async () => {
-      const ex = document.getElementById('syncExchange').value.trim();
-      const url = ex ? `/api/stock/instruments/sync?exchange=${encodeURIComponent(ex)}` : '/api/stock/instruments/sync';
-      console.log('[Dashboard] sync instruments', ex || '(all)');
-      const r = await fetch(url, { method:'POST', headers: keyHeaders() });
-      const j = await r.json();
-      log(healthOut, `Synced instruments: ${JSON.stringify(j)}`);
-    };
+    function updateStatus(elementId, status, message = '') {
+      const element = document.getElementById(elementId);
+      if (!element) return;
+      
+      element.className = `status-pill ${status}`;
+      const span = element.querySelector('span');
+      if (span) {
+        span.textContent = message || status.charAt(0).toUpperCase() + status.slice(1);
+      }
+    }
 
-    // OHLC Chart
-    let chart;
-    document.getElementById('btnLoadChart').onclick = async () => {
-      const token = document.getElementById('chartToken').value.trim(); if (!token) return;
-      const interval = document.getElementById('chartInterval').value;
-      const to = new Date(); const from = new Date(Date.now() - 14*24*3600*1000);
-      const params = new URLSearchParams({ from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10), interval });
-      const r = await fetch(`/api/stock/historical/${token}?${params.toString()}`, { headers: keyHeaders() });
-      const j = await r.json();
-      const data = (j.data?.candles || []).map(([time, open, high, low, close]) => ({ x: time, o: open, h: high, l: low, c: close }));
-      const ctx = document.getElementById('ohlc').getContext('2d');
-      if (chart) chart.destroy();
-      chart = new Chart(ctx, {
+    function showToast(message, type = 'info') {
+      // Simple toast notification
+      const toast = document.createElement('div');
+      toast.style.cssText = `
+        position: fixed; top: 20px; right: 20px; z-index: 1000;
+        background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+        padding: 12px 16px; color: var(--text); font-size: 14px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        animation: slideIn 0.3s ease-out;
+      `;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.remove();
+      }, 3000);
+    }
+
+    // Chart initialization
+    function initCharts() {
+      // Connections Chart
+      const connectionsCtx = document.getElementById('connectionsChart').getContext('2d');
+      charts.connections = new Chart(connectionsCtx, {
         type: 'line',
         data: {
-          labels: data.map(d => d.x),
-          datasets: [{ label: 'Close', data: data.map(d => d.c), borderColor: '#7c9eff', tension: .2 }]
+          labels: [],
+          datasets: [{
+            label: 'Connections',
+            data: [],
+            borderColor: '#7c9eff',
+            backgroundColor: 'rgba(124, 158, 255, 0.1)',
+            tension: 0.4
+          }]
         },
-        options: { responsive: true, scales: { x: { display: false } } }
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true },
+            x: { display: false }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
       });
-    };
 
-    // Ticker Search (Human)
-    document.getElementById('btnTickerSearch').onclick = async () => {
-      const q = document.getElementById('tickerQ').value.trim(); if (!q) return;
-      console.log('[Dashboard] tickers/search', q);
-      const r = await fetch(`/api/stock/tickers/search?q=${encodeURIComponent(q)}`, { headers: keyHeaders() });
-      const j = await r.json();
-      const rows = (j.data || []);
-      const tbody = document.querySelector('#tickerTbl tbody');
-      tbody.innerHTML = '';
-      rows.forEach(i => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td class=mono>${i.symbol}</td><td>${i.segment}</td><td>${i.instrument_type}</td><td class=mono>${i.instrument_token}</td><td class=mono>${i.last_price ?? '—'}</td><td><button class="chart2" data-t="${i.instrument_token}">Chart</button><button class="sub2" data-t="${i.instrument_token}">Sub</button></td>`;
-        tbody.appendChild(tr);
+      // Tick Rate Chart
+      const tickRateCtx = document.getElementById('tickRateChart').getContext('2d');
+      charts.tickRate = new Chart(tickRateCtx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Ticks/sec',
+            data: [],
+            borderColor: '#2bd39b',
+            backgroundColor: 'rgba(43, 211, 155, 0.1)',
+            tension: 0.4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true },
+            x: { display: false }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
       });
-      tbody.querySelectorAll('.chart2').forEach(btn => btn.onclick = (e)=>{
-        const t = e.target.getAttribute('data-t');
-        document.getElementById('chartToken').value = t; document.getElementById('btnLoadChart').click();
-      });
-      tbody.querySelectorAll('.sub2').forEach(btn => btn.onclick = (e)=>{
-        const t = parseInt(e.target.getAttribute('data-t')); ensureSocket(); socket.emit('subscribe_instruments', { instruments: [t], type: 'live' });
-      });
-    };
-
-    // WebSocket subscribe
-    function ensureSocket(){
-      if (socket) return socket;
-      const key = document.getElementById('apiKey').value;
-      socket = io('/market-data', { extraHeaders: { 'x-api-key': key, 'x-provider': currentProvider() } });
-      socket.on('connect', () => log(wsLog, 'WS connected'));
-      socket.on('market_data', (d) => log(wsLog, JSON.stringify(d)));
-      socket.on('connected', () => log(wsLog, 'Connected event'));
-      socket.on('error', (e)=> log(wsLog, 'Error: ' + JSON.stringify(e)));
-      return socket;
     }
-    document.getElementById('btnSub').onclick = () => {
-      ensureSocket();
-      const tokens = document.getElementById('tokens').value.split(',').map(s => parseInt(s.trim())).filter(Boolean);
-      socket.emit('subscribe_instruments', { instruments: tokens, type: 'live' });
-    };
 
-    // Quotes & Health
-    document.getElementById('btnQuote').onclick = async () => {
-      const tokens = document.getElementById('restTokens').value.split(',').map(s => parseInt(s.trim())).filter(Boolean);
-      const r = await fetch('/api/stock/quotes', { method:'POST', headers: keyHeaders(), body: JSON.stringify({ instruments: tokens }) });
-      const j = await r.json(); restOut.textContent = JSON.stringify(j, null, 2);
-    };
-    document.getElementById('btnHealth').onclick = async () => {
-      const r = await fetch('/api/health'); const j = await r.json(); healthOut.textContent = JSON.stringify(j, null, 2);
-    };
-    document.getElementById('btnMetrics').onclick = async () => {
-      const r = await fetch('/health/metrics'); const t = await r.text(); healthOut.textContent = t;
-    };
+    // Data fetching functions
+    async function fetchSystemStats() {
+      try {
+        const response = await fetch('/api/stock/stats');
+        const data = await response.json();
+        
+        if (data.success) {
+          document.getElementById('total-connections').textContent = data.data.connectionStats.totalConnections || 0;
+          document.getElementById('active-subscriptions').textContent = data.data.connectionStats.subscriptions?.reduce((sum, sub) => sum + sub.instrumentCount, 0) || 0;
+          document.getElementById('instruments-count').textContent = data.data.instrumentsCount || 0;
+          
+          // Update connection stats in monitoring tab
+          document.getElementById('ws-connections').textContent = data.data.connectionStats.totalConnections || 0;
+          document.getElementById('active-subs').textContent = data.data.connectionStats.subscriptions?.reduce((sum, sub) => sum + sub.instrumentCount, 0) || 0;
+        }
+      } catch (error) {
+        log('real-time-logs', `Error fetching system stats: ${error.message}`, 'error');
+      }
+    }
 
-    refreshEnv(); refreshStats(); setInterval(()=>{ refreshEnv(); refreshStats(); }, 8000);
+    async function fetchHealthStatus() {
+      try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        
+        if (data.status === 'healthy') {
+          updateStatus('env-status', 'ok', 'Healthy');
+          document.getElementById('provider-status').textContent = data.services.provider || 'Unknown';
+          
+          // Update health stats
+          document.getElementById('db-status').textContent = data.services.database || 'Unknown';
+          document.getElementById('redis-status').textContent = data.services.redis || 'Unknown';
+          
+          // Provider specific status
+          if (data.debug?.kite) {
+            const kiteStatus = data.debug.kite.isConnected ? 'Connected' : 'Disconnected';
+            updateStatus('kite-status', data.debug.kite.isConnected ? 'ok' : 'bad', kiteStatus);
+            document.getElementById('kite-detail').className = `status-pill ${data.debug.kite.isConnected ? 'ok' : 'bad'}`;
+            document.getElementById('kite-detail').querySelector('span').textContent = kiteStatus;
+          }
+          
+          if (data.debug?.vortex) {
+            const vortexStatus = data.debug.vortex.wsConnected ? 'Connected' : 'Disconnected';
+            updateStatus('vortex-status', data.debug.vortex.wsConnected ? 'ok' : 'bad', vortexStatus);
+            document.getElementById('vortex-detail').className = `status-pill ${data.debug.vortex.wsConnected ? 'ok' : 'bad'}`;
+            document.getElementById('vortex-detail').querySelector('span').textContent = vortexStatus;
+          }
+        } else {
+          updateStatus('env-status', 'bad', 'Unhealthy');
+        }
+      } catch (error) {
+        updateStatus('env-status', 'bad', 'Error');
+        log('real-time-logs', `Health check failed: ${error.message}`, 'error');
+      }
+    }
+
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabId = tab.dataset.tab;
+        
+        // Update tab states
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        
+        tab.classList.add('active');
+        document.getElementById(tabId).classList.add('active');
+      });
+    });
+
+    // Authentication wizards
+    // Kite Authentication
+    document.getElementById('kite-login-btn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('/api/auth/kite/login');
+        const data = await response.json();
+        
+        if (data.url) {
+          // Open popup for OAuth
+          const popup = window.open(data.url, 'kite-auth', 'width=600,height=700');
+          
+          // Monitor popup for completion
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed);
+              // Check if auth was successful
+              setTimeout(() => {
+                fetchHealthStatus();
+                showToast('Kite authentication completed');
+              }, 1000);
+            }
+          }, 1000);
+          
+          document.getElementById('kite-step-1').classList.add('completed');
+          document.getElementById('kite-step-2').classList.add('active');
+          log('real-time-logs', 'Kite OAuth popup opened', 'info');
+        }
+      } catch (error) {
+        log('real-time-logs', `Kite login failed: ${error.message}`, 'error');
+      }
+    });
+
+    // Vortex Authentication
+    document.getElementById('vortex-login-btn').addEventListener('click', async () => {
+      const appId = document.getElementById('vortex-app-id').value;
+      if (!appId) {
+        showToast('Please enter Vortex Application ID', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/auth/vortex/login');
+        const data = await response.json();
+        
+        if (data.url) {
+          // Show the URL and auth parameter input
+          document.getElementById('vortex-wizard-content').innerHTML = `
+            <div class="form-group">
+              <label class="form-label">Complete login at:</label>
+              <div style="background: var(--border); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                <a href="${data.url}" target="_blank" style="color: var(--accent); word-break: break-all;">${data.url}</a>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">After login, copy the 'auth' parameter from the callback URL:</label>
+              <input type="text" class="form-input" id="vortex-auth-param" placeholder="Paste auth parameter here" />
+            </div>
+            <button class="btn" id="vortex-complete-auth-btn">Complete Authentication</button>
+          `;
+          
+          document.getElementById('vortex-step-1').classList.add('completed');
+          document.getElementById('vortex-step-2').classList.add('active');
+          
+          // Handle auth completion
+          document.getElementById('vortex-complete-auth-btn').addEventListener('click', async () => {
+            const authParam = document.getElementById('vortex-auth-param').value;
+            if (!authParam) {
+              showToast('Please enter the auth parameter', 'warn');
+              return;
+            }
+            
+            try {
+              const response = await fetch(`/api/auth/vortex/callback?auth=${encodeURIComponent(authParam)}`);
+              const result = await response.json();
+              
+              if (result.success) {
+                document.getElementById('vortex-step-2').classList.add('completed');
+                document.getElementById('vortex-step-3').classList.add('active');
+                showToast('Vortex authentication successful!', 'success');
+                log('real-time-logs', 'Vortex authentication completed successfully', 'success');
+                fetchHealthStatus();
+              } else {
+                showToast('Vortex authentication failed', 'error');
+                log('real-time-logs', 'Vortex authentication failed', 'error');
+              }
+            } catch (error) {
+              showToast(`Vortex auth failed: ${error.message}`, 'error');
+              log('real-time-logs', `Vortex auth error: ${error.message}`, 'error');
+            }
+          });
+        }
+      } catch (error) {
+        log('real-time-logs', `Vortex login failed: ${error.message}`, 'error');
+      }
+    });
+
+    // Admin controls
+    document.getElementById('set-provider-btn').addEventListener('click', async () => {
+      const provider = document.getElementById('global-provider').value;
+      const adminToken = document.getElementById('admin-token').value;
+      
+      if (!adminToken) {
+        showToast('Please enter admin token', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/admin/provider/global', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-token': adminToken
+          },
+          body: JSON.stringify({ provider })
+        });
+        
+        if (response.ok) {
+          showToast(`Provider set to ${provider}`, 'success');
+          log('real-time-logs', `Global provider changed to ${provider}`, 'info');
+        } else {
+          showToast('Failed to set provider', 'error');
+        }
+      } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+      }
+    });
+
+    document.getElementById('start-stream-btn').addEventListener('click', async () => {
+      const adminToken = document.getElementById('admin-token').value;
+      
+      if (!adminToken) {
+        showToast('Please enter admin token', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/admin/provider/stream/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-token': adminToken
+          }
+        });
+        
+        if (response.ok) {
+          showToast('Stream started successfully', 'success');
+          log('real-time-logs', 'Market data stream started', 'success');
+        } else {
+          showToast('Failed to start stream', 'error');
+        }
+      } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+      }
+    });
+
+    document.getElementById('stop-stream-btn').addEventListener('click', async () => {
+      const adminToken = document.getElementById('admin-token').value;
+      
+      if (!adminToken) {
+        showToast('Please enter admin token', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/admin/provider/stream/stop', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-token': adminToken
+          }
+        });
+        
+        if (response.ok) {
+          showToast('Stream stopped successfully', 'success');
+          log('real-time-logs', 'Market data stream stopped', 'info');
+        } else {
+          showToast('Failed to stop stream', 'error');
+        }
+      } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+      }
+    });
+
+    // WebSocket testing
+    document.getElementById('ws-connect-btn').addEventListener('click', () => {
+      const apiKey = document.getElementById('ws-api-key').value;
+      const tokens = document.getElementById('ws-tokens').value;
+      const mode = document.getElementById('ws-mode').value;
+      
+      if (!apiKey || !tokens) {
+        showToast('Please enter API key and tokens', 'warn');
+        return;
+      }
+      
+      try {
+        socket = io('/market-data', { 
+          extraHeaders: { 'x-api-key': apiKey } 
+        });
+        
+        socket.on('connect', () => {
+          wsConnected = true;
+          log('ws-logs', 'WebSocket connected successfully', 'success');
+          
+          // Subscribe to instruments
+          const tokenArray = tokens.split(',').map(t => parseInt(t.trim())).filter(Boolean);
+          socket.emit('subscribe_instruments', { 
+            instruments: tokenArray, 
+            mode: mode 
+          });
+          
+          log('ws-logs', `Subscribed to ${tokenArray.length} instruments with mode=${mode}`, 'info');
+        });
+        
+        socket.on('market_data', (data) => {
+          log('ws-logs', `Received tick: ${JSON.stringify(data)}`, 'info');
+        });
+        
+        socket.on('subscription_confirmed', (data) => {
+          log('ws-logs', `Subscription confirmed: ${JSON.stringify(data)}`, 'success');
+        });
+        
+        socket.on('error', (error) => {
+          log('ws-logs', `Error: ${JSON.stringify(error)}`, 'error');
+        });
+        
+        socket.on('disconnect', () => {
+          wsConnected = false;
+          log('ws-logs', 'WebSocket disconnected', 'warn');
+        });
+        
+      } catch (error) {
+        log('ws-logs', `Connection failed: ${error.message}`, 'error');
+      }
+    });
+
+    document.getElementById('ws-disconnect-btn').addEventListener('click', () => {
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+        wsConnected = false;
+        log('ws-logs', 'WebSocket disconnected manually', 'info');
+      }
+    });
+
+    // REST API testing
+    document.getElementById('rest-quote-btn').addEventListener('click', async () => {
+      const apiKey = document.getElementById('rest-api-key').value;
+      const tokens = document.getElementById('rest-tokens').value;
+      const mode = document.getElementById('rest-mode').value;
+      const provider = document.getElementById('rest-provider').value;
+      
+      if (!apiKey || !tokens) {
+        showToast('Please enter API key and tokens', 'warn');
+        return;
+      }
+      
+      try {
+        const headers = {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey
+        };
+        
+        if (provider) {
+          headers['x-provider'] = provider;
+        }
+        
+        const tokenArray = tokens.split(',').map(t => parseInt(t.trim())).filter(Boolean);
+        
+        const response = await fetch('/api/stock/quotes', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ instruments: tokenArray })
+        });
+        
+        const data = await response.json();
+        log('rest-logs', `Quote response: ${JSON.stringify(data, null, 2)}`, 'info');
+        
+      } catch (error) {
+        log('rest-logs', `Quote request failed: ${error.message}`, 'error');
+      }
+    });
+
+    // Instrument search
+    document.getElementById('search-instruments-btn').addEventListener('click', async () => {
+      const symbol = document.getElementById('search-symbol').value;
+      const apiKey = document.getElementById('search-api-key').value;
+      
+      if (!symbol || !apiKey) {
+        showToast('Please enter symbol and API key', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/api/stock/instruments/search?q=${encodeURIComponent(symbol)}&limit=10`, {
+          headers: {
+            'x-api-key': apiKey
+          }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.data) {
+          const tbody = document.getElementById('search-results-tbody');
+      tbody.innerHTML = '';
+          
+          data.data.forEach(instrument => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+              <td>${instrument.tradingsymbol}</td>
+              <td class="mono">${instrument.instrument_token}</td>
+              <td>${instrument.exchange}</td>
+              <td>
+                <button class="btn btn-sm" onclick="testInstrument(${instrument.instrument_token}, '${apiKey}')">Test</button>
+              </td>
+            `;
+            tbody.appendChild(row);
+          });
+        } else {
+          showToast('No instruments found', 'warn');
+        }
+      } catch (error) {
+        showToast(`Search failed: ${error.message}`, 'error');
+      }
+    });
+
+    function testInstrument(token, apiKey) {
+      // Add to WebSocket test if connected
+      if (socket && wsConnected) {
+        socket.emit('subscribe_instruments', { 
+          instruments: [token], 
+          mode: document.getElementById('ws-mode').value 
+        });
+        log('ws-logs', `Added instrument ${token} to subscription`, 'info');
+      }
+      
+      // Also test via REST
+      fetch('/api/stock/quotes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey
+        },
+        body: JSON.stringify({ instruments: [token] })
+      })
+      .then(response => response.json())
+      .then(data => {
+        log('rest-logs', `Test quote for ${token}: ${JSON.stringify(data, null, 2)}`, 'info');
+      })
+      .catch(error => {
+        log('rest-logs', `Test quote failed for ${token}: ${error.message}`, 'error');
+      });
+    }
+
+    // Log controls
+    document.getElementById('clear-logs-btn').addEventListener('click', () => {
+      document.getElementById('real-time-logs').innerHTML = '';
+    });
+
+    document.getElementById('pause-logs-btn').addEventListener('click', () => {
+      logPaused = !logPaused;
+      const btn = document.getElementById('pause-logs-btn');
+      btn.textContent = logPaused ? 'Resume' : 'Pause';
+      btn.className = logPaused ? 'btn btn-sm btn-success' : 'btn btn-sm btn-secondary';
+    });
+
+    // API Key management
+    document.getElementById('create-api-key-btn').addEventListener('click', async () => {
+      const key = document.getElementById('new-api-key').value;
+      const tenant = document.getElementById('new-tenant-id').value;
+      const rateLimit = document.getElementById('rate-limit').value;
+      const adminToken = document.getElementById('admin-token').value;
+      
+      if (!key || !tenant || !adminToken) {
+        showToast('Please fill all required fields', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/admin/apikeys', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-token': adminToken
+          },
+          body: JSON.stringify({
+            key,
+            tenant_id: tenant,
+            rate_limit_per_minute: parseInt(rateLimit)
+          })
+        });
+        
+        if (response.ok) {
+          showToast('API key created successfully', 'success');
+          document.getElementById('new-api-key').value = '';
+          document.getElementById('new-tenant-id').value = '';
+          document.getElementById('list-api-keys-btn').click();
+        } else {
+          showToast('Failed to create API key', 'error');
+        }
+      } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+      }
+    });
+
+    // List API keys
+    document.getElementById('list-api-keys-btn').addEventListener('click', async () => {
+      const adminToken = document.getElementById('admin-token').value;
+      
+      if (!adminToken) {
+        showToast('Please enter admin token', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/admin/apikeys', {
+          headers: {
+            'x-admin-token': adminToken
+          }
+        });
+        
+        const data = await response.json();
+        const tbody = document.getElementById('api-keys-tbody');
+        tbody.innerHTML = '';
+        
+        data.forEach(key => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td class="mono">${key.key}</td>
+            <td>${key.tenant_id}</td>
+            <td>${key.is_active ? '✅' : '❌'}</td>
+            <td>${key.rate_limit_per_minute}</td>
+            <td>
+              <button class="btn btn-sm btn-warning" onclick="toggleApiKey('${key.key}', ${!key.is_active})">
+                ${key.is_active ? 'Deactivate' : 'Activate'}
+              </button>
+            </td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+      }
+    });
+
+    // Authentication wizards
+    let kiteAuthStep = 1;
+    let vortexAuthStep = 1;
+
+    // Kite Authentication
+    document.getElementById('kite-login-btn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('/api/auth/kite/login');
+        const data = await response.json();
+        
+        // Open popup window
+        const kiteAuthWindow = window.open(data.url, 'kiteAuth', 'width=600,height=700');
+        
+        // Update wizard step
+        updateKiteWizardStep(2);
+        
+        // Monitor popup for completion
+        const checkClosed = setInterval(() => {
+          if (kiteAuthWindow.closed) {
+            clearInterval(checkClosed);
+            checkKiteAuthStatus();
+          }
+        }, 1000);
+        
+      } catch (error) {
+        showToast(`Kite login failed: ${error.message}`, 'error');
+      }
+    });
+
+    // Vortex Authentication
+    document.getElementById('vortex-login-btn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('/api/auth/vortex/login');
+        const data = await response.json();
+        
+        // Open popup window
+        const vortexAuthWindow = window.open(data.url, 'vortexAuth', 'width=600,height=700');
+        
+        // Update wizard step
+        updateVortexWizardStep(2);
+        
+        // Show auth code input
+        showVortexAuthCodeInput();
+        
+      } catch (error) {
+        showToast(`Vortex login failed: ${error.message}`, 'error');
+      }
+    });
+
+    // Test connections
+    document.getElementById('kite-test-btn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        
+        if (data.services?.kiteConnect === 'connected') {
+          showToast('Kite connection test successful!', 'success');
+        } else {
+          showToast('Kite connection test failed', 'error');
+        }
+      } catch (error) {
+        showToast(`Test failed: ${error.message}`, 'error');
+      }
+    });
+
+    document.getElementById('vortex-test-http').addEventListener('click', async () => {
+      try {
+        const response = await fetch('/api/health/market-data');
+        const data = await response.json();
+        
+        if (data.vortex?.httpOk) {
+          showToast('Vortex HTTP API test successful!', 'success');
+        } else {
+          showToast('Vortex HTTP API test failed', 'error');
+        }
+      } catch (error) {
+        showToast(`Test failed: ${error.message}`, 'error');
+      }
+    });
+
+    // Helper functions
+    function updateKiteWizardStep(step) {
+      kiteAuthStep = step;
+      for (let i = 1; i <= 3; i++) {
+        const stepEl = document.getElementById(`kite-step-${i}`);
+        stepEl.classList.remove('active', 'completed');
+        if (i < step) {
+          stepEl.classList.add('completed');
+        } else if (i === step) {
+          stepEl.classList.add('active');
+        }
+      }
+    }
+
+    function updateVortexWizardStep(step) {
+      vortexAuthStep = step;
+      for (let i = 1; i <= 3; i++) {
+        const stepEl = document.getElementById(`vortex-step-${i}`);
+        stepEl.classList.remove('active', 'completed');
+        if (i < step) {
+          stepEl.classList.add('completed');
+        } else if (i === step) {
+          stepEl.classList.add('active');
+        }
+      }
+    }
+
+    function showVortexAuthCodeInput() {
+      const content = document.getElementById('vortex-wizard-content');
+      content.innerHTML = `
+        <div class="form-group">
+          <label class="form-label">Auth Code from Vortex</label>
+          <input type="text" class="form-input" id="vortex-auth-code" placeholder="Paste auth code here" />
+          <div class="card-subtitle">Copy the auth parameter from the callback URL</div>
+        </div>
+        <button class="btn" id="vortex-auth-submit-btn">Complete Authentication</button>
+      `;
+      
+      // Add event listener for auth code submission
+      document.getElementById('vortex-auth-submit-btn').addEventListener('click', async () => {
+        const authCode = document.getElementById('vortex-auth-code').value;
+        
+        if (!authCode) {
+          showToast('Please enter auth code', 'warn');
+          return;
+        }
+        
+        try {
+          const response = await fetch(`/api/auth/vortex/callback?auth=${encodeURIComponent(authCode)}`);
+          const data = await response.json();
+          
+          if (data.success) {
+            updateVortexWizardStep(3);
+            showToast('Vortex authentication successful!', 'success');
+          } else {
+            showToast('Vortex authentication failed', 'error');
+          }
+        } catch (error) {
+          showToast(`Vortex auth failed: ${error.message}`, 'error');
+        }
+      });
+    }
+
+    async function checkKiteAuthStatus() {
+      try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        
+        if (data.services?.kiteConnect === 'connected') {
+          updateKiteWizardStep(3);
+          document.getElementById('kite-wizard-actions').style.display = 'block';
+          showToast('Kite authentication successful!', 'success');
+        }
+      } catch (error) {
+        console.error('Error checking Kite auth status:', error);
+      }
+    }
+
+    // Provider management
+    document.getElementById('set-provider-btn').addEventListener('click', async () => {
+      const provider = document.getElementById('global-provider').value;
+      const adminToken = document.getElementById('admin-token').value;
+      
+      if (!adminToken) {
+        showToast('Please enter admin token', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/admin/provider/global', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-token': adminToken
+          },
+          body: JSON.stringify({ provider })
+        });
+        
+        if (response.ok) {
+          showToast(`Global provider set to ${provider}`, 'success');
+          refreshStatus();
+        } else {
+          showToast('Failed to set provider', 'error');
+        }
+      } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+      }
+    });
+
+    document.getElementById('start-stream-btn').addEventListener('click', async () => {
+      const adminToken = document.getElementById('admin-token').value;
+      
+      if (!adminToken) {
+        showToast('Please enter admin token', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/admin/provider/stream/start', {
+          method: 'POST',
+          headers: {
+            'x-admin-token': adminToken
+          }
+        });
+        
+        if (response.ok) {
+          showToast('Stream started successfully', 'success');
+          refreshStatus();
+        } else {
+          showToast('Failed to start stream', 'error');
+        }
+      } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+      }
+    });
+
+    document.getElementById('stop-stream-btn').addEventListener('click', async () => {
+      const adminToken = document.getElementById('admin-token').value;
+      
+      if (!adminToken) {
+        showToast('Please enter admin token', 'warn');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/admin/provider/stream/stop', {
+          method: 'POST',
+          headers: {
+            'x-admin-token': adminToken
+          }
+        });
+        
+        if (response.ok) {
+          showToast('Stream stopped successfully', 'success');
+          refreshStatus();
+        } else {
+          showToast('Failed to stop stream', 'error');
+        }
+      } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+      }
+    });
+
+    // Utility functions
+    function toggleApiKey(key, activate) {
+      console.log(`Toggle API key ${key} to ${activate ? 'active' : 'inactive'}`);
+    }
+
+    // Initialize dashboard
+    refreshStatus();
+    updateCharts();
+    loadSessions();
+
+    // Auto-refresh every 5 seconds
+    setInterval(() => {
+      if (!logPaused) {
+        refreshStatus();
+      }
+    }, 5000);
+
+    // Auto-refresh charts every 30 seconds
+    setInterval(updateCharts, 30000);
+
   </script>
 </body>
 </html>

@@ -28,6 +28,10 @@ export class ApiKey {
   @Column({ type: 'json', nullable: true })
   metadata: any;
 
+  // Optional provider override for this API key. When null, resolution falls back to global/env.
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  provider?: 'kite' | 'vortex' | null;
+
   @CreateDateColumn()
   created_at: Date;
 

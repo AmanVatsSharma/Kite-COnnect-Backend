@@ -13,7 +13,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { StockService } from './stock.service';
-import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiResponse, ApiSecurity } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiResponse, ApiSecurity, ApiHeader } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { ApiKeyGuard } from '../../guards/api-key.guard';
 
@@ -25,11 +25,19 @@ export class StockController {
   constructor(private readonly stockService: StockService) {}
 
   @Post('instruments/sync')
-  @ApiOperation({ summary: 'Sync instruments from Kite Connect' })
+  @ApiOperation({ summary: 'Sync instruments from selected provider (supports ?provider and Vortex CSV)' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
-  async syncInstruments(@Query('exchange') exchange?: string) {
+  @ApiQuery({ name: 'provider', required: false, example: 'kite', description: 'Provider to sync: kite|vortex (overrides global for this call)' })
+  @ApiQuery({ name: 'csv_url', required: false, description: 'When provider=vortex, optional CSV URL to import instruments' })
+  async syncInstruments(@Query('exchange') exchange?: string, @Query('provider') provider?: 'kite' | 'vortex', @Query('csv_url') csvUrl?: string, @Request() req?: any) {
     try {
-      const result = await this.stockService.syncInstruments(exchange);
+      const result = await this.stockService.syncInstruments(exchange, {
+        provider,
+        csv_url: csvUrl,
+        headers: req?.headers,
+        apiKey: req?.headers?.['x-api-key'] || req?.query?.['api_key'],
+      });
       return {
         success: true,
         message: 'Instruments synced successfully',
@@ -207,10 +215,12 @@ export class StockController {
   }
 
   @Post('quotes')
-  @ApiOperation({ summary: 'Get quotes for instruments' })
+  @ApiOperation({ summary: 'Get quotes for instruments with mode selection (ltp|ohlc|full)' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
+  @ApiQuery({ name: 'mode', required: false, example: 'full', description: 'ltp | ohlc | full (default: full)' })
   @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
   @ApiResponse({ status: 200, description: 'Quote data response' })
-  async getQuotes(@Body() body: { instruments: number[] }) {
+  async getQuotes(@Body() body: { instruments: number[] }, @Request() req: any, @Query('mode') mode?: 'ltp' | 'ohlc' | 'full') {
     try {
       const { instruments } = body;
       if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
@@ -232,12 +242,20 @@ export class StockController {
           HttpStatus.BAD_REQUEST,
         );
       }
-
-      const quotes = await this.stockService.getQuotes(instruments);
+      const modeNorm = (mode || 'full').toLowerCase();
+      let quotes: any;
+      if (modeNorm === 'ltp') {
+        quotes = await this.stockService.getLTP(instruments, req.headers, req.headers?.['x-api-key'] || req.query?.['api_key']);
+      } else if (modeNorm === 'ohlc') {
+        quotes = await this.stockService.getOHLC(instruments, req.headers, req.headers?.['x-api-key'] || req.query?.['api_key']);
+      } else {
+        quotes = await this.stockService.getQuotes(instruments, req.headers, req.headers?.['x-api-key'] || req.query?.['api_key']);
+      }
       return {
         success: true,
         data: quotes,
         timestamp: new Date().toISOString(),
+        mode: modeNorm,
       };
     } catch (error) {
       if (error instanceof HttpException) {
@@ -309,8 +327,9 @@ export class StockController {
 
   @Post('ltp')
   @ApiOperation({ summary: 'Get LTP for instruments' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
   @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
-  async getLTP(@Body() body: { instruments: number[] }) {
+  async getLTP(@Body() body: { instruments: number[] }, @Request() req: any) {
     try {
       const { instruments } = body;
       if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
@@ -333,7 +352,7 @@ export class StockController {
         );
       }
 
-      const ltp = await this.stockService.getLTP(instruments);
+      const ltp = await this.stockService.getLTP(instruments, req.headers, req.headers?.['x-api-key'] || req.query?.['api_key']);
       return {
         success: true,
         data: ltp,
@@ -356,8 +375,9 @@ export class StockController {
 
   @Post('ohlc')
   @ApiOperation({ summary: 'Get OHLC for instruments' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
   @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
-  async getOHLC(@Body() body: { instruments: number[] }) {
+  async getOHLC(@Body() body: { instruments: number[] }, @Request() req: any) {
     try {
       const { instruments } = body;
       if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
@@ -380,7 +400,7 @@ export class StockController {
         );
       }
 
-      const ohlc = await this.stockService.getOHLC(instruments);
+      const ohlc = await this.stockService.getOHLC(instruments, req.headers, req.headers?.['x-api-key'] || req.query?.['api_key']);
       return {
         success: true,
         data: ohlc,
@@ -403,6 +423,7 @@ export class StockController {
 
   @Get('historical/:token')
   @ApiOperation({ summary: 'Get historical data for an instrument' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
   @ApiQuery({ name: 'from', required: true, example: '2024-01-01' })
   @ApiQuery({ name: 'to', required: true, example: '2024-01-31' })
   @ApiQuery({ name: 'interval', required: false, example: 'day' })
@@ -411,6 +432,7 @@ export class StockController {
     @Query('from') fromDate: string,
     @Query('to') toDate: string,
     @Query('interval') interval: string = 'day',
+    @Request() req?: any,
   ) {
     try {
       const instrumentToken = parseInt(token);
@@ -439,6 +461,8 @@ export class StockController {
         fromDate,
         toDate,
         interval,
+        req?.headers,
+        req?.headers?.['x-api-key'] || req?.query?.['api_key'],
       );
 
       return {

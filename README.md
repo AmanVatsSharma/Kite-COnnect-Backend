@@ -1,20 +1,21 @@
-# Trading App Backend - Kite Connect Integration
+# Trading App Backend - Pluggable Providers (Kite + Vortex)
 
-A comprehensive enterprise-grade trading application backend built with NestJS, featuring real-time market data streaming, WebSocket support, Redis caching, and efficient request batching for Kite Connect API integration.
+A comprehensive enterprise-grade trading application backend built with NestJS, featuring real-time market data streaming, WebSocket support, Redis caching, and efficient request batching. The system now supports pluggable market data providers: Kite and Vortex.
 
 ## 🚀 Features
 
-- **Real-time Market Data Streaming**: Live market data from Kite Connect with WebSocket support
+- **Real-time Market Data Streaming**: Live market data via provider abstraction (Kite today; Vortex skeleton with no-op stream if unconfigured)
 - **Instrument Management**: Complete CRUD operations for trading instruments
-- **Request Batching**: Intelligent batching system to optimize API calls to Kite Connect
+- **Request Batching**: Intelligent batching system to optimize API calls to the active provider
 - **Redis Caching**: High-performance caching for market data and quotes
 - **WebSocket Gateway**: Real-time data streaming to connected clients
-- **Historical Data**: Fetch and store historical market data
+- **Historical Data**: Fetch and store historical market data from the active provider
 - **Subscription Management**: User-based instrument subscriptions
 - **Health Monitoring**: Comprehensive health checks and system statistics
 - **Enterprise Security**: JWT authentication, CORS, and security middleware
 - **Database Integration**: TypeORM with Postgres for data persistence
 - **Scheduled Tasks**: Automated instrument sync and data cleanup
+- **Pluggable Providers**: `DATA_PROVIDER=kite|vortex` (HTTP can override via `x-provider`; WS uses a global override set by admin)
 
 ## 🏗️ Architecture
 
@@ -25,11 +26,11 @@ A comprehensive enterprise-grade trading application backend built with NestJS, 
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │  Stock Service  │
-                    └─────────────────┘
-                                 │
+                                │
+                   ┌─────────────────┐
+                   │  Stock Service  │
+                   └─────────────────┘
+                                │
          ┌───────────────────────┼───────────────────────┐
          │                       │                       │
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -43,7 +44,8 @@ A comprehensive enterprise-grade trading application backend built with NestJS, 
 - Node.js (v16 or higher)
 - Postgres (v15 or higher)
 - Redis (v6.0 or higher)
-- Kite Connect API credentials
+- Kite Connect API credentials (for live Kite usage)
+- Optional Vortex API credentials and/or CSV URL for instruments
 
 ## 🛠️ Installation
 
@@ -77,10 +79,19 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=
 
+# Provider Selection
+DATA_PROVIDER=kite
+
 # Kite Connect Configuration
 KITE_API_KEY=your_kite_api_key
 KITE_API_SECRET=your_kite_api_secret
 KITE_ACCESS_TOKEN=your_kite_access_token
+
+# Vortex Configuration (optional)
+VORTEX_API_KEY=
+VORTEX_SECRET=
+VORTEX_STREAM_URL=
+VORTEX_INSTRUMENTS_CSV_URL=
 
 # JWT Configuration
 JWT_SECRET=your_jwt_secret_key
@@ -111,7 +122,9 @@ npm run start:prod
 ### REST API Endpoints
 
 #### Instruments
-- `POST /api/stock/instruments/sync` - Sync instruments from Kite Connect
+- `POST /api/stock/instruments/sync` - Sync instruments from selected provider
+  - Query: `?exchange=NSE&provider=kite|vortex&csv_url=http(s)://...`
+  - Header (optional): `x-provider: kite|vortex` (HTTP-only)
 - `GET /api/stock/instruments` - Get all instruments with filters
 - `GET /api/stock/instruments/search?q=query` - Search instruments
 - `GET /api/stock/instruments/:token` - Get specific instrument
@@ -135,7 +148,7 @@ npm run start:prod
 
 ### WebSocket Events
 
-Connect to: `ws://localhost:3000/market-data`
+Connect to: `ws://localhost:3000/market-data` (provider is global; set via admin endpoint)
 
 #### Client Events
 - `subscribe_instruments` - Subscribe to instruments
@@ -154,7 +167,7 @@ Connect to: `ws://localhost:3000/market-data`
 ## 🔧 Configuration
 
 ### Request Batching
-The system includes intelligent request batching to optimize Kite Connect API calls:
+The system includes intelligent request batching to optimize provider API calls:
 - **Batch Window**: 100ms (configurable)
 - **Max Batch Size**: 50 instruments per batch
 - **Automatic Chunking**: Large requests are automatically split
@@ -165,20 +178,26 @@ The system includes intelligent request batching to optimize Kite Connect API ca
 - **Instruments**: No expiration (until sync)
 
 ### Scheduled Tasks
-- **Daily Instrument Sync**: 6:00 AM
+- **Daily Instrument Sync**: 6:00 AM (uses current HTTP resolution if invoked by HTTP; default provider otherwise)
 - **Data Cleanup**: 2:00 AM
 
 ## 🚀 Usage Examples
 
-### 1. Sync Instruments
+### 1. Sync Instruments (Kite)
 ```bash
-curl -X POST "http://localhost:3000/api/stock/instruments/sync"
+curl -X POST "http://localhost:3000/api/stock/instruments/sync?provider=kite"
+```
+
+### 1b. Sync Instruments (Vortex CSV)
+```bash
+curl -X POST "http://localhost:3000/api/stock/instruments/sync?provider=vortex&csv_url=https://example.com/instruments.csv"
 ```
 
 ### 2. Get Quotes
 ```bash
 curl -X POST "http://localhost:3000/api/stock/quotes" \
   -H "Content-Type: application/json" \
+  -H "x-provider: kite" \
   -d '{"instruments": [738561, 5633]}'
 ```
 
@@ -300,6 +319,7 @@ For support and questions:
 
 ## 🔮 Future Enhancements
 
+- [ ] Vortex SDK/HTTP/WebSocket integration (replace stubs/no-op)
 - [ ] Advanced charting data endpoints
 - [ ] Portfolio management features
 - [ ] Order management integration

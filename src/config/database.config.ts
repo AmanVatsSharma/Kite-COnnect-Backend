@@ -5,6 +5,8 @@ import { MarketData } from '../entities/market-data.entity';
 import { Subscription } from '../entities/subscription.entity';
 import { KiteSession } from '../entities/kite-session.entity';
 import { ApiKey } from '../entities/api-key.entity';
+import { InstrumentMapping } from '../entities/instrument-mapping.entity';
+import { VortexSession } from '../entities/vortex-session.entity';
 
 export const getDatabaseConfig = (configService: ConfigService): TypeOrmModuleOptions => ({
   type: 'postgres',
@@ -13,7 +15,7 @@ export const getDatabaseConfig = (configService: ConfigService): TypeOrmModuleOp
   username: configService.get('DB_USERNAME', 'trading_user'),
   password: configService.get('DB_PASSWORD', 'trading_password'),
   database: configService.get('DB_DATABASE', 'trading_app'),
-  entities: [Instrument, MarketData, Subscription, KiteSession, ApiKey],
+  entities: [Instrument, MarketData, Subscription, KiteSession, ApiKey, InstrumentMapping, VortexSession],
   synchronize: configService.get('NODE_ENV') === 'development',
   logging: configService.get('NODE_ENV') === 'development',
   migrations: ['dist/migrations/*.js'],

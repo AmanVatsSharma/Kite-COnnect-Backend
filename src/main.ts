@@ -59,7 +59,7 @@ async function bootstrap() {
     // Swagger setup
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Trading Data Provider API')
-      .setDescription('Kite-backed market data provider for NSE/MCX')
+      .setDescription('Pluggable providers: Kite and Vortex. Use optional x-provider header for HTTP; WS uses a global provider set by admin endpoint.')
       .setVersion('1.0.0')
       .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'apiKey')
       .addApiKey({ type: 'apiKey', name: 'x-admin-token', in: 'header' }, 'admin')
@@ -76,7 +76,7 @@ async function bootstrap() {
     logger.log(`📘 Swagger docs at http://localhost:${port}/api/docs`);
     logger.log(`📈 WebSocket available at ws://localhost:${port}/market-data`);
     if (!kiteApiKey || !kiteAccessToken) {
-      logger.log('🟡 Kite is disconnected. Visit http://localhost:' + port + '/api/api/auth/kite/login to start OAuth');
+      logger.log('🟡 Kite is disconnected. Visit http://localhost:' + port + '/api/auth/kite/login to start OAuth');
     }
   } catch (error) {
     logger.error('❌ Failed to start application', error);
