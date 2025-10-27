@@ -138,155 +138,160 @@ export class VortexAuthController {
   @ApiOkResponse({ description: 'Session created', schema: { type: 'object', properties: { success: { type: 'boolean', example: true } }, example: { success: true } } })
   @ApiBadRequestResponse({ description: 'Exchange failed or misconfigured', schema: { type: 'object', properties: { statusCode: { type: 'number', example: 400 }, message: { type: 'string', example: 'Vayu session creation failed: ...' }, error: { type: 'string', example: 'Bad Request' } } } })
   async callback(@Query('auth') auth: string) {
-    this.logger.log(`[Vayu] Callback received with auth parameter: ${auth ? 'present' : 'missing'}`);
-    
-    const appId = this.configService.get<string>('VORTEX_APP_ID');
-    const apiKey = this.configService.get<string>('VORTEX_API_KEY');
-    const baseUrl = (this.configService.get<string>('VORTEX_BASE_URL') || 'https://vortex-api.rupeezy.in/v2').replace(/\/$/, '');
-    const createSessionUrl = `${baseUrl}/user/session`;
-    
-    this.logger.log(`[Vayu] Configuration: appId=${appId ? 'present' : 'missing'}, apiKey=${apiKey ? 'present' : 'missing'}, baseUrl=${baseUrl}`);
-    
-    if (!appId || !apiKey) {
-      throw new BadRequestException('Vayu envs missing: VORTEX_APP_ID, VORTEX_API_KEY');
-    }
-    if (!auth) throw new BadRequestException('Missing auth parameter');
-
-    // checksum = sha256(appId + auth + apiKey) hex-lowercase
-    const crypto = await import('crypto');
-    const checksum = crypto.createHash('sha256').update(`${appId}${auth}${apiKey}`).digest('hex');
-    this.logger.log(`[Vayu] Generated checksum for session creation`);
-
-    let sessionResp: any;
     try {
-      this.logger.log(`[Vayu] Creating session at ${createSessionUrl.replace(apiKey, '***')}`);
-      sessionResp = await axios.post(createSessionUrl, {
-        checksum,
-        applicationId: appId,
-        token: auth,
-      }, {
-        headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        timeout: 10000,
-      });
-      this.logger.log(`[Vayu] Session creation successful, received response`);
+      this.logger.log(`[Vayu] Callback received with auth parameter: ${auth ? 'present' : 'missing'}`);
       
-      // Log full response for debugging
-      this.logger.log(`[Vayu] Response structure: ${JSON.stringify({ 
-        status: sessionResp?.data?.status,
-        hasData: !!sessionResp?.data?.data,
-        hasAccessToken: !!sessionResp?.data?.data?.access_token 
-      })}`);
+      const appId = this.configService.get<string>('VORTEX_APP_ID');
+      const apiKey = this.configService.get<string>('VORTEX_API_KEY');
+      const baseUrl = (this.configService.get<string>('VORTEX_BASE_URL') || 'https://vortex-api.rupeezy.in/v2').replace(/\/$/, '');
+      const createSessionUrl = `${baseUrl}/user/session`;
       
-    } catch (e: any) {
-      const status = e?.response?.status;
-      const body = e?.response?.data;
-      const sanitizedUrl = createSessionUrl.replace(apiKey, '***');
-      const msg = body || e?.message || 'unknown error';
-      this.logger.error(`[Vayu] Session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'})`);
-      throw new BadRequestException(`Vayu session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'} url=${sanitizedUrl})`);
-    }
-
-    // Check if response indicates success
-    if (sessionResp?.data?.status !== 'success') {
-      this.logger.error(`[Vayu] Session creation returned non-success status: ${JSON.stringify(sessionResp?.data)}`);
-      throw new BadRequestException(`Vayu session creation failed: ${JSON.stringify(sessionResp?.data)}`);
-    }
-
-    const data = sessionResp?.data?.data || {};
-    const accessToken: string | undefined = data?.access_token;
-    
-    // Additional debug logging
-    if (!accessToken) {
-      this.logger.error(`[Vayu] Response data structure: ${JSON.stringify(sessionResp?.data)}`);
-      throw new BadRequestException(`Vayu session did not return access_token. Response: ${JSON.stringify(sessionResp?.data)}`);
-    }
-    
-    this.logger.log(`[Vayu] Access token extracted, length: ${accessToken.length}`);
-
-    // Determine TTL from JWT exp if present
-    let ttl = 24 * 3600; // fallback 24h
-    try {
-      const parts = accessToken.split('.');
-      if (parts.length >= 2) {
-        const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
-        if (payload?.exp) {
-          const nowSec = Math.floor(Date.now() / 1000);
-          const remain = Math.max(60, payload.exp - nowSec);
-          ttl = remain;
-          this.logger.log(`[Vortex] JWT TTL calculated: ${remain}s (expires at ${new Date(payload.exp * 1000).toISOString()})`);
-        }
+      this.logger.log(`[Vayu] Configuration: appId=${appId ? 'present' : 'missing'}, apiKey=${apiKey ? 'present' : 'missing'}, baseUrl=${baseUrl}`);
+      
+      if (!appId || !apiKey) {
+        throw new BadRequestException('Vayu envs missing: VORTEX_APP_ID, VORTEX_API_KEY');
       }
-    } catch (e) {
-      this.logger.warn(`[Vortex] Failed to parse JWT TTL, using fallback: ${ttl}s`);
-    }
+      if (!auth) throw new BadRequestException('Missing auth parameter');
 
-    // Persist session in DB; deactivate previous
-    this.logger.log(`[Vortex] Deactivating previous sessions and saving new session`);
-    await this.vortexSessionRepo.createQueryBuilder()
-      .update(VortexSession)
-      .set({ is_active: false })
-      .where('is_active = :active', { active: true })
-      .execute();
-    const expiresAt = ((): Date | null => {
+      // checksum = sha256(appId + auth + apiKey) hex-lowercase
+      const crypto = await import('crypto');
+      const checksum = crypto.createHash('sha256').update(`${appId}${auth}${apiKey}`).digest('hex');
+      this.logger.log(`[Vayu] Generated checksum for session creation`);
+
+      let sessionResp: any;
+      try {
+        this.logger.log(`[Vayu] Creating session at ${createSessionUrl.replace(apiKey, '***')}`);
+        sessionResp = await axios.post(createSessionUrl, {
+          checksum,
+          applicationId: appId,
+          token: auth,
+        }, {
+          headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          timeout: 10000,
+        });
+        this.logger.log(`[Vayu] Session creation successful, received response`);
+        
+        // Log full response for debugging
+        this.logger.log(`[Vayu] Response structure: ${JSON.stringify({ 
+          status: sessionResp?.data?.status,
+          hasData: !!sessionResp?.data?.data,
+          hasAccessToken: !!sessionResp?.data?.data?.access_token 
+        })}`);
+        
+      } catch (e: any) {
+        const status = e?.response?.status;
+        const body = e?.response?.data;
+        const sanitizedUrl = createSessionUrl.replace(apiKey, '***');
+        const msg = body || e?.message || 'unknown error';
+        this.logger.error(`[Vayu] Session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'})`);
+        throw new BadRequestException(`Vayu session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'} url=${sanitizedUrl})`);
+      }
+
+      // Check if response indicates success
+      if (sessionResp?.data?.status !== 'success') {
+        this.logger.error(`[Vayu] Session creation returned non-success status: ${JSON.stringify(sessionResp?.data)}`);
+        throw new BadRequestException(`Vayu session creation failed: ${JSON.stringify(sessionResp?.data)}`);
+      }
+
+      const data = sessionResp?.data?.data || {};
+      const accessToken: string | undefined = data?.access_token;
+      
+      // Additional debug logging
+      if (!accessToken) {
+        this.logger.error(`[Vayu] Response data structure: ${JSON.stringify(sessionResp?.data)}`);
+        throw new BadRequestException(`Vayu session did not return access_token. Response: ${JSON.stringify(sessionResp?.data)}`);
+      }
+      
+      this.logger.log(`[Vayu] Access token extracted, length: ${accessToken.length}`);
+
+      // Determine TTL from JWT exp if present
+      let ttl = 24 * 3600; // fallback 24h
       try {
         const parts = accessToken.split('.');
         if (parts.length >= 2) {
           const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
-          if (payload?.exp) return new Date(payload.exp * 1000);
+          if (payload?.exp) {
+            const nowSec = Math.floor(Date.now() / 1000);
+            const remain = Math.max(60, payload.exp - nowSec);
+            ttl = remain;
+            this.logger.log(`[Vayu] JWT TTL calculated: ${remain}s (expires at ${new Date(payload.exp * 1000).toISOString()})`);
+          }
         }
-      } catch {}
-      return null;
-    })();
-    const entity = this.vortexSessionRepo.create({ access_token: accessToken, is_active: true, expires_at: expiresAt, metadata: data });
-    await this.vortexSessionRepo.save(entity);
-    this.logger.log(`[Vortex] Session saved to database with ID: ${entity.id}`);
-
-    // Cache token in Redis for cross-process readers with JWT-derived TTL
-    try {
-      if (this.redisService.isRedisAvailable?.()) {
-        await this.redisService.set('vortex:access_token', accessToken, ttl);
-        this.logger.log(`[Vortex] Token cached in Redis with TTL: ${ttl}s`);
-      } else {
-        this.logger.warn(`[Vortex] Redis not available, skipping token cache`);
+      } catch (e) {
+        this.logger.warn(`[Vayu] Failed to parse JWT TTL, using fallback: ${ttl}s`);
       }
-    } catch (e) {
-      this.logger.error(`[Vortex] Failed to cache token in Redis`, e as any);
-    }
 
-    // Update in-memory provider to pick latest token
-    try {
-      if (typeof (this.vortexProvider as any).updateAccessToken === 'function') {
-        await (this.vortexProvider as any).updateAccessToken(accessToken);
-        this.logger.log('[Vortex] Updated access token in provider');
-      }
-    } catch (e) {
-      this.logger.error('[Vortex] Failed to update access token in provider', e as any);
-    }
+      // Persist session in DB; deactivate previous
+      this.logger.log(`[Vayu] Deactivating previous sessions and saving new session`);
+      await this.vortexSessionRepo.createQueryBuilder()
+        .update(VortexSession)
+        .set({ is_active: false })
+        .where('is_active = :active', { active: true })
+        .execute();
+      const expiresAt = ((): Date | null => {
+        try {
+          const parts = accessToken.split('.');
+          if (parts.length >= 2) {
+            const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+            if (payload?.exp) return new Date(payload.exp * 1000);
+          }
+        } catch {}
+        return null;
+      })();
+      const entity = this.vortexSessionRepo.create({ access_token: accessToken, is_active: true, expires_at: expiresAt, metadata: data });
+      await this.vortexSessionRepo.save(entity);
+      this.logger.log(`[Vayu] Session saved to database with ID: ${entity.id}`);
 
-    // Auto-set global provider to vortex after successful login
-    try {
-      await this.resolver.setGlobalProviderName('vortex');
-      this.logger.log('[Vortex] Auto-set global provider to vortex');
-    } catch (e) {
-      this.logger.error('[Vortex] Failed to set global provider', e as any);
-    }
-
-    // Auto-start streaming if not already active
-    try {
-      const status = await this.streamService.getStreamingStatus();
-      if (!status?.isStreaming) {
-        await this.streamService.startStreaming();
-        this.logger.log('[Vortex] Auto-started streaming after successful login');
-      } else {
-        this.logger.log('[Vortex] Streaming already active, reconnecting with new token');
-        if (typeof (this.streamService as any).reconnectIfStreaming === 'function') {
-          await (this.streamService as any).reconnectIfStreaming();
+      // Cache token in Redis for cross-process readers with JWT-derived TTL
+      try {
+        if (this.redisService.isRedisAvailable?.()) {
+          await this.redisService.set('vortex:access_token', accessToken, ttl);
+          this.logger.log(`[Vayu] Token cached in Redis with TTL: ${ttl}s`);
+        } else {
+          this.logger.warn(`[Vayu] Redis not available, skipping token cache`);
         }
+      } catch (e) {
+        this.logger.error(`[Vayu] Failed to cache token in Redis`, e as any);
       }
-    } catch (e) {
-      this.logger.error('[Vortex] Failed to start/reconnect streaming', e as any);
-    }
 
-    return { success: true } as any;
+      // Update in-memory provider to pick latest token
+      try {
+        if (typeof (this.vortexProvider as any).updateAccessToken === 'function') {
+          await (this.vortexProvider as any).updateAccessToken(accessToken);
+          this.logger.log('[Vayu] Updated access token in provider');
+        }
+      } catch (e) {
+        this.logger.error('[Vayu] Failed to update access token in provider', e as any);
+      }
+
+      // Auto-set global provider to vortex after successful login
+      try {
+        await this.resolver.setGlobalProviderName('vortex');
+        this.logger.log('[Vayu] Auto-set global provider to vortex');
+      } catch (e) {
+        this.logger.error('[Vayu] Failed to set global provider', e as any);
+      }
+
+      // Auto-start streaming if not already active
+      try {
+        const status = await this.streamService.getStreamingStatus();
+        if (!status?.isStreaming) {
+          await this.streamService.startStreaming();
+          this.logger.log('[Vayu] Auto-started streaming after successful login');
+        } else {
+          this.logger.log('[Vayu] Streaming already active, reconnecting with new token');
+          if (typeof (this.streamService as any).reconnectIfStreaming === 'function') {
+            await (this.streamService as any).reconnectIfStreaming();
+          }
+        }
+      } catch (e) {
+        this.logger.error('[Vayu] Failed to start/reconnect streaming', e as any);
+      }
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error(`[Vayu] Callback error: ${error.message}`, error.stack);
+      throw new BadRequestException(`Vayu callback failed: ${error.message}`);
+    }
   }
 }
