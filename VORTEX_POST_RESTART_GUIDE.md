@@ -259,3 +259,4 @@ Monitor these log messages:
 | Check Debug | `curl -X GET "http://localhost:3000/api/admin/debug/vortex" -H "x-admin-token: $ADMIN_TOKEN"` |
 
 
+

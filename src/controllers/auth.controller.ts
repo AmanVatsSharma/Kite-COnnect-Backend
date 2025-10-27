@@ -17,7 +17,7 @@ import { MarketDataProviderResolverService } from '../services/market-data-provi
 // Fallback in-memory store for OAuth state when Redis is unavailable
 const kiteStateMemory = new Map<string, number>(); // state -> createdAt (ms)
 
-@Controller('auth/kite')
+@Controller('auth/falcon')
 @ApiTags('auth')
 export class AuthController {
   constructor(
@@ -28,12 +28,12 @@ export class AuthController {
   ) {}
 
   @Get('login')
-  @ApiOperation({ summary: 'Get Kite login URL with CSRF state' })
-  @ApiResponse({ status: 200, description: 'Kite login URL', schema: { properties: { url: { type: 'string', example: 'https://kite.trade/connect/login?...' }, state: { type: 'string' } } } })
+  @ApiOperation({ summary: 'Get Falcon login URL with CSRF state' })
+  @ApiResponse({ status: 200, description: 'Falcon login URL', schema: { properties: { url: { type: 'string', example: 'https://kite.trade/connect/login?...' }, state: { type: 'string' } } } })
   async login(@Res() res: Response) {
     const apiKey = this.configService.get<string>('KITE_API_KEY');
     const apiSecret = this.configService.get<string>('KITE_API_SECRET');
-    if (!apiKey || !apiSecret) throw new BadRequestException('Kite API creds not configured');
+    if (!apiKey || !apiSecret) throw new BadRequestException('Falcon API creds not configured');
 
     const kite = new KiteConnect({ api_key: apiKey });
     const state = Math.random().toString(36).slice(2);
@@ -50,14 +50,14 @@ export class AuthController {
   }
 
   @Get('callback')
-  @ApiOperation({ summary: 'Kite OAuth callback handler' })
+  @ApiOperation({ summary: 'Falcon OAuth callback handler' })
   @ApiQuery({ name: 'request_token', required: true })
   @ApiQuery({ name: 'state', required: true })
   @ApiResponse({ status: 200, description: 'OAuth success', schema: { properties: { success: { type: 'boolean', example: true } } } })
   async callback(@Query('request_token') requestToken: string, @Query('state') state: string) {
     const apiKey = this.configService.get<string>('KITE_API_KEY');
     const apiSecret = this.configService.get<string>('KITE_API_SECRET');
-    if (!apiKey || !apiSecret) throw new BadRequestException('Kite API creds not configured');
+    if (!apiKey || !apiSecret) throw new BadRequestException('Falcon API creds not configured');
 
     let stateValid = false;
     if (this.redisService.isRedisAvailable()) {
@@ -74,7 +74,7 @@ export class AuthController {
     try {
       session = await kite.generateSession(requestToken, apiSecret);
     } catch (e: any) {
-      throw new BadRequestException(`Kite OAuth failed: ${e?.message || 'unknown error'}`);
+      throw new BadRequestException(`Falcon OAuth failed: ${e?.message || 'unknown error'}`);
     }
     const entity = this.kiteSessionRepo.create({
       access_token: session.access_token,
@@ -107,7 +107,7 @@ export class AuthController {
   }
 }
 
-@Controller('auth/vortex')
+@Controller('auth/vayu')
 @ApiTags('auth')
 export class VortexAuthController {
   private readonly logger = new Logger(VortexAuthController.name);
@@ -122,40 +122,40 @@ export class VortexAuthController {
   ) {}
 
   @Get('login')
-  @ApiOperation({ summary: 'Get Vortex login URL', description: 'Returns the Rupeezy Vortex OAuth login URL generated from your VORTEX_APP_ID.' })
-  @ApiOkResponse({ description: 'Vortex login URL', schema: { type: 'object', properties: { url: { type: 'string', example: 'https://flow.rupeezy.in?applicationId=YOUR_APP_ID' } } } })
-  @ApiBadRequestResponse({ description: 'Missing configuration', schema: { type: 'object', properties: { statusCode: { type: 'number', example: 400 }, message: { type: 'string', example: 'Vortex applicationId (VORTEX_APP_ID) not configured' }, error: { type: 'string', example: 'Bad Request' } } } })
+  @ApiOperation({ summary: 'Get Vayu login URL', description: 'Returns the Rupeezy Vayu OAuth login URL generated from your VORTEX_APP_ID.' })
+  @ApiOkResponse({ description: 'Vayu login URL', schema: { type: 'object', properties: { url: { type: 'string', example: 'https://flow.rupeezy.in?applicationId=YOUR_APP_ID' } } } })
+  @ApiBadRequestResponse({ description: 'Missing configuration', schema: { type: 'object', properties: { statusCode: { type: 'number', example: 400 }, message: { type: 'string', example: 'Vayu applicationId (VORTEX_APP_ID) not configured' }, error: { type: 'string', example: 'Bad Request' } } } })
   async login(@Res() res: Response) {
     const appId = this.configService.get<string>('VORTEX_APP_ID');
-    if (!appId) throw new BadRequestException('Vortex applicationId (VORTEX_APP_ID) not configured');
+    if (!appId) throw new BadRequestException('Vayu applicationId (VORTEX_APP_ID) not configured');
     const url = `https://flow.rupeezy.in?applicationId=${encodeURIComponent(appId)}`;
     return res.json({ url });
   }
 
   @Get('callback')
-  @ApiOperation({ summary: 'Vortex callback handler (exchanges auth->access_token)', description: 'Handles redirect from Rupeezy Vortex. Reads the auth query param, computes checksum, calls Create Session API, and persists the access_token to the database.' })
+  @ApiOperation({ summary: 'Vayu callback handler (exchanges auth->access_token)', description: 'Handles redirect from Rupeezy Vayu. Reads the auth query param, computes checksum, calls Create Session API, and persists the access_token to the database.' })
   @ApiQuery({ name: 'auth', required: true })
   @ApiOkResponse({ description: 'Session created', schema: { type: 'object', properties: { success: { type: 'boolean', example: true } }, example: { success: true } } })
-  @ApiBadRequestResponse({ description: 'Exchange failed or misconfigured', schema: { type: 'object', properties: { statusCode: { type: 'number', example: 400 }, message: { type: 'string', example: 'Vortex session creation failed: ...' }, error: { type: 'string', example: 'Bad Request' } } } })
+  @ApiBadRequestResponse({ description: 'Exchange failed or misconfigured', schema: { type: 'object', properties: { statusCode: { type: 'number', example: 400 }, message: { type: 'string', example: 'Vayu session creation failed: ...' }, error: { type: 'string', example: 'Bad Request' } } } })
   async callback(@Query('auth') auth: string) {
-    this.logger.log(`[Vortex] Callback received with auth parameter: ${auth ? 'present' : 'missing'}`);
+    this.logger.log(`[Vayu] Callback received with auth parameter: ${auth ? 'present' : 'missing'}`);
     
     const appId = this.configService.get<string>('VORTEX_APP_ID');
     const apiKey = this.configService.get<string>('VORTEX_API_KEY');
     const baseUrl = (this.configService.get<string>('VORTEX_BASE_URL') || 'https://vortex-api.rupeezy.in/v2').replace(/\/$/, '');
     const createSessionUrl = `${baseUrl}/user/session`;
     
-    this.logger.log(`[Vortex] Configuration: appId=${appId ? 'present' : 'missing'}, apiKey=${apiKey ? 'present' : 'missing'}, baseUrl=${baseUrl}`);
+    this.logger.log(`[Vayu] Configuration: appId=${appId ? 'present' : 'missing'}, apiKey=${apiKey ? 'present' : 'missing'}, baseUrl=${baseUrl}`);
     
     if (!appId || !apiKey) {
-      throw new BadRequestException('Vortex envs missing: VORTEX_APP_ID, VORTEX_API_KEY');
+      throw new BadRequestException('Vayu envs missing: VORTEX_APP_ID, VORTEX_API_KEY');
     }
     if (!auth) throw new BadRequestException('Missing auth parameter');
 
     // checksum = sha256(appId + auth + apiKey) hex-lowercase
     const crypto = await import('crypto');
     const checksum = crypto.createHash('sha256').update(`${appId}${auth}${apiKey}`).digest('hex');
-    this.logger.log(`[Vortex] Generated checksum for session creation`);
+    this.logger.log(`[Vayu] Generated checksum for session creation`);
 
     let sessionResp: any;
     try {
@@ -174,14 +174,14 @@ export class VortexAuthController {
       const body = e?.response?.data;
       const sanitizedUrl = createSessionUrl.replace(apiKey, '***');
       const msg = body || e?.message || 'unknown error';
-      this.logger.error(`[Vortex] Session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'})`);
-      throw new BadRequestException(`Vortex session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'} url=${sanitizedUrl})`);
+      this.logger.error(`[Vayu] Session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'})`);
+      throw new BadRequestException(`Vayu session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'} url=${sanitizedUrl})`);
     }
 
     const data = sessionResp?.data?.data || {};
     const accessToken: string | undefined = data?.access_token;
-    if (!accessToken) throw new BadRequestException('Vortex session did not return access_token');
-    this.logger.log(`[Vortex] Access token extracted, length: ${accessToken.length}`);
+    if (!accessToken) throw new BadRequestException('Vayu session did not return access_token');
+    this.logger.log(`[Vayu] Access token extracted, length: ${accessToken.length}`);
 
     // Determine TTL from JWT exp if present
     let ttl = 24 * 3600; // fallback 24h

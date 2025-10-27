@@ -60,14 +60,14 @@ export class AdminController {
   }
 
   @Post('apikeys/provider')
-  @ApiOperation({ summary: 'Set provider for an API key (kite|vortex or null to inherit)' })
+  @ApiOperation({ summary: 'Set provider for an API key (falcon|vayu or null to inherit)' })
   async setApiKeyProvider(@Body() body: { key: string; provider?: 'kite' | 'vortex' | null }) {
     await this.apiKeyRepo.update({ key: body.key }, { provider: body.provider ?? null });
     return { success: true };
   }
 
   @Post('provider/global')
-  @ApiOperation({ summary: 'Set global provider for WebSocket streaming (kite|vortex)' })
+  @ApiOperation({ summary: 'Set global provider for WebSocket streaming (falcon|vayu)' })
   async setGlobalProvider(@Body() body: { provider: 'kite' | 'vortex' }) {
     await this.resolver.setGlobalProviderName(body.provider);
     return { success: true };
@@ -102,14 +102,14 @@ export class AdminController {
     return this.stream.getStreamingStatus();
   }
 
-  @Get('debug/kite')
-  @ApiOperation({ summary: 'Get debug status for Kite provider/ticker' })
+  @Get('debug/falcon')
+  @ApiOperation({ summary: 'Get debug status for Falcon provider/ticker' })
   async kiteDebug() {
     return this.kiteProvider.getDebugStatus?.() || {};
   }
 
-  @Get('debug/vortex')
-  @ApiOperation({ summary: 'Get debug status for Vortex provider/ticker' })
+  @Get('debug/vayu')
+  @ApiOperation({ summary: 'Get debug status for Vayu provider/ticker' })
   async vortexDebug() {
     return this.vortexProvider.getDebugStatus?.() || {};
   }

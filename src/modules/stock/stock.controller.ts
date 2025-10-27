@@ -29,11 +29,11 @@ export class StockController {
   ) {}
 
   @Post('instruments/sync')
-  @ApiOperation({ summary: 'Sync instruments from selected provider (supports ?provider and Vortex CSV)' })
-  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
+  @ApiOperation({ summary: 'Sync instruments from selected provider (supports ?provider and Vayu CSV)' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: falcon|vayu' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
-  @ApiQuery({ name: 'provider', required: false, example: 'kite', description: 'Provider to sync: kite|vortex (overrides global for this call)' })
-  @ApiQuery({ name: 'csv_url', required: false, description: 'When provider=vortex, optional CSV URL to import instruments' })
+  @ApiQuery({ name: 'provider', required: false, example: 'kite', description: 'Provider to sync: falcon|vayu (overrides global for this call)' })
+  @ApiQuery({ name: 'csv_url', required: false, description: 'When provider=vayu, optional CSV URL to import instruments' })
   async syncInstruments(@Query('exchange') exchange?: string, @Query('provider') provider?: 'kite' | 'vortex', @Query('csv_url') csvUrl?: string, @Request() req?: any) {
     try {
       const result = await this.stockService.syncInstruments(exchange, {
@@ -220,7 +220,7 @@ export class StockController {
 
   @Post('quotes')
   @ApiOperation({ summary: 'Get quotes for instruments with mode selection (ltp|ohlc|full)' })
-  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: falcon|vayu' })
   @ApiQuery({ name: 'mode', required: false, example: 'full', description: 'ltp | ohlc | full (default: full)' })
   @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
   @ApiResponse({ status: 200, description: 'Quote data response' })
@@ -331,7 +331,7 @@ export class StockController {
 
   @Post('ltp')
   @ApiOperation({ summary: 'Get LTP for instruments' })
-  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: falcon|vayu' })
   @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
   async getLTP(@Body() body: { instruments: number[] }, @Request() req: any) {
     try {
@@ -379,7 +379,7 @@ export class StockController {
 
   @Post('ohlc')
   @ApiOperation({ summary: 'Get OHLC for instruments' })
-  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: falcon|vayu' })
   @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
   async getOHLC(@Body() body: { instruments: number[] }, @Request() req: any) {
     try {
@@ -427,7 +427,7 @@ export class StockController {
 
   @Get('historical/:token')
   @ApiOperation({ summary: 'Get historical data for an instrument' })
-  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: kite|vortex' })
+  @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: falcon|vayu' })
   @ApiQuery({ name: 'from', required: true, example: '2024-01-01' })
   @ApiQuery({ name: 'to', required: true, example: '2024-01-31' })
   @ApiQuery({ name: 'interval', required: false, example: 'day' })
@@ -691,10 +691,10 @@ export class StockController {
     }
   }
 
-  // ===== VORTEX-SPECIFIC ENDPOINTS =====
+  // ===== VAYU-SPECIFIC ENDPOINTS =====
 
-  @Get('vortex/instruments')
-  @ApiOperation({ summary: 'Get Vortex instruments with optional filters' })
+  @Get('vayu/instruments')
+  @ApiOperation({ summary: 'Get Vayu instruments with optional filters' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
   @ApiQuery({ name: 'instrument_name', required: false, example: 'EQ' })
   @ApiQuery({ name: 'symbol', required: false, example: 'RELIANCE' })
@@ -731,7 +731,7 @@ export class StockController {
       throw new HttpException(
         {
           success: false,
-          message: 'Failed to fetch Vortex instruments',
+          message: 'Failed to fetch Vayu instruments',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -739,8 +739,8 @@ export class StockController {
     }
   }
 
-  @Get('vortex/instruments/search')
-  @ApiOperation({ summary: 'Search Vortex instruments by symbol or instrument name' })
+  @Get('vayu/instruments/search')
+  @ApiOperation({ summary: 'Search Vayu instruments by symbol or instrument name' })
   @ApiQuery({ name: 'q', required: true, example: 'RELIANCE' })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   async searchVortexInstruments(
@@ -768,7 +768,7 @@ export class StockController {
       throw new HttpException(
         {
           success: false,
-          message: 'Failed to search Vortex instruments',
+          message: 'Failed to search Vayu instruments',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -776,8 +776,8 @@ export class StockController {
     }
   }
 
-  @Get('vortex/instruments/stats')
-  @ApiOperation({ summary: 'Get Vortex instrument statistics' })
+  @Get('vayu/instruments/stats')
+  @ApiOperation({ summary: 'Get Vayu instrument statistics' })
   async getVortexInstrumentStats() {
     try {
       const stats = await this.vortexInstrumentService.getVortexInstrumentStats();
@@ -789,7 +789,7 @@ export class StockController {
       throw new HttpException(
         {
           success: false,
-          message: 'Failed to fetch Vortex instrument stats',
+          message: 'Failed to fetch Vayu instrument stats',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -797,10 +797,10 @@ export class StockController {
     }
   }
 
-  @Get('vortex/instruments/:token')
-  @ApiOperation({ summary: 'Get specific Vortex instrument by token' })
-  @ApiResponse({ status: 200, description: 'Vortex instrument found' })
-  @ApiResponse({ status: 404, description: 'Vortex instrument not found' })
+  @Get('vayu/instruments/:token')
+  @ApiOperation({ summary: 'Get specific Vayu instrument by token' })
+  @ApiResponse({ status: 200, description: 'Vayu instrument found' })
+  @ApiResponse({ status: 404, description: 'Vayu instrument not found' })
   async getVortexInstrumentByToken(@Param('token') token: string) {
     try {
       const tokenNumber = parseInt(token);
@@ -820,7 +820,7 @@ export class StockController {
         throw new HttpException(
           {
             success: false,
-            message: 'Vortex instrument not found',
+            message: 'Vayu instrument not found',
           },
           HttpStatus.NOT_FOUND,
         );
@@ -837,7 +837,7 @@ export class StockController {
       throw new HttpException(
         {
           success: false,
-          message: 'Failed to fetch Vortex instrument',
+          message: 'Failed to fetch Vayu instrument',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -845,8 +845,8 @@ export class StockController {
     }
   }
 
-  @Post('vortex/instruments/sync')
-  @ApiOperation({ summary: 'Manually sync Vortex instruments from CSV' })
+  @Post('vayu/instruments/sync')
+  @ApiOperation({ summary: 'Manually sync Vayu instruments from CSV' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
   @ApiQuery({ name: 'csv_url', required: false, description: 'Optional CSV URL override' })
   async syncVortexInstruments(
@@ -857,14 +857,14 @@ export class StockController {
       const result = await this.vortexInstrumentService.syncVortexInstruments(exchange, csvUrl);
       return {
         success: true,
-        message: 'Vortex instruments synced successfully',
+        message: 'Vayu instruments synced successfully',
         data: result,
       };
     } catch (error) {
       throw new HttpException(
         {
           success: false,
-          message: 'Failed to sync Vortex instruments',
+          message: 'Failed to sync Vayu instruments',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -873,7 +873,7 @@ export class StockController {
   }
 
 
-  @Get('vortex/options/chain/:symbol')
+  @Get('vayu/options/chain/:symbol')
   @ApiOperation({ summary: 'Get options chain for a symbol' })
   async getVortexOptionsChain(@Param('symbol') symbol: string) {
     try {
@@ -918,8 +918,8 @@ export class StockController {
     }
   }
 
-  @Post('vortex/instruments/batch')
-  @ApiOperation({ summary: 'Batch lookup for multiple Vortex instruments' })
+  @Post('vayu/instruments/batch')
+  @ApiOperation({ summary: 'Batch lookup for multiple Vayu instruments' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -980,8 +980,8 @@ export class StockController {
 
   // ===== MARKET SEGMENT ENDPOINTS =====
 
-  @Get('vortex/equities')
-  @ApiOperation({ summary: 'Get Vortex equities with filters' })
+  @Get('vayu/equities')
+  @ApiOperation({ summary: 'Get Vayu equities with filters' })
   @ApiQuery({ name: 'q', required: false, description: 'Symbol search' })
   @ApiQuery({ name: 'exchange', required: false, description: 'Exchange filter' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
@@ -1026,8 +1026,8 @@ export class StockController {
     }
   }
 
-  @Get('vortex/futures')
-  @ApiOperation({ summary: 'Get Vortex futures with filters' })
+  @Get('vayu/futures')
+  @ApiOperation({ summary: 'Get Vayu futures with filters' })
   @ApiQuery({ name: 'q', required: false, description: 'Symbol search' })
   @ApiQuery({ name: 'exchange', required: false, description: 'Exchange filter' })
   @ApiQuery({ name: 'expiry_from', required: false, description: 'Expiry date from' })
@@ -1079,8 +1079,8 @@ export class StockController {
     }
   }
 
-  @Get('vortex/options')
-  @ApiOperation({ summary: 'Get Vortex options with filters' })
+  @Get('vayu/options')
+  @ApiOperation({ summary: 'Get Vayu options with filters' })
   @ApiQuery({ name: 'q', required: false, description: 'Symbol search' })
   @ApiQuery({ name: 'exchange', required: false, description: 'Exchange filter' })
   @ApiQuery({ name: 'option_type', required: false, enum: ['CE', 'PE'] })
@@ -1143,8 +1143,8 @@ export class StockController {
     }
   }
 
-  @Get('vortex/commodities')
-  @ApiOperation({ summary: 'Get Vortex commodities (MCX) with filters' })
+  @Get('vayu/commodities')
+  @ApiOperation({ summary: 'Get Vayu commodities (MCX) with filters' })
   @ApiQuery({ name: 'q', required: false, description: 'Symbol search' })
   @ApiQuery({ name: 'expiry_from', required: false, description: 'Expiry date from' })
   @ApiQuery({ name: 'expiry_to', required: false, description: 'Expiry date to' })
@@ -1194,8 +1194,8 @@ export class StockController {
     }
   }
 
-  @Get('vortex/instruments/popular')
-  @ApiOperation({ summary: 'Get popular Vortex instruments with caching' })
+  @Get('vayu/instruments/popular')
+  @ApiOperation({ summary: 'Get popular Vayu instruments with caching' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Max instruments (default 50)' })
   async getVortexPopularInstruments(@Query('limit') limit?: number) {
     try {
@@ -1215,8 +1215,8 @@ export class StockController {
     }
   }
 
-  @Get('vortex/instruments/cached-stats')
-  @ApiOperation({ summary: 'Get Vortex instrument stats with caching' })
+  @Get('vayu/instruments/cached-stats')
+  @ApiOperation({ summary: 'Get Vayu instrument stats with caching' })
   async getVortexInstrumentStatsCached() {
     try {
       const result = await this.vortexInstrumentService.getVortexInstrumentStatsCached();
@@ -1238,8 +1238,8 @@ export class StockController {
     }
   }
 
-  @Post('vortex/cache/clear')
-  @ApiOperation({ summary: 'Clear Vortex cache' })
+  @Post('vayu/cache/clear')
+  @ApiOperation({ summary: 'Clear Vayu cache' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -1264,8 +1264,8 @@ export class StockController {
     }
   }
 
-  @Get('vortex/tickers/search')
-  @ApiOperation({ summary: 'Search Vortex tickers and return live price + metadata' })
+  @Get('vayu/tickers/search')
+  @ApiOperation({ summary: 'Search Vayu tickers and return live price + metadata' })
   @ApiQuery({ name: 'q', required: true, example: 'NSE_EQ_RELIANCE' })
   async searchVortexTickers(@Query('q') q: string) {
     try {
@@ -1293,17 +1293,17 @@ export class StockController {
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      throw new HttpException({ success: false, message: 'Failed to search Vortex tickers', error: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
+      throw new HttpException({ success: false, message: 'Failed to search Vayu tickers', error: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
-  @Get('vortex/tickers/:symbol')
-  @ApiOperation({ summary: 'Get live price and metadata by Vortex ticker (e.g., NSE_EQ_RELIANCE)' })
+  @Get('vayu/tickers/:symbol')
+  @ApiOperation({ summary: 'Get live price and metadata by Vayu ticker (e.g., NSE_EQ_RELIANCE)' })
   async getVortexTickerBySymbol(@Param('symbol') symbol: string) {
     try {
       const { instrument } = await this.vortexInstrumentService.resolveVortexSymbol(symbol);
       if (!instrument) {
-        throw new HttpException({ success: false, message: 'Vortex symbol not found' }, HttpStatus.NOT_FOUND);
+        throw new HttpException({ success: false, message: 'Vayu symbol not found' }, HttpStatus.NOT_FOUND);
       }
       
       const ltp = await this.vortexInstrumentService.getVortexLTP([instrument.token]);
@@ -1323,7 +1323,7 @@ export class StockController {
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      throw new HttpException({ success: false, message: 'Failed to fetch Vortex ticker', error: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
+      throw new HttpException({ success: false, message: 'Failed to fetch Vayu ticker', error: error.message }, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }

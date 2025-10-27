@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide helps your clients integrate with your market data WebSocket API. Clients will never see provider names (Kite/Vortex) - they only interact with your unified API.
+This guide helps your clients integrate with your market data WebSocket API. Clients will never see backend provider names - they only interact with your unified API.
 
 ## Quick Start
 
@@ -221,6 +221,10 @@ const socket = connectWithRetry();
 | Reliance | 2881 | Reliance Industries Ltd |
 | TCS | 2953217 | Tata Consultancy Services |
 | HDFC Bank | 341249 | HDFC Bank Ltd |
+
+## Market Data Providers
+
+The platform supports multiple market data providers (Falcon and Vayu) with automatic failover and load balancing.
 
 ## Support
 
