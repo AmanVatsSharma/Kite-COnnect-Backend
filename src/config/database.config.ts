@@ -17,7 +17,7 @@ export const getDatabaseConfig = (configService: ConfigService): TypeOrmModuleOp
   password: configService.get('DB_PASSWORD', 'trading_password'),
   database: configService.get('DB_DATABASE', 'trading_app'),
   entities: [Instrument, MarketData, Subscription, KiteSession, ApiKey, InstrumentMapping, VortexSession, VortexInstrument],
-  synchronize: configService.get('NODE_ENV') === 'development',
+  synchronize: true, // Auto-sync schema for now (creates missing tables)
   logging: configService.get('NODE_ENV') === 'development',
   migrations: ['dist/migrations/*.js'],
   migrationsRun: false,
