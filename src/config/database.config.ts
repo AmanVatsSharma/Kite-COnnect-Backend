@@ -21,5 +21,5 @@ export const getDatabaseConfig = (configService: ConfigService): TypeOrmModuleOp
   logging: configService.get('NODE_ENV') === 'development',
   migrations: ['dist/migrations/*.js'],
   migrationsRun: false,
-  ssl: configService.get('NODE_ENV') === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: false, // Disable SSL for Docker internal network
 });
