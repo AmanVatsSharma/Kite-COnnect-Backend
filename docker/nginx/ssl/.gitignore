@@ -1,0 +1,13 @@
+# Ignore all SSL certificate files
+*.pem
+*.key
+*.crt
+*.cert
+*.csr
+*.p12
+*.pfx
+
+# But keep this directory in Git
+!.gitkeep
+
+

@@ -10,7 +10,7 @@ import { KiteProviderService } from '../providers/kite-provider.service';
 import { MarketDataStreamService } from '../services/market-data-stream.service';
 import { VortexProviderService } from '../providers/vortex-provider.service';
 
-@Controller('api/admin')
+@Controller('admin')
 @ApiTags('admin')
 @ApiSecurity('admin')
 @UseGuards(AdminGuard)

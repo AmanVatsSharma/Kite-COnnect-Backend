@@ -42,6 +42,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
 
   async onModuleInit() {
     await this.initialize();
+    // Auto-load saved access token on startup
+    await this.loadSavedToken();
   }
 
   async initialize(): Promise<void> {
@@ -93,23 +95,61 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       const rows = this.parseCsv(text);
       const items: any[] = [];
       for (const row of rows) {
-        // Attempt to normalize common columns; fall back to best-effort mapping
-        const instrument_token = Number(row['instrument_token'] || row['token'] || row['id']);
-        if (!Number.isFinite(instrument_token)) continue;
-        items.push({
-          instrument_token,
-          exchange_token: Number(row['exchange_token'] || row['exch_token'] || 0),
-          tradingsymbol: row['tradingsymbol'] || row['symbol'] || '',
-          name: row['name'] || row['tradingsymbol'] || '',
-          last_price: Number(row['last_price'] || row['ltp'] || 0),
-          expiry: row['expiry'] || null,
-          strike: Number(row['strike'] || 0),
-          tick_size: Number(row['tick_size'] || 0.05),
-          lot_size: Number(row['lot_size'] || 1),
-          instrument_type: row['instrument_type'] || row['type'] || '',
-          segment: row['segment'] || exchange || '',
-          exchange: row['exchange'] || exchange || '',
-        });
+        // Map Vortex CSV fields according to API documentation
+        const token = Number(row['token']);
+        if (!Number.isFinite(token)) {
+          this.logger.debug(`[Vortex] Skipping row with invalid token: ${row['token']}`);
+          continue;
+        }
+
+        // Parse strike price - handle both string and number formats
+        let strike_price = 0;
+        if (row['strike_price']) {
+          strike_price = Number(row['strike_price']);
+          if (!Number.isFinite(strike_price)) {
+            this.logger.debug(`[Vortex] Invalid strike_price for token ${token}: ${row['strike_price']}`);
+            strike_price = 0;
+          }
+        }
+
+        // Parse tick size - handle both string and number formats
+        let tick = 0.05;
+        if (row['tick']) {
+          tick = Number(row['tick']);
+          if (!Number.isFinite(tick) || tick <= 0) {
+            this.logger.debug(`[Vortex] Invalid tick for token ${token}: ${row['tick']}, using default 0.05`);
+            tick = 0.05;
+          }
+        }
+
+        // Parse lot size - handle both string and number formats
+        let lot_size = 1;
+        if (row['lot_size']) {
+          lot_size = Number(row['lot_size']);
+          if (!Number.isFinite(lot_size) || lot_size <= 0) {
+            this.logger.debug(`[Vortex] Invalid lot_size for token ${token}: ${row['lot_size']}, using default 1`);
+            lot_size = 1;
+          }
+        }
+
+        const instrument = {
+          token,
+          exchange: row['exchange'] || exchange || 'NSE_EQ',
+          symbol: row['symbol'] || '',
+          instrument_name: row['instrument_name'] || '',
+          expiry_date: row['expiry_date'] || null,
+          option_type: row['option_type'] || null,
+          strike_price,
+          tick,
+          lot_size,
+        };
+
+        // Log first few instruments for debugging
+        if (items.length < 5) {
+          this.logger.debug(`[Vortex] Parsed instrument ${items.length + 1}:`, instrument);
+        }
+
+        items.push(instrument);
       }
       this.logger.log(`[Vortex] Parsed ${items.length} instruments from CSV`);
       return items;
@@ -734,6 +774,25 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       }
       this.lastReqAt[key] = Date.now();
     } catch {}
+  }
+
+  private async loadSavedToken(): Promise<void> {
+    try {
+      const active = await this.vortexSessionRepo.findOne({ where: { is_active: true }, order: { created_at: 'DESC' } });
+      if (active?.access_token) {
+        // If expired, skip
+        if (active.expires_at && active.expires_at.getTime() <= Date.now()) {
+          this.logger.warn('[Vortex] Saved token is expired; please login again');
+          return;
+        }
+        this.accessToken = active.access_token;
+        this.logger.log('[Vortex] Auto-loaded access token from DB on startup');
+      } else {
+        this.logger.log('[Vortex] No active token found in DB; login required');
+      }
+    } catch (e) {
+      this.logger.warn('[Vortex] Failed to load saved token from DB', e as any);
+    }
   }
 
   private async ensureTokenLoaded(): Promise<void> {

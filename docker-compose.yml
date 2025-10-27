@@ -5,8 +5,10 @@ services:
   trading-app:
     build: .
     container_name: trading-app-backend
-    ports:
-      - "3000:3000"
+    # Note: Port 3000 is only exposed to localhost (host machine)
+    # Nginx on the host will proxy external traffic to this port
+    expose:
+      - "3000"
     environment:
       - NODE_ENV=production
       - DB_HOST=postgres
@@ -20,6 +22,16 @@ services:
       - KITE_API_SECRET=${KITE_API_SECRET}
       - KITE_ACCESS_TOKEN=${KITE_ACCESS_TOKEN}
       - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - DATA_PROVIDER=${DATA_PROVIDER}
+      - VORTEX_APP_ID=${VORTEX_APP_ID}
+      - VORTEX_API_KEY=${VORTEX_API_KEY}
+      - VORTEX_CREATE_SESSION_URL=${VORTEX_CREATE_SESSION_URL}
+      - VORTEX_BASE_URL=${VORTEX_BASE_URL}
+      - VORTEX_WS_URL=${VORTEX_WS_URL}
+      - VORTEX_REDIRECT_URI=${VORTEX_REDIRECT_URI}
+      - VORTEX_INSTRUMENTS_CSV_URL=${VORTEX_INSTRUMENTS_CSV_URL}
+      - CORS_ORIGIN=${CORS_ORIGIN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,6 +42,12 @@ services:
       - trading-network
     volumes:
       - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "node", "dist/health-check.js"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   # Postgres Database
   postgres:
@@ -39,8 +57,9 @@ services:
       - POSTGRES_DB=trading_app
       - POSTGRES_USER=trading_user
       - POSTGRES_PASSWORD=trading_password
-    ports:
-      - "5432:5432"
+    # Expose only to internal network, not host (security)
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -52,13 +71,23 @@ services:
     restart: unless-stopped
     networks:
       - trading-network
+    # Resource limits for production stability
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: trading-redis
-    ports:
-      - "6379:6379"
+    # Expose only to internal network, not host (security)
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -68,22 +97,15 @@ services:
     restart: unless-stopped
     networks:
       - trading-network
-
-  # Nginx Reverse Proxy (Optional)
-  nginx:
-    image: nginx:alpine
-    container_name: trading-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./docker/nginx/ssl:/etc/nginx/ssl
-    depends_on:
-      - trading-app
-    restart: unless-stopped
-    networks:
-      - trading-network
+    # Resource limits for production stability
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
 volumes:
   postgres_data:

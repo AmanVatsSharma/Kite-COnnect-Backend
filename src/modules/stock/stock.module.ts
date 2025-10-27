@@ -25,10 +25,12 @@ import { MarketDataProviderResolverService } from '../../services/market-data-pr
 import { VortexProviderService } from '../../providers/vortex-provider.service';
 import { InstrumentMapping } from '../../entities/instrument-mapping.entity';
 import { VortexSession } from '../../entities/vortex-session.entity';
+import { VortexInstrument } from '../../entities/vortex-instrument.entity';
+import { VortexInstrumentService } from '../../services/vortex-instrument.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Instrument, MarketData, Subscription, ApiKey, KiteSession, InstrumentMapping, VortexSession]),
+    TypeOrmModule.forFeature([Instrument, MarketData, Subscription, ApiKey, KiteSession, InstrumentMapping, VortexSession, VortexInstrument]),
     ScheduleModule.forRoot(),
   ],
   controllers: [StockController, HealthController, AuthController, VortexAuthController, AdminController],
@@ -36,6 +38,7 @@ import { VortexSession } from '../../entities/vortex-session.entity';
     StockService,
     KiteProviderService,
     VortexProviderService,
+    VortexInstrumentService,
     MarketDataProviderResolverService,
     RedisService,
     ApiKeyService,
@@ -47,6 +50,6 @@ import { VortexSession } from '../../entities/vortex-session.entity';
     AdminGuard,
     MetricsInterceptor,
   ],
-  exports: [StockService, MarketDataGateway, MarketDataStreamService],
+  exports: [StockService, MarketDataGateway, MarketDataStreamService, VortexInstrumentService],
 })
 export class StockModule {}

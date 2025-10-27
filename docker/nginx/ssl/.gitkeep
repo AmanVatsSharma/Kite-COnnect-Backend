@@ -1,0 +1,5 @@
+# SSL certificates directory
+# Actual SSL certificates will be stored here by Certbot
+# DO NOT commit .pem or .key files to version control
+
+

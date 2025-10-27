@@ -10,6 +10,7 @@ import { MarketDataProvider } from '../../providers/market-data.provider';
 import { RedisService } from '../../services/redis.service';
 import { RequestBatchingService } from '../../services/request-batching.service';
 import { MarketDataGateway } from '../../gateways/market-data.gateway';
+import { VortexInstrumentService } from '../../services/vortex-instrument.service';
 import { Inject, forwardRef } from '@nestjs/common';
 
 @Injectable()
@@ -28,6 +29,7 @@ export class StockService {
     private providerResolver: MarketDataProviderResolverService,
     private redisService: RedisService,
     private requestBatchingService: RequestBatchingService,
+    private vortexInstrumentService: VortexInstrumentService,
     @Inject(forwardRef(() => MarketDataGateway)) private marketDataGateway: MarketDataGateway,
   ) {}
 
@@ -39,6 +41,13 @@ export class StockService {
       const effectiveProvider: 'kite' | 'vortex' = providerName === 'vortex' ? 'vortex' : 'kite';
       this.logger.log(`Starting instrument sync for exchange=${exchange || 'all'} via provider=${providerName}`);
 
+      // Delegate Vortex sync to VortexInstrumentService
+      if (effectiveProvider === 'vortex') {
+        this.logger.log('Delegating Vortex instrument sync to VortexInstrumentService');
+        return await this.vortexInstrumentService.syncVortexInstruments(exchange, opts?.csv_url);
+      }
+
+      // Continue with Kite sync logic
       const instruments = await providerInstance.getInstruments(exchange, { csvUrl: opts?.csv_url });
       let synced = 0;
       let updated = 0;
@@ -86,14 +95,11 @@ export class StockService {
           await this.instrumentRepository.save(newInstrument);
           synced++;
         }
-        // Upsert instrument mapping: provider_token
-        // - For kite: instrument_token as string
-        // - For vortex: prefer `${exchange}-${instrument_token}` when exchange present
+        // Upsert instrument mapping: provider_token for Kite only
+        // Vortex mapping is handled by VortexInstrumentService
         try {
-          const providerToken = effectiveProvider === 'vortex'
-            ? `${(kiteInstrument.exchange || kiteInstrument.segment || 'NSE_EQ').toString()}-${kiteInstrument.instrument_token}`
-            : String(kiteInstrument.instrument_token);
-          const existingMap = await this.mappingRepository.findOne({ where: { provider: effectiveProvider, provider_token: providerToken } });
+          const providerToken = String(kiteInstrument.instrument_token);
+          const existingMap = await this.mappingRepository.findOne({ where: { provider: 'kite', provider_token: providerToken } });
           if (existingMap) {
             if (existingMap.instrument_token !== kiteInstrument.instrument_token) {
               existingMap.instrument_token = kiteInstrument.instrument_token;
@@ -101,7 +107,7 @@ export class StockService {
             }
           } else {
             await this.mappingRepository.save(this.mappingRepository.create({
-              provider: effectiveProvider,
+              provider: 'kite',
               provider_token: providerToken,
               instrument_token: kiteInstrument.instrument_token,
             }));

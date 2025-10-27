@@ -277,25 +277,31 @@ curl http://localhost:3000/api/stock/stats
 
 ## 🔄 Deployment
 
-### Docker Deployment
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "run", "start:prod"]
+### Quick Start (EC2)
+For a complete production-ready deployment on AWS EC2 with SSL/TLS, see:
+- **[Quick Start Guide](QUICK_START_EC2.md)** - Get running in minutes
+- **[EC2 Deployment Guide](EC2_DEPLOYMENT_GUIDE.md)** - Complete production setup
+- **[Production Checklist](PRODUCTION_CHECKLIST.md)** - Deployment verification
+
+### Docker Deployment (Local)
+```bash
+# Development
+docker compose -f docker-compose.dev.yml up
+
+# Production
+docker compose up -d
 ```
 
 ### Environment Variables for Production
+See `env.production.example` for complete configuration. Required variables:
 ```env
 NODE_ENV=production
-DB_HOST=your_production_db_host
-REDIS_HOST=your_production_redis_host
+DB_HOST=postgres
+REDIS_HOST=redis
 KITE_API_KEY=your_production_kite_key
 JWT_SECRET=your_secure_jwt_secret
+ADMIN_TOKEN=your_secure_admin_token
+DB_PASSWORD=your_secure_db_password
 ```
 
 ## 🤝 Contributing
