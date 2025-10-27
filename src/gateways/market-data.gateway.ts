@@ -51,7 +51,10 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
     try {
       // Attach Redis adapter lazily on first connection
       if (!(this.server as any)._redisAdapterAttached) {
-        const pubClient = createClient({ url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}` });
+        const pubClient = createClient({ 
+          url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
+          socket: { family: 4 } // Force IPv4 to avoid ::1 issues
+        });
         const subClient = pubClient.duplicate();
         await Promise.all([pubClient.connect(), subClient.connect()]);
         this.server.adapter(createAdapter(pubClient, subClient));

@@ -5,10 +5,9 @@ services:
   trading-app:
     build: .
     container_name: trading-app-backend
-    # Note: Port 3000 is only exposed to localhost (host machine)
-    # Nginx on the host will proxy external traffic to this port
-    expose:
-      - "3000"
+    # Expose port 3000 to host (for testing without Nginx)
+    ports:
+      - "3000:3000"
     environment:
       - NODE_ENV=production
       - DB_HOST=postgres
