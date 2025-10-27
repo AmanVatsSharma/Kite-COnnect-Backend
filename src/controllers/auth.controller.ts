@@ -159,7 +159,7 @@ export class VortexAuthController {
 
     let sessionResp: any;
     try {
-      this.logger.log(`[Vortex] Creating session at ${createSessionUrl.replace(apiKey, '***')}`);
+      this.logger.log(`[Vayu] Creating session at ${createSessionUrl.replace(apiKey, '***')}`);
       sessionResp = await axios.post(createSessionUrl, {
         checksum,
         applicationId: appId,
@@ -168,7 +168,15 @@ export class VortexAuthController {
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
         timeout: 10000,
       });
-      this.logger.log(`[Vortex] Session creation successful, received access_token`);
+      this.logger.log(`[Vayu] Session creation successful, received response`);
+      
+      // Log full response for debugging
+      this.logger.log(`[Vayu] Response structure: ${JSON.stringify({ 
+        status: sessionResp?.data?.status,
+        hasData: !!sessionResp?.data?.data,
+        hasAccessToken: !!sessionResp?.data?.data?.access_token 
+      })}`);
+      
     } catch (e: any) {
       const status = e?.response?.status;
       const body = e?.response?.data;
@@ -178,9 +186,21 @@ export class VortexAuthController {
       throw new BadRequestException(`Vayu session creation failed: ${typeof msg === 'string' ? msg : JSON.stringify(msg)} (status=${status || 'n/a'} url=${sanitizedUrl})`);
     }
 
+    // Check if response indicates success
+    if (sessionResp?.data?.status !== 'success') {
+      this.logger.error(`[Vayu] Session creation returned non-success status: ${JSON.stringify(sessionResp?.data)}`);
+      throw new BadRequestException(`Vayu session creation failed: ${JSON.stringify(sessionResp?.data)}`);
+    }
+
     const data = sessionResp?.data?.data || {};
     const accessToken: string | undefined = data?.access_token;
-    if (!accessToken) throw new BadRequestException('Vayu session did not return access_token');
+    
+    // Additional debug logging
+    if (!accessToken) {
+      this.logger.error(`[Vayu] Response data structure: ${JSON.stringify(sessionResp?.data)}`);
+      throw new BadRequestException(`Vayu session did not return access_token. Response: ${JSON.stringify(sessionResp?.data)}`);
+    }
+    
     this.logger.log(`[Vayu] Access token extracted, length: ${accessToken.length}`);
 
     // Determine TTL from JWT exp if present
