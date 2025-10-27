@@ -67,39 +67,70 @@ export class AdminController {
   }
 
   @Post('provider/global')
-  @ApiOperation({ summary: 'Set global provider for WebSocket streaming (falcon|vayu)' })
+  @ApiOperation({ 
+    summary: 'Set global provider for WebSocket streaming', 
+    description: 'Sets the global market data provider that will be used for all WebSocket connections. Must be done before starting streaming.'
+  })
+  @ApiBody({ 
+    schema: { 
+      type: 'object', 
+      properties: { provider: { type: 'string', enum: ['kite', 'vortex'], description: 'Provider to use: "kite" for Falcon, "vortex" for Vayu' } },
+      example: { provider: 'vortex' }
+    } 
+  })
   async setGlobalProvider(@Body() body: { provider: 'kite' | 'vortex' }) {
     await this.resolver.setGlobalProviderName(body.provider);
-    return { success: true };
+    return { success: true, message: `Global provider set to ${body.provider}` };
   }
 
   @Get('provider/global')
-  @ApiOperation({ summary: 'Get current global provider for WebSocket streaming' })
+  @ApiOperation({ 
+    summary: 'Get current global provider',
+    description: 'Returns the currently configured global provider for WebSocket streaming'
+  })
   async getGlobalProvider() {
     const name = await this.resolver.getGlobalProviderName();
     return { provider: name };
   }
 
   @Post('provider/stream/start')
-  @ApiOperation({ summary: 'Start market data streaming for the current global provider' })
+  @ApiOperation({ 
+    summary: 'Start market data streaming', 
+    description: 'Starts real-time market data streaming using the current global provider. Ensure provider is set first with POST /api/admin/provider/global'
+  })
   async startStream() {
     await this.stream.startStreaming();
-    return { success: true };
+    const status = await this.stream.getStreamingStatus();
+    return { 
+      success: true, 
+      message: 'Streaming started',
+      status: status 
+    };
   }
 
   @Post('provider/stream/stop')
-  @ApiOperation({ summary: 'Stop market data streaming' })
+  @ApiOperation({ 
+    summary: 'Stop market data streaming', 
+    description: 'Stops all real-time market data streaming. Does not reset the provider.'
+  })
   async stopStream() {
     // Stop without re-initializing
     // Using the existing private method through public wrapper
     await (this.stream as any).stopStreaming?.();
-    return { success: true };
+    return { 
+      success: true, 
+      message: 'Streaming stopped' 
+    };
   }
 
   @Get('stream/status')
-  @ApiOperation({ summary: 'Get streaming service status' })
+  @ApiOperation({ 
+    summary: 'Get streaming service status',
+    description: 'Returns current streaming status including provider, connection state, and subscribed instruments'
+  })
   async streamStatus() {
-    return this.stream.getStreamingStatus();
+    const status = await this.stream.getStreamingStatus();
+    return status;
   }
 
   @Get('debug/falcon')

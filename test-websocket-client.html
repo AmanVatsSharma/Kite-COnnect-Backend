@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Market Data WebSocket Test</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #4CAF50;
+            color: white;
+        }
+        .status.disconnected {
+            background: #f44336;
+            color: white;
+        }
+        .status.connecting {
+            background: #ff9800;
+            color: white;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 5px;
+            width: 300px;
+        }
+        .data-item {
+            padding: 8px;
+            margin: 5px 0;
+            background: #f9f9f9;
+            border-left: 3px solid #2196F3;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .stat {
+            padding: 15px;
+            background: #e3f2fd;
+            border-radius: 4px;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1976D2;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 Market Data WebSocket Test</h1>
+    
+    <div class="container">
+        <h2>Connection Settings</h2>
+        <div>
+            <label>Server:</label>
+            <input type="text" id="serverUrl" value="https://marketdata.vedpragya.com" />
+        </div>
+        <div>
+            <label>API Key:</label>
+            <input type="text" id="apiKey" placeholder="Enter your API key here" />
+        </div>
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+    </div>
+    
+    <div class="container">
+        <h2>Quick Subscribe</h2>
+        <button onclick="subscribeToNifty()" id="subscribeBtn" disabled>Subscribe to Nifty 50 (26000)</button>
+        <button onclick="subscribeToPopular()" id="popularBtn" disabled>Subscribe to Popular Stocks</button>
+    </div>
+    
+    <div class="container">
+        <h2>Custom Subscribe</h2>
+        <div>
+            <label>Add Instrument Token:</label>
+            <input type="number" id="customToken" placeholder="e.g., 11536" />
+            <button onclick="addCustomInstrument()" id="addBtn" disabled>Add Token</button>
+        </div>
+        <div>
+            <label>Mode:</label>
+            <select id="dataMode">
+                <option value="ltp">LTP (Last Traded Price)</option>
+                <option value="ohlcv">OHLCV (Open, High, Low, Close, Volume)</option>
+                <option value="full">Full (Market Depth)</option>
+            </select>
+        </div>
+        <div id="subscribedTokens" style="margin-top: 10px;">
+            <p><strong>Subscribed Tokens:</strong> <span id="tokenList">None</span></p>
+        </div>
+        <button onclick="subscribeToCustom()" id="customSubscribeBtn" disabled>Subscribe to All</button>
+    </div>
+    
+    <div class="container">
+        <h2>Connection Status</h2>
+        <div id="status" class="status disconnected">Not Connected</div>
+        <div id="connectionInfo"></div>
+    </div>
+    
+    <div class="container">
+        <h2>Live Market Data</h2>
+        <div class="stats" id="priceStats">
+            <div class="stat">
+                <div class="stat-label">Messages Received</div>
+                <div class="stat-value" id="msgCount">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Last Update</div>
+                <div class="stat-value" style="font-size: 14px;" id="lastUpdate">-</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h2>Raw Data Log</h2>
+        <button onclick="clearLog()">Clear Log</button>
+        <div id="log" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
+    </div>
+    
+    <script>
+        let socket;
+        let messageCount = 0;
+        let selectedTokens = [];
+        let priceData = {}; // Store prices by token
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML = `<div>[${timestamp}] ${message}</div>` + logDiv.innerHTML;
+        }
+        
+        function updateStatus(status, message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${status}`;
+            statusDiv.textContent = message;
+        }
+        
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            
+            if (!apiKey) {
+                alert('Please enter API Key');
+                return;
+            }
+            
+            const wsUrl = `${serverUrl}/market-data`;
+            
+            updateStatus('connecting', 'Connecting...');
+            log(`Connecting to ${wsUrl}`);
+            
+            socket = io(wsUrl, {
+                extraHeaders: {
+                    'x-api-key': apiKey
+                },
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionAttempts: 5
+            });
+            
+            // Connection handlers
+            socket.on('connect', () => {
+                updateStatus('connected', '✅ Connected to ' + serverUrl);
+                log(`✅ Connected! Socket ID: ${socket.id}`);
+                
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                document.getElementById('subscribeBtn').disabled = false;
+                document.getElementById('popularBtn').disabled = false;
+                document.getElementById('addBtn').disabled = false;
+                document.getElementById('customSubscribeBtn').disabled = false;
+                
+                document.getElementById('connectionInfo').innerHTML = 
+                    `Socket ID: ${socket.id}<br>Server: ${serverUrl}`;
+            });
+            
+            socket.on('connected', (data) => {
+                log(`📥 Server confirmation: ${data.message}`);
+                log(`Client ID: ${data.clientId}`);
+            });
+            
+            socket.on('subscription_confirmed', (data) => {
+                log(`✅ Subscription confirmed!`);
+                log(`   Instruments: ${data.instruments.join(', ')}`);
+                log(`   Mode: ${data.mode}`);
+            });
+            
+            socket.on('market_data', (data) => {
+                messageCount++;
+                document.getElementById('msgCount').textContent = messageCount;
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+                
+                // Store price data
+                priceData[data.instrumentToken] = data.data;
+                
+                // Update price display
+                updatePriceDisplay(data.instrumentToken, data.data.last_price);
+                
+                log(`💰 Data - Token: ${data.instrumentToken}, Price: ${data.data.last_price}, Time: ${data.timestamp}`);
+            });
+            
+            socket.on('error', (error) => {
+                log(`❌ Error: ${error.message}`);
+                updateStatus('disconnected', '❌ Error: ' + error.message);
+            });
+            
+            socket.on('disconnect', (reason) => {
+                log(`⚠️ Disconnected: ${reason}`);
+                updateStatus('disconnected', 'Disconnected: ' + reason);
+                
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('subscribeBtn').disabled = true;
+                document.getElementById('popularBtn').disabled = true;
+                document.getElementById('addBtn').disabled = true;
+                document.getElementById('customSubscribeBtn').disabled = true;
+            });
+            
+            socket.on('connect_error', (error) => {
+                log(`❌ Connection failed: ${error.message}`);
+                updateStatus('disconnected', 'Connection failed');
+                
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('subscribeBtn').disabled = true;
+                document.getElementById('popularBtn').disabled = true;
+                document.getElementById('addBtn').disabled = true;
+                document.getElementById('customSubscribeBtn').disabled = true;
+            });
+        }
+        
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                updateStatus('disconnected', 'Not Connected');
+                
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('subscribeBtn').disabled = true;
+                
+                log('Disconnected');
+            }
+        }
+        
+        function subscribeToNifty() {
+            if (!socket || !socket.connected) {
+                alert('Not connected');
+                return;
+            }
+            
+            log('📡 Subscribing to Nifty 50 (token: 26000) with LTP mode...');
+            
+            socket.emit('subscribe_instruments', {
+                instruments: [26000],  // Nifty 50
+                mode: 'ltp'
+            });
+            
+            log('Subscription request sent');
+            
+            // Add to selected tokens
+            if (!selectedTokens.includes(26000)) {
+                selectedTokens.push(26000);
+                updateTokenList();
+            }
+        }
+        
+        function subscribeToPopular() {
+            if (!socket || !socket.connected) {
+                alert('Not connected');
+                return;
+            }
+            
+            const popularInstruments = [26000, 11536, 2881]; // Nifty, Bank Nifty, Reliance
+            
+            log('📡 Subscribing to popular stocks with LTP mode...');
+            
+            socket.emit('subscribe_instruments', {
+                instruments: popularInstruments,
+                mode: 'ltp'
+            });
+            
+            log('Subscription request sent');
+            
+            // Add to selected tokens
+            popularInstruments.forEach(token => {
+                if (!selectedTokens.includes(token)) {
+                    selectedTokens.push(token);
+                }
+            });
+            updateTokenList();
+        }
+        
+        function addCustomInstrument() {
+            const tokenInput = document.getElementById('customToken');
+            const token = parseInt(tokenInput.value);
+            
+            if (!token || isNaN(token)) {
+                alert('Please enter a valid token number');
+                return;
+            }
+            
+            if (selectedTokens.includes(token)) {
+                alert('Token already added');
+                return;
+            }
+            
+            selectedTokens.push(token);
+            updateTokenList();
+            tokenInput.value = '';
+        }
+        
+        function subscribeToCustom() {
+            if (!socket || !socket.connected) {
+                alert('Not connected');
+                return;
+            }
+            
+            if (selectedTokens.length === 0) {
+                alert('Please add instruments first');
+                return;
+            }
+            
+            const mode = document.getElementById('dataMode').value;
+            
+            log(`📡 Subscribing to ${selectedTokens.length} instruments with ${mode} mode...`);
+            
+            socket.emit('subscribe_instruments', {
+                instruments: selectedTokens,
+                mode: mode
+            });
+            
+            log('Custom subscription request sent');
+        }
+        
+        function updateTokenList() {
+            document.getElementById('tokenList').textContent = 
+                selectedTokens.length > 0 ? selectedTokens.join(', ') : 'None';
+        }
+        
+        function updatePriceDisplay(token, price) {
+            const statsDiv = document.getElementById('priceStats');
+            
+            // Remove existing stat for this token if any
+            const existing = document.getElementById(`stat-${token}`);
+            if (existing) {
+                existing.remove();
+            }
+            
+            // Add new stat
+            const statDiv = document.createElement('div');
+            statDiv.className = 'stat';
+            statDiv.id = `stat-${token}`;
+            statDiv.innerHTML = `
+                <div class="stat-label">Token ${token}</div>
+                <div class="stat-value">${typeof price === 'number' ? price.toFixed(2) : price}</div>
+            `;
+            
+            // Insert after the first stat (message count)
+            const msgCountStat = document.querySelector('#priceStats .stat');
+            msgCountStat.parentNode.insertBefore(statDiv, msgCountStat.nextSibling);
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+    </script>
+</body>
+</html>
+

@@ -363,21 +363,27 @@ export class StockService {
         data_type: 'live',
       });
 
-      await this.marketDataRepository.save(marketData);
+      try {
+        await this.marketDataRepository.save(marketData);
+        this.logger.log(`Stored market data for instrument ${instrumentToken}`);
+      } catch (dbError) {
+        // Log database error but don't block broadcasting
+        this.logger.warn(`Failed to store market data in DB for token ${instrumentToken}: ${dbError.message}. Continuing with broadcast.`);
+      }
 
-      // Cache the data
-      await this.redisService.cacheMarketData(instrumentToken, data, 60);
+      // Cache the data (non-blocking)
+      try {
+        await this.redisService.cacheMarketData(instrumentToken, data, 60);
+        await this.redisService.set(`last_tick:${instrumentToken}`, data, 300);
+      } catch (cacheError) {
+        this.logger.warn(`Failed to cache market data: ${cacheError.message}`);
+      }
 
-      // Also cache last tick plain for quick dashboard access
-      await this.redisService.set(`last_tick:${instrumentToken}`, data, 300);
-
-      // Broadcast to WebSocket clients
+      // Always broadcast to WebSocket clients (even if DB save failed)
       await this.marketDataGateway.broadcastMarketData(instrumentToken, data);
-
-      this.logger.log(`Stored market data for instrument ${instrumentToken}`);
     } catch (error) {
       this.logger.error('Error storing market data', error);
-      throw error;
+      // Don't throw - allow tick processing to continue
     }
   }
 

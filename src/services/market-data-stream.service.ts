@@ -80,11 +80,16 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       for (const tick of ticks) {
         const instrumentToken = tick.instrument_token;
         
-        // Store market data in database
-        await this.stockService.storeMarketData(instrumentToken, tick);
-        
-        // Update subscribed instruments set
+        // Update subscribed instruments set first
         this.subscribedInstruments.add(instrumentToken);
+        
+        // Store market data in database and broadcast (non-blocking if DB fails)
+        try {
+          await this.stockService.storeMarketData(instrumentToken, tick);
+        } catch (storeError) {
+          // Log but continue processing - broadcast still happens
+          this.logger.debug(`Failed to store tick for ${instrumentToken}, continuing with broadcast: ${storeError.message}`);
+        }
       }
     } catch (error) {
       this.logger.error('Error handling ticks', error);
