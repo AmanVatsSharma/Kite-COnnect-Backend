@@ -109,23 +109,22 @@
             try {
                 log('🔍 Attempting connection with Socket.IO...');
                 
-                // Connect to Socket.IO namespace
-                // Socket.IO uses the default /socket.io path with namespace
-                log('🔗 Connecting to base URL: ' + wsUrl);
-                log('📋 Using namespace: /market-data');
+                // CORRECT: NestJS Socket.IO with namespace
+                // With namespace: '/market-data', the URL is: base/market-data
+                const socketUrl = wsUrl + '/market-data';
+                log('🔗 Full Socket.IO URL: ' + socketUrl);
+                log('📋 This connects to the /market-data namespace');
+                log('🔑 API Key being sent: ' + apiKey.substring(0, 8) + '...');
                 
-                socket = io('/market-data', {
-                    host: wsUrl,
-                    extraHeaders: {
-                        'x-api-key': apiKey
-                    },
+                // Connect to the namespace directly
+                // Query parameter is MOST RELIABLE for Socket.IO WebSocket
+                socket = io(socketUrl, {
                     query: {
-                        'api_key': apiKey
+                        'api_key': apiKey  // Query parameter works best
                     },
-                    transports: ['websocket'],
+                    transports: ['websocket', 'polling'],
                     reconnection: false,
                     autoConnect: true,
-                    upgrade: true,
                     forceNew: true
                 });
                 
@@ -134,17 +133,22 @@
                     log('✅ CONNECTED! Socket ID: ' + socket.id);
                     updateStatus('connected', '✅ Connected!');
                     
-                    // Try to subscribe to something
-                    log('📤 Sending test subscription...');
-                    socket.emit('subscribe', {
-                        instruments: [26000], // Nifty
-                        mode: 'ltp'
-                    });
+                    // IMPORTANT: Get auth token from server response first
+                    log('📥 Waiting for server authentication...');
                 });
                 
-                // Server confirmation
+                // Server sends connection confirmation with auth info
                 socket.on('connected', (data) => {
                     log('📥 Server connected event: ' + JSON.stringify(data));
+                    
+                    // Wait a moment then subscribe
+                    setTimeout(() => {
+                        log('📤 Sending test subscription...');
+                        socket.emit('subscribe', {
+                            instruments: [26000], // Nifty
+                            mode: 'ltp'
+                        });
+                    }, 1000);
                 });
                 
                 // Subscription confirmation
