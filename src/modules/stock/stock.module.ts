@@ -27,6 +27,7 @@ import { InstrumentMapping } from '../../entities/instrument-mapping.entity';
 import { VortexSession } from '../../entities/vortex-session.entity';
 import { VortexInstrument } from '../../entities/vortex-instrument.entity';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
+import { NativeWebSocketGateway } from '../../gateways/native-websocket.gateway';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { VortexInstrumentService } from '../../services/vortex-instrument.servic
     ApiKeyService,
     RequestBatchingService,
     MarketDataGateway,
+    NativeWebSocketGateway,
     MarketDataStreamService,
     ApiKeyGuard,
     MetricsService,

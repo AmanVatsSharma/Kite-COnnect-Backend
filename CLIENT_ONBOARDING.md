@@ -1,28 +1,48 @@
-# First Client Onboarding Guide
+# Client Onboarding Guide
 
-Welcome to the Trading Data Provider. This guide walks your team through getting production access, authenticating, and integrating with our REST and WebSocket APIs for NSE/MCX market data.
+Welcome to the Vayu Market Data Provider. This guide walks your team through getting production access, authenticating, and integrating with our REST and WebSocket APIs for NSE/MCX market data powered by Vayu (Rupeezy Vortex).
 
 ## 1) Credentials
 Your account manager will provide:
 - API base URL: https://marketdata.vedpragya.com
 - API Key: <your_api_key>
-- WebSocket namespace: https://marketdata.vedpragya.com/market-data (uses WSS/WSS over HTTPS)
+- WebSocket namespace: https://marketdata.vedpragya.com/market-data (uses WSS over HTTPS)
+- Swagger docs: https://marketdata.vedpragya.com/api/docs
 
-Keep the API key secret. Rotate if compromised.
+**Important**: All endpoints use the Vayu (Rupeezy Vortex) data provider. Keep your API key secret and rotate if compromised.
 
 ## 2) Network and Latency
 - Hosted in AWS (region-specific). Expect ~50–150ms E2E latency depending on region.
 - Use persistent WebSocket connections for streaming; reuse HTTP/1.1 keep-alive for REST.
+- Data provider: **Vayu (Rupeezy Vortex)**
 
 ## 3) Authentication
 - All REST endpoints (except health/docs) require header: `x-api-key: <your_api_key>`
-- WebSocket: include header `x-api-key` or query `?api_key=<your_api_key>` during connection.
+- WebSocket: include query parameter `?api_key=<your_api_key>` during connection (recommended)
+- Alternative: include header `x-api-key` in extraHeaders
+
+## 4) Quick Tests
+- Health: `GET https://marketdata.vedpragya.com/api/health`
+- Swagger: `GET https://marketdata.vedpragya.com/api/docs`
+- Stats: `GET https://marketdata.vedpragya.com/api/stock/stats` (requires `x-api-key`)
+
+## 5) REST Endpoints
+Refer to Swagger for full details. Common ones:
+
+- **Get Instruments**: `GET /api/stock/instruments?exchange=NSE&instrument_type=EQ`
+- **Search Instruments**: `GET /api/stock/instruments/search?q=RELIANCE&limit=20`
+- **Get Quotes**: `POST /api/stock/quotes` with body `{ "instruments": [26000, 11536] }`
+- **Get LTP**: `POST /api/stock/ltp` with body `{ "instruments": [26000] }`
+- **Get OHLC**: `POST /api/stock/ohlc` with body `{ "instruments": [26000] }`
+- **Historical Data**: `GET /api/stock/historical/:token?from=YYYY-MM-DD&to=YYYY-MM-DD&interval=day`
+- **Last Tick**: `GET /api/stock/market-data/:token/last`
 
 Example curl:
 ```bash
 curl -X POST "https://marketdata.vedpragya.com/api/stock/quotes" \
-  -H "x-api-key: <your_api_key>" -H "Content-Type: application/json" \
-  -d '{"instruments":[738561,5633]}'
+  -H "x-api-key: <your_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{"instruments":[26000,11536]}'
 ```
 
 ## 6) WebSocket Streaming
@@ -44,19 +64,22 @@ const socket = io('https://marketdata.vedpragya.com/market-data', {
 
 socket.on('connect', () => {
   console.log('Connected!', socket.id);
-});
-
-socket.on('connected', () => {
-  socket.emit('subscribe_instruments', { instruments: [738561], type: 'live' });
+  
+  // Subscribe to instruments
+  socket.emit('subscribe', { 
+    instruments: [26000], // Nifty 50
+    mode: 'ltp' 
+  });
 });
 
 socket.on('market_data', (msg) => console.log(msg));
 ```
 
 ## 7) Symbols and Instruments
-- Use `POST /api/stock/instruments/sync` (admin-internal) to sync; as a client use:
-  - `GET /api/stock/instruments?exchange=NSE&instrument_type=EQ&limit=100`
-  - `GET /api/stock/instruments/search?q=RELIANCE&limit=20`
+All instruments are available via Vayu (Rupeezy Vortex) data. As a client:
+- **List instruments**: `GET /api/stock/instruments?exchange=NSE&instrument_type=EQ&limit=100`
+- **Search instruments**: `GET /api/stock/instruments/search?q=RELIANCE&limit=20`
+- **Sync instruments** (admin): `POST /api/stock/instruments/sync?provider=vayu`
 
 ## 8) Quotas and Limits
 - Default rate limit: 600 requests/min per API key (configurable).

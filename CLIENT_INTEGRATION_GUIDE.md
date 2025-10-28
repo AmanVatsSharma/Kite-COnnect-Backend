@@ -1,232 +1,214 @@
-# Client Integration Guide
+# Vedpragya — Client Integration Guide
 
 ## Overview
 
-This guide helps your clients integrate with your market data WebSocket API. Clients will never see backend provider names - they only interact with your unified API.
+Welcome! This guide shows you how to quickly and securely connect to Vedpragya’s unified NSE/MCX market data streaming via our WebSocket API. The API abstracts all backend data sources—your integration is always with the Vedpragya platform.
+
+---
 
 ## Quick Start
 
-### 1. Get Your API Key
+### 1. Obtain Your API Key
 
-Contact your account manager to receive your unique API key.
+Reach out to your Vedpragya account manager for your production API key.
 
-### 2. Connect to WebSocket
+### 2. Connect to the Vedpragya WebSocket
 
 ```javascript
-// Load Socket.IO client
+// Install Socket.IO Client if not already: npm install socket.io-client
 const io = require('socket.io-client');
 
-// Connect to market data stream (WSS over HTTPS)
+// Connect securely to Vedpragya’s stream gateway
 const socket = io('https://marketdata.vedpragya.com/market-data', {
-  query: { 'api_key': 'your-api-key-here' }
+  query: { 'api_key': '<your_api_key>' }
 });
 
-// Handle connection
-socket.on('connected', (data) => {
-  console.log('Connected:', data.message);
+// Connection event (always use 'connect', not 'connected')
+socket.on('connect', () => {
+  console.log('✅ Connected! Socket ID:', socket.id);
 });
 ```
 
-### 3. Subscribe to Instruments
+### 3. Subscribe to Market Instruments
 
 ```javascript
-// Subscribe to multiple instruments
-socket.emit('subscribe_instruments', {
-  instruments: [26000, 11536, 2881],  // Nifty, Bank Nifty, Reliance
-  mode: 'ltp'  // ltp, ohlcv, or full
+// Subscribe to instruments by token. Example: Nifty 50, Bank Nifty, Reliance
+socket.emit('subscribe', {
+  instruments: [26000, 11536, 2881], // Example tokens
+  mode: 'ltp' // Modes: 'ltp', 'ohlcv', 'full'
 });
 
-// Handle subscription confirmation
+// Confirm subscription
 socket.on('subscription_confirmed', (data) => {
-  console.log('Subscribed to:', data.instruments);
+  console.log('Subscription confirmed for:', data.instruments);
 });
 ```
 
-### 4. Receive Market Data
+### 4. Receive Live Market Data
 
 ```javascript
-// Listen for real-time market data
+// Receive real-time ticks
 socket.on('market_data', (data) => {
   console.log('Market Data:', {
-    instrumentToken: data.instrumentToken,
+    instrument: data.instrumentToken,
     price: data.data.last_price,
     timestamp: data.timestamp
   });
 });
 ```
 
-## API Reference
+---
+
+## API Details
 
 ### WebSocket Events
 
-#### Client → Server Events
+#### Client ➔ Server
 
-**`subscribe_instruments`**
+**`subscribe`**
 ```javascript
-socket.emit('subscribe_instruments', {
-  instruments: number[],  // Array of instrument tokens
-  mode: 'ltp' | 'ohlcv' | 'full'  // Data mode
+socket.emit('subscribe', {
+  instruments: [/* array of tokens */],
+  mode: 'ltp' | 'ohlcv' | 'full'
 });
 ```
 
-**`unsubscribe_instruments`**
+**`unsubscribe`**
 ```javascript
-socket.emit('unsubscribe_instruments', {
-  instruments: number[]  // Array of instrument tokens to unsubscribe
+socket.emit('unsubscribe', {
+  instruments: [/* array of tokens */]
 });
 ```
 
 **`get_quote`**
 ```javascript
 socket.emit('get_quote', {
-  instruments: number[]  // Get current quotes
+  instruments: [/* array of tokens */]
 });
 ```
 
 **`get_historical_data`**
 ```javascript
 socket.emit('get_historical_data', {
-  instrumentToken: number,
-  fromDate: '2024-01-01',
-  toDate: '2024-01-31',
+  instrumentToken: 26000,
+  fromDate: 'YYYY-MM-DD',
+  toDate: 'YYYY-MM-DD',
   interval: '1D'
 });
 ```
 
-#### Server → Client Events
+#### Server ➔ Client
 
-**`connected`**
+**`connect`**
 ```javascript
-{
-  message: 'Connected to market data stream',
-  clientId: 'socket-id',
-  timestamp: '2024-01-01T12:00:00.000Z'
-}
+// Fires when connected
+// { message: 'Connected', clientId, timestamp }
 ```
 
 **`subscription_confirmed`**
 ```javascript
-{
-  instruments: [26000, 11536],
-  type: 'live',
-  mode: 'ltp',
-  timestamp: '2024-01-01T12:00:00.000Z'
-}
+// { instruments: [...], type: 'live', mode, timestamp }
 ```
 
 **`market_data`**
 ```javascript
-{
-  instrumentToken: 26000,
-  data: {
-    last_price: 25870.3,
-    ohlc: {
-      open: 25800.0,
-      high: 25900.0,
-      low: 25750.0,
-      close: 25870.3
-    },
-    volume: 1234567
-  },
-  timestamp: '2024-01-01T12:00:00.000Z'
-}
+// {
+//   instrumentToken: 26000,
+//   data: { last_price, ohlc: { open, high, low, close }, volume },
+//   timestamp: ...
+// }
 ```
 
 **`error`**
 ```javascript
-{
-  message: 'Error description'
-}
+// { message: 'Error message' }
 ```
+
+---
 
 ## Data Modes
 
-### `ltp` - Last Traded Price
-- **Size**: 22 bytes per tick
-- **Data**: Last price only
-- **Use case**: Real-time price updates
+| Mode   | Size (approx/tick) | Data                                           | Use Case               |
+|--------|--------------------|------------------------------------------------|------------------------|
+| ltp    | 22 bytes           | Last price only                                | Fast updates           |
+| ohlcv  | 62 bytes           | OHLC + Volume                                  | Charting/analytics     |
+| full   | 266 bytes          | OHLCV + order book depth (top buy/sell levels) | Advanced trading       |
 
-### `ohlcv` - OHLC + Volume
-- **Size**: 62 bytes per tick  
-- **Data**: Open, High, Low, Close, Volume
-- **Use case**: Charting and analysis
+---
 
-### `full` - Complete Market Depth
-- **Size**: 266 bytes per tick
-- **Data**: OHLCV + Market depth (buy/sell orders)
-- **Use case**: Advanced trading strategies
+## Limits
 
-## Rate Limits
+- **WebSocket Connections**: Up to 100 per API key
+- **API Rate**: 1000/minute per API key
+- **Instrument Subscriptions**: Up to 1000 per socket
 
-- **WebSocket Connections**: Up to 100 concurrent connections per API key
-- **API Requests**: 1000 requests per minute per API key
-- **Subscriptions**: Up to 1000 instruments per WebSocket connection
+---
 
-## Error Handling
+## Common Error Handling
 
 ```javascript
-socket.on('error', (error) => {
-  console.error('WebSocket Error:', error.message);
-  
-  // Common error messages:
-  // - "Missing x-api-key"
-  // - "Invalid API key" 
-  // - "Connection limit exceeded"
-  // - "Invalid instruments array"
-  // - "Invalid mode. Must be ltp, ohlcv, or full"
+socket.on('error', (err) => {
+  console.error('WebSocket error:', err.message);
+  // Possible: "Missing x-api-key", "Invalid API key", "Limit exceeded", etc.
 });
 
 socket.on('disconnect', (reason) => {
-  console.log('Disconnected:', reason);
-  // Implement reconnection logic if needed
+  console.warn('Disconnected:', reason);
+  // You may choose to auto-reconnect here
 });
 ```
 
-## Reconnection Strategy
+---
+
+## Example: Simple Reconnection
 
 ```javascript
 function connectWithRetry() {
-  const socket = io('ws://your-domain.com/market-data', {
-    extraHeaders: { 'x-api-key': 'your-api-key' }
+  const s = io('https://marketdata.vedpragya.com/market-data', {
+    query: { 'api_key': '<your_api_key>' }
   });
-  
-  socket.on('connect', () => {
-    console.log('Connected successfully');
-    // Resubscribe to instruments
-    socket.emit('subscribe_instruments', {
-      instruments: [26000, 11536, 2881],
-      mode: 'ltp'
-    });
+
+  s.on('connect', () => {
+    console.log('Connected!');
+    s.emit('subscribe', { instruments: [26000], mode: 'ltp' });
   });
-  
-  socket.on('disconnect', () => {
-    console.log('Disconnected, retrying in 5 seconds...');
+
+  s.on('disconnect', () => {
+    console.log('Reconnect in 5s');
     setTimeout(connectWithRetry, 5000);
   });
-  
-  return socket;
 }
 
-const socket = connectWithRetry();
+connectWithRetry();
 ```
+
+---
 
 ## Popular Instrument Tokens
 
-| Instrument | Token | Description |
-|------------|-------|-------------|
-| Nifty 50 | 26000 | NSE Nifty 50 Index |
-| Bank Nifty | 11536 | NSE Bank Nifty Index |
-| Reliance | 2881 | Reliance Industries Ltd |
-| TCS | 2953217 | Tata Consultancy Services |
-| HDFC Bank | 341249 | HDFC Bank Ltd |
+| Instrument   | Token   | Description              |
+|--------------|---------|-------------------------|
+| Nifty 50     | 26000   | NSE Nifty 50 Index      |
+| Bank Nifty   | 11536   | NSE Bank Nifty Index    |
+| Reliance     | 2881    | Reliance Industries Ltd |
+| TCS          | 2953217 | Tata Consultancy        |
+| HDFC Bank    | 341249  | HDFC Bank Ltd           |
 
-## Market Data Providers
+_Need more? Ask support or use the instruments API._
 
-The platform supports multiple market data providers (Falcon and Vayu) with automatic failover and load balancing.
+---
+
+## Data Providers
+
+Vedpragya abstracts multiple market data sources (e.g., Falcon, Vayu) for best uptime, with seamless backend failover. You always receive a unified market stream.
+
+---
 
 ## Support
 
-For technical support or questions:
-- Email: support@yourcompany.com
-- Documentation: https://docs.yourcompany.com
-- Status Page: https://status.yourcompany.com
+Have questions or need help?
+- Email: support@vedpragya.com
+- Docs: https://marketdata.vedpragya.com/api/docs
+- Status: https://status.vedpragya.com
+
+We’re here to make your onboarding and integration smooth!

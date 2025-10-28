@@ -6,6 +6,13 @@
 - **Protocol**: HTTPS/WSS (Secure WebSocket over HTTPS)
 - **Authentication**: API Key via query parameter
 - **Framework**: Socket.IO
+- **Data Provider**: Vayu (Rupeezy Vortex)
+
+## Important Notes
+
+- All endpoints use **Vayu (Rupeezy Vortex)** data provider
+- SSL/WSS is fully configured and working
+- Use HTTPS in Socket.IO URL (not WS/WSS)
 
 ## Quick Examples
 

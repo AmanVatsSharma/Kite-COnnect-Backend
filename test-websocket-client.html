@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Market Data WebSocket Test</title>
+    <title>Market Data WebSocket Test - Enhanced</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            max-width: 1200px;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
             background: #f5f5f5;
@@ -36,6 +36,18 @@
             background: #ff9800;
             color: white;
         }
+        .status.excellent {
+            background: #4CAF50;
+        }
+        .status.good {
+            background: #8BC34A;
+        }
+        .status.fair {
+            background: #FFC107;
+        }
+        .status.poor {
+            background: #f44336;
+        }
         button {
             background: #2196F3;
             color: white;
@@ -52,12 +64,37 @@
             background: #ccc;
             cursor: not-allowed;
         }
-        input {
+        input, select {
             padding: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
             margin: 5px;
+        }
+        input[type="text"], input[type="number"] {
             width: 300px;
+        }
+        .protocol-selector {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .protocol-option {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: center;
+        }
+        .protocol-option.active {
+            border-color: #2196F3;
+            background: #E3F2FD;
+        }
+        .protocol-option input[type="radio"] {
+            display: none;
         }
         .data-item {
             padding: 8px;
@@ -67,7 +104,7 @@
         }
         .stats {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 10px;
             margin: 20px 0;
         }
@@ -85,10 +122,37 @@
             font-weight: bold;
             color: #1976D2;
         }
+        .error-code {
+            padding: 5px;
+            margin: 5px 0;
+            background: #ffebee;
+            border-left: 3px solid #f44336;
+            font-family: monospace;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .mode-info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        #log {
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 11px;
+            background: #fafafa;
+            padding: 10px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
-    <h1>🎯 Market Data WebSocket Test</h1>
+    <h1>🎯 Market Data WebSocket Test - Enhanced</h1>
     
     <div class="container">
         <h2>Connection Settings</h2>
@@ -100,8 +164,32 @@
             <label>API Key:</label>
             <input type="text" id="apiKey" placeholder="Enter your API key here" />
         </div>
-        <button id="connectBtn" onclick="connect()">Connect</button>
-        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        
+        <h3>Protocol Selection</h3>
+        <div class="protocol-selector">
+            <label class="protocol-option" id="socketio-option">
+                <input type="radio" name="protocol" value="socketio" checked onchange="selectProtocol('socketio')"/>
+                <strong>Socket.IO</strong><br>
+                <small>Recommended for most clients<br>With fallback & reconnection</small>
+            </label>
+            <label class="protocol-option" id="native-option">
+                <input type="radio" name="protocol" value="native" onchange="selectProtocol('native')"/>
+                <strong>Native WebSocket</strong><br>
+                <small>Lightweight, standard WS<br>Lower overhead</small>
+            </label>
+        </div>
+        
+        <div class="controls">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h2>Connection Status & Quality</h2>
+        <div id="status" class="status disconnected">Not Connected</div>
+        <div id="connectionInfo"></div>
+        <div id="qualityIndicator" style="margin-top: 10px;"></div>
     </div>
     
     <div class="container">
@@ -117,28 +205,23 @@
             <input type="number" id="customToken" placeholder="e.g., 11536" />
             <button onclick="addCustomInstrument()" id="addBtn" disabled>Add Token</button>
         </div>
-        <div>
+        <div style="margin: 10px 0;">
             <label>Mode:</label>
             <select id="dataMode">
-                <option value="ltp">LTP (Last Traded Price)</option>
-                <option value="ohlcv">OHLCV (Open, High, Low, Close, Volume)</option>
-                <option value="full">Full (Market Depth)</option>
+                <option value="ltp">LTP (Last Traded Price) - ~22 bytes/tick</option>
+                <option value="ohlcv">OHLCV (Open, High, Low, Close, Volume) - ~62 bytes/tick</option>
+                <option value="full">Full (Market Depth) - ~266 bytes/tick</option>
             </select>
+            <div class="mode-info">Select data mode. Full mode includes order book depth.</div>
         </div>
-        <div id="subscribedTokens" style="margin-top: 10px;">
+        <div style="margin-top: 10px;">
             <p><strong>Subscribed Tokens:</strong> <span id="tokenList">None</span></p>
         </div>
         <button onclick="subscribeToCustom()" id="customSubscribeBtn" disabled>Subscribe to All</button>
     </div>
     
     <div class="container">
-        <h2>Connection Status</h2>
-        <div id="status" class="status disconnected">Not Connected</div>
-        <div id="connectionInfo"></div>
-    </div>
-    
-    <div class="container">
-        <h2>Live Market Data</h2>
+        <h2>Live Market Data & Statistics</h2>
         <div class="stats" id="priceStats">
             <div class="stat">
                 <div class="stat-label">Messages Received</div>
@@ -148,20 +231,35 @@
                 <div class="stat-label">Last Update</div>
                 <div class="stat-value" style="font-size: 14px;" id="lastUpdate">-</div>
             </div>
+            <div class="stat">
+                <div class="stat-label">Connection Latency</div>
+                <div class="stat-value" style="font-size: 18px;" id="latency">-</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Data Rate</div>
+                <div class="stat-value" style="font-size: 18px;" id="dataRate">0/sec</div>
+            </div>
         </div>
     </div>
     
     <div class="container">
         <h2>Raw Data Log</h2>
         <button onclick="clearLog()">Clear Log</button>
-        <div id="log" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px;"></div>
+        <button onclick="exportLogs()">Export Logs</button>
+        <div id="log"></div>
     </div>
     
     <script>
         let socket;
+        let ws; // For native WebSocket
+        let selectedProtocol = 'socketio';
         let messageCount = 0;
         let selectedTokens = [];
-        let priceData = {}; // Store prices by token
+        let priceData = {};
+        let connectionStartTime = 0;
+        let lastMessageTime = 0;
+        let messageRates = [];
+        let pingInterval;
         
         function log(message) {
             const logDiv = document.getElementById('log');
@@ -175,6 +273,13 @@
             statusDiv.textContent = message;
         }
         
+        function selectProtocol(protocol) {
+            selectedProtocol = protocol;
+            document.getElementById('socketio-option').classList.toggle('active', protocol === 'socketio');
+            document.getElementById('native-option').classList.toggle('active', protocol === 'native');
+            log(`📡 Protocol selected: ${protocol.toUpperCase()}`);
+        }
+        
         function connect() {
             const serverUrl = document.getElementById('serverUrl').value;
             const apiKey = document.getElementById('apiKey').value;
@@ -184,21 +289,28 @@
                 return;
             }
             
-            // Force HTTPS/WSS for secure connections
-            let wsUrl = `${serverUrl}/market-data`;
-            // Ensure we're using wss:// instead of ws://
-            if (wsUrl.startsWith('http://')) {
-                wsUrl = wsUrl.replace('http://', 'https://');
-            } else if (wsUrl.startsWith('ws://')) {
-                wsUrl = wsUrl.replace('ws://', 'wss://');
+            if (socket && socket.connected) {
+                disconnect();
             }
             
+            connectionStartTime = Date.now();
             updateStatus('connecting', 'Connecting...');
-            log(`Connecting to ${wsUrl}`);
+            
+            if (selectedProtocol === 'socketio') {
+                connectSocketIO(serverUrl, apiKey);
+            } else {
+                connectNativeWebSocket(serverUrl, apiKey);
+            }
+        }
+        
+        function connectSocketIO(serverUrl, apiKey) {
+            let wsUrl = `${serverUrl}/market-data`;
+            
+            log(`🔌 Connecting via Socket.IO to ${wsUrl}`);
             
             socket = io(wsUrl, {
                 query: {
-                    'api_key': apiKey  // Query parameter is most reliable
+                    'api_key': apiKey
                 },
                 transports: ['websocket', 'polling'],
                 reconnection: true,
@@ -206,9 +318,8 @@
                 reconnectionAttempts: 5
             });
             
-            // Connection handlers
             socket.on('connect', () => {
-                updateStatus('connected', '✅ Connected to ' + serverUrl);
+                updateStatus('connected', '✅ Connected via Socket.IO');
                 log(`✅ Connected! Socket ID: ${socket.id}`);
                 
                 document.getElementById('connectBtn').disabled = true;
@@ -219,12 +330,15 @@
                 document.getElementById('customSubscribeBtn').disabled = false;
                 
                 document.getElementById('connectionInfo').innerHTML = 
-                    `Socket ID: ${socket.id}<br>Server: ${serverUrl}`;
+                    `Socket ID: ${socket.id}<br>Server: ${serverUrl}<br>Protocol: Socket.IO`;
+                
+                startPing();
             });
             
             socket.on('connected', (data) => {
                 log(`📥 Server confirmation: ${data.message}`);
                 log(`Client ID: ${data.clientId}`);
+                showConnectionQuality();
             });
             
             socket.on('subscription_confirmed', (data) => {
@@ -233,88 +347,228 @@
                 log(`   Mode: ${data.mode}`);
             });
             
-            socket.on('market_data', (data) => {
-                messageCount++;
-                document.getElementById('msgCount').textContent = messageCount;
-                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+            socket.on('market_data', handleMarketData);
+            socket.on('error', handleError);
+            socket.on('connect_error', handleConnectionError);
+            socket.on('disconnect', handleDisconnect);
+        }
+        
+        function connectNativeWebSocket(serverUrl, apiKey) {
+            // Convert HTTPS to WSS for WebSocket
+            const wsUrl = serverUrl.replace('https://', 'wss://').replace('http://', 'ws://') + '/ws';
+            
+            log(`🔌 Connecting via Native WebSocket to ${wsUrl}`);
+            
+            try {
+                ws = new WebSocket(`${wsUrl}?api_key=${apiKey}`);
                 
-                // Store price data
+                ws.onopen = () => {
+                    updateStatus('connected', '✅ Connected via Native WebSocket');
+                    log(`✅ Connected via Native WebSocket!`);
+                    
+                    document.getElementById('connectBtn').disabled = true;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    document.getElementById('subscribeBtn').disabled = false;
+                    document.getElementById('popularBtn').disabled = false;
+                    document.getElementById('addBtn').disabled = false;
+                    document.getElementById('customSubscribeBtn').disabled = false;
+                    
+                    document.getElementById('connectionInfo').innerHTML = 
+                        `Protocol: Native WebSocket<br>Server: ${serverUrl}`;
+                    
+                    startPing();
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.event) {
+                            // Event-based message format
+                            if (data.event === 'connected') {
+                                log(`📥 Server: ${data.message || 'Connected'}`);
+                                showConnectionQuality();
+                            } else if (data.event === 'subscription_confirmed') {
+                                log(`✅ Subscription confirmed!`);
+                                log(`   Instruments: ${data.data?.instruments?.join(', ') || 'N/A'}`);
+                            } else if (data.event === 'market_data') {
+                                handleMarketData(data.data);
+                            } else if (data.event === 'error') {
+                                log(`❌ Error: ${data.message || 'Unknown error'}`);
+                                showError(data.message);
+                            }
+                        } else {
+                            // Direct data
+                            handleMarketData(data);
+                        }
+                    } catch (e) {
+                        log(`⚠️ Failed to parse message: ${e.message}`);
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    log(`❌ WebSocket error: ${error}`);
+                    updateStatus('disconnected', '❌ Connection error');
+                };
+                
+                ws.onclose = (event) => {
+                    log(`⚠️ Disconnected: ${event.code} ${event.reason || 'Unknown reason'}`);
+                    updateStatus('disconnected', `Disconnected: ${event.code}`);
+                    handleDisconnect();
+                };
+                
+            } catch (error) {
+                log(`❌ Failed to create WebSocket: ${error.message}`);
+                updateStatus('disconnected', '❌ Failed to connect');
+            }
+        }
+        
+        function handleMarketData(data) {
+            messageCount++;
+            document.getElementById('msgCount').textContent = messageCount;
+            
+            const now = Date.now();
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+            
+            // Calculate data rate
+            if (lastMessageTime > 0) {
+                messageRates.push(1000 / (now - lastMessageTime));
+                if (messageRates.length > 10) messageRates.shift();
+                const avgRate = messageRates.reduce((a, b) => a + b, 0) / messageRates.length;
+                document.getElementById('dataRate').textContent = avgRate.toFixed(1) + '/sec';
+            }
+            lastMessageTime = now;
+            
+            // Store price data
+            if (data.instrumentToken) {
                 priceData[data.instrumentToken] = data.data;
-                
-                // Update price display
-                updatePriceDisplay(data.instrumentToken, data.data.last_price);
-                
-                log(`💰 Data - Token: ${data.instrumentToken}, Price: ${data.data.last_price}, Time: ${data.timestamp}`);
-            });
+                updatePriceDisplay(data.instrumentToken, data.data?.last_price);
+                log(`💰 Token: ${data.instrumentToken}, Price: ${data.data?.last_price}, Time: ${data.timestamp}`);
+            }
+        }
+        
+        function handleError(error) {
+            console.error('WebSocket Error:', error);
+            const errorMsg = error.message || JSON.stringify(error);
+            log(`❌ Error: ${errorMsg}`);
+            updateStatus('disconnected', '❌ Error: ' + errorMsg);
+            showError(errorMsg);
+        }
+        
+        function handleConnectionError(error) {
+            console.error('Connection Error:', error);
+            log(`❌ Connection Error: ${error.message || 'Unknown error'}`);
+            updateStatus('disconnected', '❌ Connection failed');
+            showError(error.message);
+        }
+        
+        function handleDisconnect(reason) {
+            log(`⚠️ Disconnected: ${reason || 'Connection lost'}`);
+            updateStatus('disconnected', 'Disconnected');
             
-            socket.on('error', (error) => {
-                console.error('WebSocket Error:', error);
-                log(`❌ Error: ${error.message || JSON.stringify(error)}`);
-                updateStatus('disconnected', '❌ Error: ' + (error.message || 'Connection failed'));
-            });
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            document.getElementById('subscribeBtn').disabled = true;
+            document.getElementById('popularBtn').disabled = true;
+            document.getElementById('addBtn').disabled = true;
+            document.getElementById('customSubscribeBtn').disabled = true;
             
-            // Add connection error handler
-            socket.on('connect_error', (error) => {
-                console.error('Connection Error:', error);
-                log(`❌ Connection Error: ${error.message || JSON.stringify(error)}`);
-                updateStatus('disconnected', '❌ Connection failed: ' + (error.message || 'Unknown error'));
-            });
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+        }
+        
+        function showConnectionQuality() {
+            const qualityDiv = document.getElementById('qualityIndicator');
+            const latency = Date.now() - connectionStartTime;
+            let quality = 'poor';
+            let text = 'Poor';
             
-            socket.on('disconnect', (reason) => {
-                log(`⚠️ Disconnected: ${reason}`);
-                updateStatus('disconnected', 'Disconnected: ' + reason);
-                
-                document.getElementById('connectBtn').disabled = false;
-                document.getElementById('disconnectBtn').disabled = true;
-                document.getElementById('subscribeBtn').disabled = true;
-                document.getElementById('popularBtn').disabled = true;
-                document.getElementById('addBtn').disabled = true;
-                document.getElementById('customSubscribeBtn').disabled = true;
-            });
+            if (latency < 100) {
+                quality = 'excellent';
+                text = 'Excellent';
+            } else if (latency < 300) {
+                quality = 'good';
+                text = 'Good';
+            } else if (latency < 500) {
+                quality = 'fair';
+                text = 'Fair';
+            }
             
-            socket.on('connect_error', (error) => {
-                log(`❌ Connection failed: ${error.message}`);
-                updateStatus('disconnected', 'Connection failed');
-                
-                document.getElementById('connectBtn').disabled = false;
-                document.getElementById('disconnectBtn').disabled = true;
-                document.getElementById('subscribeBtn').disabled = true;
-                document.getElementById('popularBtn').disabled = true;
-                document.getElementById('addBtn').disabled = true;
-                document.getElementById('customSubscribeBtn').disabled = true;
-            });
+            qualityDiv.innerHTML = `<div class="status ${quality}">Connection Quality: ${text} (${latency}ms)</div>`;
+            document.getElementById('latency').textContent = latency + 'ms';
+        }
+        
+        function showError(message) {
+            document.getElementById('connectionInfo').innerHTML += 
+                `<div class="error-code">ERROR: ${message}</div>`;
+        }
+        
+        function startPing() {
+            if (pingInterval) clearInterval(pingInterval);
+            
+            pingInterval = setInterval(() => {
+                if (socket && socket.connected) {
+                    const now = Date.now();
+                    socket.emit('ping', { timestamp: now });
+                } else if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ event: 'ping', timestamp: Date.now() }));
+                }
+            }, 10000); // Ping every 10 seconds
         }
         
         function disconnect() {
             if (socket) {
                 socket.disconnect();
                 socket = null;
-                updateStatus('disconnected', 'Not Connected');
-                
-                document.getElementById('connectBtn').disabled = false;
-                document.getElementById('disconnectBtn').disabled = true;
-                document.getElementById('subscribeBtn').disabled = true;
-                
-                log('Disconnected');
+            }
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            updateStatus('disconnected', 'Not Connected');
+            
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            document.getElementById('subscribeBtn').disabled = true;
+            document.getElementById('popularBtn').disabled = true;
+            document.getElementById('addBtn').disabled = true;
+            document.getElementById('customSubscribeBtn').disabled = true;
+            
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+            
+            log('Disconnected');
+        }
+        
+        function emit(event, data) {
+            if (selectedProtocol === 'socketio' && socket && socket.connected) {
+                socket.emit(event, data);
+            } else if (selectedProtocol === 'native' && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ event: event, data: data }));
             }
         }
         
         function subscribeToNifty() {
-            if (!socket || !socket.connected) {
+            if ((!socket || !socket.connected) && (!ws || ws.readyState !== WebSocket.OPEN)) {
                 alert('Not connected');
                 return;
             }
             
             log('📡 Subscribing to Nifty 50 (token: 26000) with LTP mode...');
             
-            socket.emit('subscribe_instruments', {
-                instruments: [26000],  // Nifty 50
+            // Use new event name 'subscribe' (also supports old 'subscribe_instruments' for backward compatibility)
+            emit('subscribe', {
+                instruments: [26000],
                 mode: 'ltp'
             });
             
             log('Subscription request sent');
             
-            // Add to selected tokens
             if (!selectedTokens.includes(26000)) {
                 selectedTokens.push(26000);
                 updateTokenList();
@@ -322,23 +576,22 @@
         }
         
         function subscribeToPopular() {
-            if (!socket || !socket.connected) {
+            if ((!socket || !socket.connected) && (!ws || ws.readyState !== WebSocket.OPEN)) {
                 alert('Not connected');
                 return;
             }
             
-            const popularInstruments = [26000, 11536, 2881]; // Nifty, Bank Nifty, Reliance
+            const popularInstruments = [26000, 11536, 2881];
             
             log('📡 Subscribing to popular stocks with LTP mode...');
             
-            socket.emit('subscribe_instruments', {
+            emit('subscribe', {
                 instruments: popularInstruments,
                 mode: 'ltp'
             });
             
             log('Subscription request sent');
             
-            // Add to selected tokens
             popularInstruments.forEach(token => {
                 if (!selectedTokens.includes(token)) {
                     selectedTokens.push(token);
@@ -367,7 +620,7 @@
         }
         
         function subscribeToCustom() {
-            if (!socket || !socket.connected) {
+            if ((!socket || !socket.connected) && (!ws || ws.readyState !== WebSocket.OPEN)) {
                 alert('Not connected');
                 return;
             }
@@ -381,7 +634,7 @@
             
             log(`📡 Subscribing to ${selectedTokens.length} instruments with ${mode} mode...`);
             
-            socket.emit('subscribe_instruments', {
+            emit('subscribe', {
                 instruments: selectedTokens,
                 mode: mode
             });
@@ -397,13 +650,11 @@
         function updatePriceDisplay(token, price) {
             const statsDiv = document.getElementById('priceStats');
             
-            // Remove existing stat for this token if any
             const existing = document.getElementById(`stat-${token}`);
             if (existing) {
                 existing.remove();
             }
             
-            // Add new stat
             const statDiv = document.createElement('div');
             statDiv.className = 'stat';
             statDiv.id = `stat-${token}`;
@@ -412,7 +663,6 @@
                 <div class="stat-value">${typeof price === 'number' ? price.toFixed(2) : price}</div>
             `;
             
-            // Insert after the first stat (message count)
             const msgCountStat = document.querySelector('#priceStats .stat');
             msgCountStat.parentNode.insertBefore(statDiv, msgCountStat.nextSibling);
         }
@@ -420,7 +670,20 @@
         function clearLog() {
             document.getElementById('log').innerHTML = '';
         }
+        
+        function exportLogs() {
+            const logs = document.getElementById('log').innerText;
+            const blob = new Blob([logs], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'websocket-logs-' + new Date().toISOString() + '.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // Initialize
+        selectProtocol('socketio');
     </script>
 </body>
 </html>
-
