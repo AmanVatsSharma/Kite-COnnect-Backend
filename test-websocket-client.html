@@ -94,7 +94,7 @@
         <h2>Connection Settings</h2>
         <div>
             <label>Server:</label>
-            <input type="text" id="serverUrl" value="https://marketdata.vedpragya.com" />
+            <input type="text" id="serverUrl" value="https://marketdata.vedpragya.com" placeholder="Use https:// (not http://)" />
         </div>
         <div>
             <label>API Key:</label>
@@ -184,7 +184,14 @@
                 return;
             }
             
-            const wsUrl = `${serverUrl}/market-data`;
+            // Force HTTPS/WSS for secure connections
+            let wsUrl = `${serverUrl}/market-data`;
+            // Ensure we're using wss:// instead of ws://
+            if (wsUrl.startsWith('http://')) {
+                wsUrl = wsUrl.replace('http://', 'https://');
+            } else if (wsUrl.startsWith('ws://')) {
+                wsUrl = wsUrl.replace('ws://', 'wss://');
+            }
             
             updateStatus('connecting', 'Connecting...');
             log(`Connecting to ${wsUrl}`);
@@ -193,6 +200,7 @@
                 extraHeaders: {
                     'x-api-key': apiKey
                 },
+                transports: ['websocket'], // Force websocket (not polling)
                 reconnection: true,
                 reconnectionDelay: 1000,
                 reconnectionAttempts: 5
@@ -240,8 +248,16 @@
             });
             
             socket.on('error', (error) => {
-                log(`❌ Error: ${error.message}`);
-                updateStatus('disconnected', '❌ Error: ' + error.message);
+                console.error('WebSocket Error:', error);
+                log(`❌ Error: ${error.message || JSON.stringify(error)}`);
+                updateStatus('disconnected', '❌ Error: ' + (error.message || 'Connection failed'));
+            });
+            
+            // Add connection error handler
+            socket.on('connect_error', (error) => {
+                console.error('Connection Error:', error);
+                log(`❌ Connection Error: ${error.message || JSON.stringify(error)}`);
+                updateStatus('disconnected', '❌ Connection failed: ' + (error.message || 'Unknown error'));
             });
             
             socket.on('disconnect', (reason) => {

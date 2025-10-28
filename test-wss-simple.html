@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple WSS Test</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .log {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .connected { background: #4CAF50; color: white; }
+        .error { background: #f44336; color: white; }
+        .connecting { background: #ff9800; color: white; }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔌 Simple WebSocket Secure (WSS) Test</h1>
+    
+    <div>
+        <label>Server URL:</label><br>
+        <input type="text" id="serverUrl" value="https://marketdata.vedpragya.com" />
+    </div>
+    
+    <div>
+        <label>API Key:</label><br>
+        <input type="text" id="apiKey" value="demo-key-1" />
+    </div>
+    
+    <button onclick="testConnection()">Connect & Test</button>
+    <button onclick="clearLog()">Clear Log</button>
+    
+    <div id="status" class="status">Ready to connect...</div>
+    
+    <div class="log" id="log"></div>
+    
+    <script>
+        let socket = null;
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        function updateStatus(status, message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'status ' + status;
+            statusDiv.textContent = message;
+        }
+        
+        function testConnection() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            
+            if (!apiKey) {
+                alert('Please enter an API key');
+                return;
+            }
+            
+            const wsUrl = serverUrl;
+            log(`🔍 Starting connection to: ${wsUrl}`);
+            log(`🔑 Using API Key: ${apiKey.substring(0, 8)}...`);
+            updateStatus('connecting', 'Connecting...');
+            
+            // Close existing connection if any
+            if (socket) {
+                socket.disconnect();
+            }
+            
+            try {
+                log('🔍 Attempting connection with Socket.IO...');
+                
+                // Connect to Socket.IO namespace
+                // Socket.IO uses the default /socket.io path with namespace
+                log('🔗 Connecting to base URL: ' + wsUrl);
+                log('📋 Using namespace: /market-data');
+                
+                socket = io('/market-data', {
+                    host: wsUrl,
+                    extraHeaders: {
+                        'x-api-key': apiKey
+                    },
+                    query: {
+                        'api_key': apiKey
+                    },
+                    transports: ['websocket'],
+                    reconnection: false,
+                    autoConnect: true,
+                    upgrade: true,
+                    forceNew: true
+                });
+                
+                // Connection event
+                socket.on('connect', () => {
+                    log('✅ CONNECTED! Socket ID: ' + socket.id);
+                    updateStatus('connected', '✅ Connected!');
+                    
+                    // Try to subscribe to something
+                    log('📤 Sending test subscription...');
+                    socket.emit('subscribe', {
+                        instruments: [26000], // Nifty
+                        mode: 'ltp'
+                    });
+                });
+                
+                // Server confirmation
+                socket.on('connected', (data) => {
+                    log('📥 Server connected event: ' + JSON.stringify(data));
+                });
+                
+                // Subscription confirmation
+                socket.on('subscription_confirmed', (data) => {
+                    log('✅ Subscription confirmed: ' + JSON.stringify(data));
+                });
+                
+                // Market data
+                socket.on('market_data', (data) => {
+                    log('💰 Market data: ' + JSON.stringify(data));
+                });
+                
+                // Connection error - detailed logging
+                socket.on('connect_error', (error) => {
+                    log('❌ Connection error: ' + JSON.stringify(error));
+                    log('❌ Error details: type=' + error.type + ', message=' + error.message);
+                    console.error('Full error object:', error);
+                    updateStatus('error', '❌ Connection failed: ' + (error.message || error.type));
+                });
+                
+                // Error
+                socket.on('error', (error) => {
+                    log('❌ Error event: ' + JSON.stringify(error));
+                    updateStatus('error', '❌ Error: ' + error.message);
+                });
+                
+                // Disconnect
+                socket.on('disconnect', (reason) => {
+                    log('⚠️ Disconnected: ' + reason);
+                    updateStatus('error', 'Disconnected: ' + reason);
+                });
+                
+            } catch (error) {
+                log('❌ Exception: ' + error.message);
+                updateStatus('error', 'Exception: ' + error.message);
+            }
+        }
+        
+        // Auto-test on load
+        window.onload = function() {
+            log('🚀 WSS Test Page Loaded');
+            log('📝 Instructions:');
+            log('  1. Make sure server URL is https://marketdata.vedpragya.com');
+            log('  2. Enter your API key (demo-key-1)');
+            log('  3. Click "Connect & Test"');
+            log('  4. Check browser console (F12) for detailed logs');
+        };
+    </script>
+</body>
+</html>
+
