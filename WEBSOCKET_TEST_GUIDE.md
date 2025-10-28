@@ -18,11 +18,11 @@ This guide shows you how to test the WebSocket connection to receive real-time m
 ### Basic Test
 
 ```bash
-# Test with default localhost
-node test-websocket.js your-api-key-here
-
-# Test with your EC2 server
+# Test with production server (HTTPS/WSS)
 SERVER_URL=https://marketdata.vedpragya.com node test-websocket.js your-api-key-here
+
+# Test locally (HTTP/WS) - only for development
+node test-websocket.js your-api-key-here
 ```
 
 ### Expected Output
@@ -31,7 +31,7 @@ SERVER_URL=https://marketdata.vedpragya.com node test-websocket.js your-api-key-
 ====================================
 Market Data WebSocket Test Client
 ====================================
-Server: ws://localhost:3000/market-data
+Server: https://marketdata.vedpragya.com/market-data
 API Key: your-api-...
 
 Connecting to WebSocket...

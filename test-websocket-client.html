@@ -197,10 +197,10 @@
             log(`Connecting to ${wsUrl}`);
             
             socket = io(wsUrl, {
-                extraHeaders: {
-                    'x-api-key': apiKey
+                query: {
+                    'api_key': apiKey  // Query parameter is most reliable
                 },
-                transports: ['websocket'], // Force websocket (not polling)
+                transports: ['websocket', 'polling'],
                 reconnection: true,
                 reconnectionDelay: 1000,
                 reconnectionAttempts: 5

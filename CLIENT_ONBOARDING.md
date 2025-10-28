@@ -4,10 +4,9 @@ Welcome to the Trading Data Provider. This guide walks your team through getting
 
 ## 1) Credentials
 Your account manager will provide:
-- API base URL: https://your-domain.com
+- API base URL: https://marketdata.vedpragya.com
 - API Key: <your_api_key>
-- WebSocket namespace: wss://your-domain.com/market-data
-- Swagger docs: https://your-domain.com/api/docs
+- WebSocket namespace: https://marketdata.vedpragya.com/market-data (uses WSS/WSS over HTTPS)
 
 Keep the API key secret. Rotate if compromised.
 
@@ -19,38 +18,32 @@ Keep the API key secret. Rotate if compromised.
 - All REST endpoints (except health/docs) require header: `x-api-key: <your_api_key>`
 - WebSocket: include header `x-api-key` or query `?api_key=<your_api_key>` during connection.
 
-## 4) Quick Tests
-- Health: `GET /api/health`
-- Swagger: `GET /api/docs`
-- Stats: `GET /api/stock/stats` (requires `x-api-key`)
-
-## 5) REST Endpoints
-Refer to Swagger for full details. Common ones:
-- Quotes: `POST /api/stock/quotes` with body `{ "instruments": [738561, 5633] }`
-- LTP: `POST /api/stock/ltp` with body `{ "instruments": [ ... ] }`
-- OHLC: `POST /api/stock/ohlc` with body `{ "instruments": [ ... ] }`
-- Historical: `GET /api/stock/historical/:token?from=YYYY-MM-DD&to=YYYY-MM-DD&interval=minute|day|...`
-- Last tick (cached): `GET /api/stock/market-data/:token/last`
-
 Example curl:
 ```bash
-curl -X POST "https://your-domain.com/api/stock/quotes" \
+curl -X POST "https://marketdata.vedpragya.com/api/stock/quotes" \
   -H "x-api-key: <your_api_key>" -H "Content-Type: application/json" \
   -d '{"instruments":[738561,5633]}'
 ```
 
 ## 6) WebSocket Streaming
-- Connect: `wss://your-domain.com/market-data`
+- Connect: `https://marketdata.vedpragya.com/market-data` (automatically uses WSS over HTTPS)
+- **Important**: Use HTTPS (not WS/WSS in Socket.IO URL - it handles that automatically)
 - Client events:
-  - `subscribe_instruments`: `{ instruments: number[], type?: 'live'|'historical'|'both' }`
-  - `unsubscribe_instruments`: `{ instruments: number[] }`
+  - `subscribe`: `{ instruments: number[], mode: 'ltp'|'ohlcv'|'full' }`
+  - `unsubscribe`: `{ instruments: number[] }`
 - Server events:
-  - `connected`, `market_data`, `quote_data`, `historical_data`, `error`
+  - `connected`, `market_data`, `subscription_confirmed`, `error`
 
 JavaScript example:
 ```js
-const socket = io('https://your-domain.com/market-data', {
-  extraHeaders: { 'x-api-key': '<your_api_key>' }
+const io = require('socket.io-client');
+
+const socket = io('https://marketdata.vedpragya.com/market-data', {
+  query: { 'api_key': 'your_api_key_here' }  // Query parameter
+});
+
+socket.on('connect', () => {
+  console.log('Connected!', socket.id);
 });
 
 socket.on('connected', () => {

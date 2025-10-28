@@ -16,11 +16,9 @@ Contact your account manager to receive your unique API key.
 // Load Socket.IO client
 const io = require('socket.io-client');
 
-// Connect to market data stream
-const socket = io('ws://your-domain.com/market-data', {
-  extraHeaders: {
-    'x-api-key': 'your-api-key-here'
-  }
+// Connect to market data stream (WSS over HTTPS)
+const socket = io('https://marketdata.vedpragya.com/market-data', {
+  query: { 'api_key': 'your-api-key-here' }
 });
 
 // Handle connection
