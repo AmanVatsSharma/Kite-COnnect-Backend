@@ -1,11 +1,28 @@
 version: '3.8'
 
+# =============================================================================
+# SSL/TLS Configuration Notes
+# =============================================================================
+# SSL terminates at Nginx on the EC2 host (not in Docker containers).
+# Docker containers communicate internally over HTTP on the Docker network.
+# 
+# Architecture:
+#   Internet (HTTPS:443) → Nginx on EC2 host → HTTP:3000 → Docker containers
+#
+# Benefits:
+#   - SSL only configured once at Nginx level
+#   - No SSL certificates needed in Docker
+#   - No code changes required for WebSocket → WSS
+#   - Easier certificate management and renewal
+# =============================================================================
+
 services:
   # Trading App Backend
   trading-app:
     build: .
     container_name: trading-app-backend
     # Expose port 3000 to host (for testing without Nginx)
+    # In production, Nginx on host proxies to this port
     ports:
       - "3000:3000"
     environment:

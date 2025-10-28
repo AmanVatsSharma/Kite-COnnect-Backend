@@ -126,23 +126,17 @@ export class StockController {
   }
 
   @Get('instruments/search')
-  @ApiOperation({ summary: 'Search instruments by symbol or name' })
-  @ApiQuery({ name: 'q', required: true, example: 'RELIANCE' })
+  @ApiOperation({ summary: 'Search instruments by symbol or name (case-insensitive)' })
+  @ApiQuery({ name: 'q', required: true, example: 'rel' })
   @ApiQuery({ name: 'limit', required: false, example: 20 })
   async searchInstruments(
     @Query('q') query: string,
     @Query('limit') limit?: number,
   ) {
     try {
-      // Accept NSE:SBIN or NSE_SBIN as a direct lookup
-      if (/^(NSE|BSE|NFO|CDS|MCX)[:_]/i.test(query)) {
-        const resolved = await this.stockService.resolveSymbol(query);
-        return {
-          success: true,
-          data: resolved.instrument ? [resolved.instrument] : resolved.candidates,
-        };
-      }
-      if (!query) {
+      // Trim and validate query
+      const trimmedQuery = query?.trim();
+      if (!trimmedQuery || trimmedQuery.length === 0) {
         throw new HttpException(
           {
             success: false,
@@ -152,8 +146,17 @@ export class StockController {
         );
       }
 
+      // Accept NSE:SBIN or NSE_SBIN as a direct lookup
+      if (/^(NSE|BSE|NFO|CDS|MCX)[:_]/i.test(trimmedQuery)) {
+        const resolved = await this.stockService.resolveSymbol(trimmedQuery);
+        return {
+          success: true,
+          data: resolved.instrument ? [resolved.instrument] : resolved.candidates,
+        };
+      }
+
       const instruments = await this.stockService.searchInstruments(
-        query,
+        trimmedQuery,
         limit ? parseInt(limit.toString()) : 20,
       );
 
@@ -162,6 +165,7 @@ export class StockController {
         data: instruments,
       };
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new HttpException(
         {
           success: false,

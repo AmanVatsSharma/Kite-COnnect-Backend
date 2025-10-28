@@ -188,10 +188,13 @@ export class StockService {
 
   async searchInstruments(query: string, limit: number = 20): Promise<Instrument[]> {
     try {
+      // Normalize query: trim whitespace and convert to uppercase for case-insensitive search
+      const normalizedQuery = query.trim().toUpperCase();
+      
       return await this.instrumentRepository
         .createQueryBuilder('instrument')
-        .where('instrument.tradingsymbol LIKE :query', { query: `%${query}%` })
-        .orWhere('instrument.name LIKE :query', { query: `%${query}%` })
+        .where('UPPER(instrument.tradingsymbol) LIKE :query', { query: `%${normalizedQuery}%` })
+        .orWhere('UPPER(instrument.name) LIKE :query', { query: `%${normalizedQuery}%` })
         .andWhere('instrument.is_active = :is_active', { is_active: true })
         .limit(limit)
         .orderBy('instrument.tradingsymbol', 'ASC')
