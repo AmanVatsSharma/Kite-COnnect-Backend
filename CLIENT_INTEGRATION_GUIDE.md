@@ -208,7 +208,7 @@ Vedpragya abstracts multiple market data sources (e.g., Falcon, Vayu) for best u
 
 Have questions or need help?
 - Email: support@vedpragya.com
-- Docs: https://marketdata.vedpragya.com/api/docs
-- Status: https://status.vedpragya.com
+
+
 
 We’re here to make your onboarding and integration smooth!

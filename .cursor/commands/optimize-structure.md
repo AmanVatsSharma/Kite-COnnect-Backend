@@ -1,0 +1,1 @@
+Refactor folders, naming, imports, linting, and patterns for scalability + clean architecture.

@@ -544,7 +544,6 @@ socket.on('pong', (data) => {
 1. Check API key is valid
 2. Verify server URL uses HTTPS
 3. Check firewall/network allows WSS connections
-4. Test with: `https://marketdata.vedpragya.com/api/health`
 
 ### No Data Received
 
@@ -596,13 +595,11 @@ socket.on('pong', (data) => {
 ## Support
 
 - **Email**: support@vedpragya.com
-- **Docs**: https://marketdata.vedpragya.com/api/docs
-- **Health Check**: https://marketdata.vedpragya.com/api/health
-- **Status**: https://status.vedpragya.com
-
+- **Phone**: +91 9963730111
+- **Website**: [vedpragya.com](https://vedpragya.com)
 ---
 
-**Version**: 1.0.0  
+**Version**: 1.3.0  
 **Last Updated**: 2024-01-XX  
 **Protocol Support**: Socket.IO 4.x, Native WebSocket
 

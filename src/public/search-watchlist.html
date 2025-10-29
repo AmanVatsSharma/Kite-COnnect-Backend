@@ -1,0 +1,1132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Instrument Search & Watchlist - Market Data</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root { 
+      --bg: #0b1020; 
+      --card: #121735; 
+      --text: #e6ebff; 
+      --muted: #9aa4c4; 
+      --accent: #7c9eff; 
+      --ok: #2bd39b; 
+      --warn: #ffb648; 
+      --bad: #ff6b6b;
+      --border: rgba(255,255,255,0.06);
+      --hover: rgba(255,255,255,0.08);
+      --equity: #2bd39b;
+      --futures: #7c9eff;
+      --options: #b47cff;
+      --mcx: #ffb648;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      background:linear-gradient(180deg,#0b1020 0%,#0d1430 100%);
+      color:var(--text);
+      min-height:100vh;
+      padding:20px 0;
+    }
+    .container{max-width:1400px;margin:0 auto;padding:0 16px}
+    
+    /* Header */
+    .header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:24px 0;
+      border-bottom:1px solid var(--border);
+      margin-bottom:24px;
+    }
+    .title{
+      font-weight:800;
+      font-size:32px;
+      letter-spacing:0.3px;
+      display:flex;
+      align-items:center;
+      gap:12px;
+      margin:0;
+    }
+    .title::before{content:'📊';font-size:28px}
+    
+    /* API Key Section */
+    .api-key-section{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:20px;
+      margin-bottom:24px;
+    }
+    .api-key-form{
+      display:flex;
+      gap:12px;
+      align-items:flex-end;
+    }
+    .form-group{
+      flex:1;
+      margin-bottom:0;
+    }
+    .form-label{
+      display:block;
+      font-size:12px;
+      font-weight:600;
+      color:var(--muted);
+      margin-bottom:6px;
+    }
+    .form-input,.form-select{
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:rgba(15,20,48,0.5);
+      color:var(--text);
+      padding:12px 16px;
+      width:100%;
+      font-size:14px;
+      transition:all 0.2s;
+    }
+    .form-input:focus,.form-select:focus{
+      outline:none;
+      border-color:var(--accent);
+      box-shadow:0 0 0 3px rgba(124,158,255,0.1);
+    }
+    
+    /* Buttons */
+    .btn{
+      background:var(--accent);
+      border:none;
+      border-radius:12px;
+      color:white;
+      padding:12px 24px;
+      font-weight:600;
+      cursor:pointer;
+      font-size:14px;
+      transition:all 0.2s;
+      white-space:nowrap;
+    }
+    .btn:hover{background:#6b8eff;transform:translateY(-1px)}
+    .btn:disabled{background:var(--muted);cursor:not-allowed;transform:none;opacity:0.6}
+    .btn-sm{padding:8px 16px;font-size:12px}
+    .btn-secondary{background:var(--border);color:var(--text)}
+    .btn-secondary:hover{background:var(--hover)}
+    
+    /* Tabs */
+    .tabs{
+      display:flex;
+      gap:8px;
+      border-bottom:1px solid var(--border);
+      margin-bottom:24px;
+      flex-wrap:wrap;
+    }
+    .tab{
+      padding:12px 24px;
+      background:none;
+      border:none;
+      color:var(--muted);
+      cursor:pointer;
+      font-weight:600;
+      border-bottom:3px solid transparent;
+      transition:all 0.2s;
+      position:relative;
+      font-size:14px;
+    }
+    .tab:hover{color:var(--text)}
+    .tab.active{color:var(--text)}
+    .tab[data-tab="equity"].active{border-bottom-color:var(--equity)}
+    .tab[data-tab="futures"].active{border-bottom-color:var(--futures)}
+    .tab[data-tab="options"].active{border-bottom-color:var(--options)}
+    .tab[data-tab="mcx"].active{border-bottom-color:var(--mcx)}
+    
+    /* Tab Content */
+    .tab-content{
+      display:none;
+    }
+    .tab-content.active{
+      display:block;
+    }
+    
+    /* Search Section */
+    .search-section{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:20px;
+      margin-bottom:24px;
+    }
+    .search-header{
+      display:flex;
+      gap:12px;
+      margin-bottom:16px;
+      flex-wrap:wrap;
+    }
+    .search-input-wrapper{
+      flex:1;
+      min-width:200px;
+      position:relative;
+    }
+    .search-input{
+      width:100%;
+      padding-right:40px;
+    }
+    .search-icon{
+      position:absolute;
+      right:12px;
+      top:50%;
+      transform:translateY(-50%);
+      color:var(--muted);
+      pointer-events:none;
+    }
+    .filter-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:12px;
+      margin-top:16px;
+    }
+    .filter-group{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    
+    /* Options specific filters */
+    .options-filters{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:12px;
+      margin-top:16px;
+    }
+    
+    /* Results Section */
+    .results-section{
+      margin-top:24px;
+    }
+    .results-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:16px;
+    }
+    .results-count{
+      color:var(--muted);
+      font-size:14px;
+    }
+    .results-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+      gap:16px;
+    }
+    .instrument-card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:16px;
+      transition:all 0.2s;
+      cursor:pointer;
+      position:relative;
+    }
+    .instrument-card:hover{
+      border-color:var(--accent);
+      transform:translateY(-2px);
+      box-shadow:0 4px 12px rgba(124,158,255,0.2);
+    }
+    .card-symbol{
+      font-size:18px;
+      font-weight:700;
+      color:var(--text);
+      margin-bottom:8px;
+    }
+    .card-exchange{
+      display:inline-block;
+      padding:4px 8px;
+      border-radius:6px;
+      font-size:11px;
+      font-weight:600;
+      margin-bottom:8px;
+    }
+    .card-exchange.nse{background:rgba(43,211,155,0.2);color:var(--equity)}
+    .card-exchange.nfo{background:rgba(124,158,255,0.2);color:var(--futures)}
+    .card-exchange.mcx{background:rgba(255,182,72,0.2);color:var(--mcx)}
+    .card-price{
+      font-size:20px;
+      font-weight:700;
+      color:var(--ok);
+      margin:8px 0;
+    }
+    .card-details{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      margin-top:12px;
+      padding-top:12px;
+      border-top:1px solid var(--border);
+    }
+    .card-detail{
+      display:flex;
+      justify-content:space-between;
+      font-size:12px;
+    }
+    .card-detail-label{
+      color:var(--muted);
+    }
+    .card-detail-value{
+      color:var(--text);
+      font-weight:600;
+    }
+    .card-token{
+      font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+      font-size:11px;
+      color:var(--muted);
+      cursor:pointer;
+      padding:4px 8px;
+      background:rgba(124,158,255,0.1);
+      border-radius:6px;
+      display:inline-block;
+    }
+    .card-token:hover{
+      background:rgba(124,158,255,0.2);
+      color:var(--accent);
+    }
+    .option-badge{
+      display:inline-block;
+      padding:4px 8px;
+      border-radius:6px;
+      font-size:11px;
+      font-weight:600;
+      margin-left:8px;
+    }
+    .option-badge.ce{
+      background:rgba(43,211,155,0.2);
+      color:var(--ok);
+    }
+    .option-badge.pe{
+      background:rgba(255,107,107,0.2);
+      color:var(--bad);
+    }
+    
+    /* Loading States */
+    .loading{
+      text-align:center;
+      padding:40px;
+      color:var(--muted);
+    }
+    .spinner{
+      display:inline-block;
+      width:24px;
+      height:24px;
+      border:3px solid var(--border);
+      border-top-color:var(--accent);
+      border-radius:50%;
+      animation:spin 0.8s linear infinite;
+    }
+    @keyframes spin{
+      to{transform:rotate(360deg)}
+    }
+    .skeleton-card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:16px;
+      height:180px;
+      animation:pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse{
+      0%,100%{opacity:1}
+      50%{opacity:0.5}
+    }
+    
+    /* Empty State */
+    .empty-state{
+      text-align:center;
+      padding:60px 20px;
+      color:var(--muted);
+    }
+    .empty-state-icon{
+      font-size:48px;
+      margin-bottom:16px;
+    }
+    .empty-state-title{
+      font-size:18px;
+      font-weight:700;
+      color:var(--text);
+      margin-bottom:8px;
+    }
+    .empty-state-message{
+      font-size:14px;
+      color:var(--muted);
+    }
+    
+    /* Error Banner */
+    .error-banner{
+      background:rgba(255,107,107,0.1);
+      border:1px solid var(--bad);
+      border-radius:12px;
+      padding:16px;
+      margin-bottom:24px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+    }
+    .error-message{
+      color:var(--bad);
+      flex:1;
+    }
+    .error-banner.hidden{
+      display:none;
+    }
+    
+    /* Pagination */
+    .pagination{
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:12px;
+      margin-top:24px;
+    }
+    .pagination-info{
+      color:var(--muted);
+      font-size:14px;
+    }
+    
+    /* Responsive */
+    @media (max-width:768px){
+      .results-grid{
+        grid-template-columns:1fr;
+      }
+      .search-header{
+        flex-direction:column;
+      }
+      .filter-grid,.options-filters{
+        grid-template-columns:1fr;
+      }
+      .header{
+        flex-direction:column;
+        align-items:flex-start;
+      }
+    }
+    
+    .hidden{display:none!important}
+    .text-center{text-align:center}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <h1 class="title">Instrument Search & Watchlist</h1>
+    </header>
+
+    <!-- API Key Section -->
+    <div class="api-key-section">
+      <div class="api-key-form">
+        <div class="form-group">
+          <label class="form-label" for="apiKey">API Key</label>
+          <input 
+            type="text" 
+            id="apiKey" 
+            class="form-input" 
+            placeholder="Enter your API key"
+            autocomplete="off"
+          />
+        </div>
+        <button class="btn" id="saveApiKey">Save</button>
+      </div>
+    </div>
+
+    <!-- Error Banner -->
+    <div class="error-banner hidden" id="errorBanner">
+      <div class="error-message" id="errorMessage"></div>
+      <button class="btn btn-sm btn-secondary" id="dismissError">Dismiss</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="equity">Equity</button>
+      <button class="tab" data-tab="futures">Futures</button>
+      <button class="tab" data-tab="options">Options</button>
+      <button class="tab" data-tab="mcx">MCX Commodities</button>
+    </div>
+
+    <!-- Equity Tab Content -->
+    <div class="tab-content active" id="equity-tab">
+      <div class="search-section">
+        <div class="search-header">
+          <div class="search-input-wrapper">
+            <input 
+              type="text" 
+              id="equity-search" 
+              class="form-input search-input" 
+              placeholder="Search equities (e.g., RELIANCE, TCS)..."
+            />
+            <span class="search-icon">🔍</span>
+          </div>
+          <select id="equity-exchange" class="form-select" style="max-width:200px">
+            <option value="">All Exchanges</option>
+            <option value="NSE_EQ">NSE Equity</option>
+            <option value="BSE_EQ">BSE Equity</option>
+          </select>
+        </div>
+        <div class="filter-grid">
+          <div class="filter-group">
+            <label class="form-label" for="equity-limit">Results Limit</label>
+            <select id="equity-limit" class="form-select">
+              <option value="20">20</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="results-section">
+        <div class="results-header">
+          <div class="results-count" id="equity-count"></div>
+        </div>
+        <div class="results-grid" id="equity-results"></div>
+        <div class="pagination" id="equity-pagination"></div>
+      </div>
+    </div>
+
+    <!-- Futures Tab Content -->
+    <div class="tab-content" id="futures-tab">
+      <div class="search-section">
+        <div class="search-header">
+          <div class="search-input-wrapper">
+            <input 
+              type="text" 
+              id="futures-search" 
+              class="form-input search-input" 
+              placeholder="Search futures (e.g., NIFTY, BANKNIFTY)..."
+            />
+            <span class="search-icon">🔍</span>
+          </div>
+          <select id="futures-exchange" class="form-select" style="max-width:200px">
+            <option value="">All Exchanges</option>
+            <option value="NSE_FO">NSE F&O</option>
+            <option value="BSE_FO">BSE F&O</option>
+          </select>
+        </div>
+        <div class="filter-grid">
+          <div class="filter-group">
+            <label class="form-label" for="futures-expiry-from">Expiry From (YYYYMMDD)</label>
+            <input type="text" id="futures-expiry-from" class="form-input" placeholder="20241201" pattern="[0-9]{8}" />
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="futures-expiry-to">Expiry To (YYYYMMDD)</label>
+            <input type="text" id="futures-expiry-to" class="form-input" placeholder="20241231" pattern="[0-9]{8}" />
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="futures-limit">Results Limit</label>
+            <select id="futures-limit" class="form-select">
+              <option value="20">20</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="results-section">
+        <div class="results-header">
+          <div class="results-count" id="futures-count"></div>
+        </div>
+        <div class="results-grid" id="futures-results"></div>
+        <div class="pagination" id="futures-pagination"></div>
+      </div>
+    </div>
+
+    <!-- Options Tab Content -->
+    <div class="tab-content" id="options-tab">
+      <div class="search-section">
+        <div class="search-header">
+          <div class="search-input-wrapper">
+            <input 
+              type="text" 
+              id="options-search" 
+              class="form-input search-input" 
+              placeholder="Search options (e.g., NIFTY, BANKNIFTY)..."
+            />
+            <span class="search-icon">🔍</span>
+          </div>
+          <select id="options-exchange" class="form-select" style="max-width:200px">
+            <option value="">All Exchanges</option>
+            <option value="NSE_FO">NSE F&O</option>
+            <option value="BSE_FO">BSE F&O</option>
+          </select>
+        </div>
+        <div class="options-filters">
+          <div class="filter-group">
+            <label class="form-label" for="options-type">Option Type</label>
+            <select id="options-type" class="form-select">
+              <option value="">All</option>
+              <option value="CE">Call (CE)</option>
+              <option value="PE">Put (PE)</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="options-expiry-from">Expiry From (YYYYMMDD)</label>
+            <input type="text" id="options-expiry-from" class="form-input" placeholder="20241201" pattern="[0-9]{8}" />
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="options-expiry-to">Expiry To (YYYYMMDD)</label>
+            <input type="text" id="options-expiry-to" class="form-input" placeholder="20241231" pattern="[0-9]{8}" />
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="options-strike-min">Strike Min</label>
+            <input type="number" id="options-strike-min" class="form-input" placeholder="19000" step="50" />
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="options-strike-max">Strike Max</label>
+            <input type="number" id="options-strike-max" class="form-input" placeholder="20000" step="50" />
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="options-limit">Results Limit</label>
+            <select id="options-limit" class="form-select">
+              <option value="20">20</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="results-section">
+        <div class="results-header">
+          <div class="results-count" id="options-count"></div>
+        </div>
+        <div class="results-grid" id="options-results"></div>
+        <div class="pagination" id="options-pagination"></div>
+      </div>
+    </div>
+
+    <!-- MCX Tab Content -->
+    <div class="tab-content" id="mcx-tab">
+      <div class="search-section">
+        <div class="search-header">
+          <div class="search-input-wrapper">
+            <input 
+              type="text" 
+              id="mcx-search" 
+              class="form-input search-input" 
+              placeholder="Search commodities (e.g., GOLD, SILVER, CRUDE)..."
+            />
+            <span class="search-icon">🔍</span>
+          </div>
+        </div>
+        <div class="filter-grid">
+          <div class="filter-group">
+            <label class="form-label" for="mcx-expiry-from">Expiry From (YYYYMMDD)</label>
+            <input type="text" id="mcx-expiry-from" class="form-input" placeholder="20241201" pattern="[0-9]{8}" />
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="mcx-expiry-to">Expiry To (YYYYMMDD)</label>
+            <input type="text" id="mcx-expiry-to" class="form-input" placeholder="20241231" pattern="[0-9]{8}" />
+          </div>
+          <div class="filter-group">
+            <label class="form-label" for="mcx-limit">Results Limit</label>
+            <select id="mcx-limit" class="form-select">
+              <option value="20">20</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="results-section">
+        <div class="results-header">
+          <div class="results-count" id="mcx-count"></div>
+        </div>
+        <div class="results-grid" id="mcx-results"></div>
+        <div class="pagination" id="mcx-pagination"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Configuration
+    const BASE_URL = 'https://marketdata.vedpragya.com/api/stock';
+    const API_KEY_STORAGE = 'watchlist_api_key';
+    const DEBOUNCE_DELAY = 500;
+    
+    // State Management
+    const state = {
+      apiKey: localStorage.getItem(API_KEY_STORAGE) || '',
+      currentTab: 'equity',
+      abortControllers: {},
+      pagination: {
+        equity: { offset: 0, total: 0, hasMore: false },
+        futures: { offset: 0, total: 0, hasMore: false },
+        options: { offset: 0, total: 0, hasMore: false },
+        mcx: { offset: 0, total: 0, hasMore: false }
+      }
+    };
+
+    // Utility Functions
+    function log(message, type = 'info') {
+      const timestamp = new Date().toISOString();
+      const prefix = type.toUpperCase().padEnd(5);
+      console.log(`[${timestamp}] [${prefix}] ${message}`);
+    }
+
+    function showError(message) {
+      const banner = document.getElementById('errorBanner');
+      const errorMsg = document.getElementById('errorMessage');
+      errorMsg.textContent = message;
+      banner.classList.remove('hidden');
+      log(`Error: ${message}`, 'error');
+    }
+
+    function hideError() {
+      document.getElementById('errorBanner').classList.add('hidden');
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr || dateStr.length !== 8) return dateStr;
+      const year = dateStr.substring(0, 4);
+      const month = dateStr.substring(4, 6);
+      const day = dateStr.substring(6, 8);
+      const date = new Date(`${year}-${month}-${day}`);
+      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    function formatCurrency(value) {
+      if (!value && value !== 0) return 'N/A';
+      return new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        maximumFractionDigits: 2
+      }).format(value);
+    }
+
+    function getExchangeBadge(exchange) {
+      if (!exchange) return { class: '', text: 'N/A' };
+      if (exchange.includes('NSE')) return { class: 'nse', text: exchange.replace('_', ' ') };
+      if (exchange.includes('MCX')) return { class: 'mcx', text: exchange.replace('_', ' ') };
+      if (exchange.includes('NFO') || exchange.includes('FO')) return { class: 'nfo', text: exchange.replace('_', ' ') };
+      return { class: '', text: exchange };
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        log(`Copied to clipboard: ${text}`, 'success');
+      }).catch(err => {
+        log(`Failed to copy: ${err.message}`, 'error');
+      });
+    }
+
+    // API Functions
+    async function makeRequest(endpoint, params = {}, options = {}) {
+      const apiKey = state.apiKey;
+      if (!apiKey) {
+        showError('Please enter and save your API key first');
+        return null;
+      }
+
+      // Cancel previous request for this tab
+      const tab = options.tab || 'default';
+      if (state.abortControllers[tab]) {
+        state.abortControllers[tab].abort();
+        log(`Cancelled previous request for ${tab}`, 'info');
+      }
+
+      const controller = new AbortController();
+      state.abortControllers[tab] = controller;
+
+      const url = new URL(`${BASE_URL}${endpoint}`);
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== '' && value !== null && value !== undefined) {
+          url.searchParams.append(key, value);
+        }
+      });
+
+      log(`Making request to: ${url.toString()}`, 'info');
+      log(`Query params: ${JSON.stringify(params)}`, 'info');
+
+      try {
+        const response = await fetch(url.toString(), {
+          headers: {
+            'x-api-key': apiKey,
+            'Content-Type': 'application/json'
+          },
+          signal: controller.signal,
+          timeout: 10000
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const data = await response.json();
+        log(`Response received: ${JSON.stringify(data).substring(0, 200)}...`, 'success');
+
+        if (!data.success) {
+          throw new Error(data.message || 'Request failed');
+        }
+
+        return data;
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          log(`Request aborted for ${tab}`, 'warn');
+          return null;
+        }
+        log(`Request failed: ${error.message}`, 'error');
+        showError(`Failed to fetch data: ${error.message}`);
+        return null;
+      }
+    }
+
+    // Search Functions for Each Tab
+    async function searchEquities(query = '', offset = 0, append = false) {
+      const limit = parseInt(document.getElementById('equity-limit').value) || 50;
+      const exchange = document.getElementById('equity-exchange').value;
+
+      state.pagination.equity.offset = offset;
+
+      const params = {
+        q: query,
+        limit,
+        offset
+      };
+      if (exchange) params.exchange = exchange;
+
+      const data = await makeRequest('/vayu/equities', params, { tab: 'equity' });
+      
+      if (!data) return null;
+
+      displayResults('equity', data.data.instruments || [], data.data.pagination || {}, append);
+      updatePagination('equity', data.data.pagination || {});
+      return data;
+    }
+
+    async function searchFutures(query = '', offset = 0, append = false) {
+      const limit = parseInt(document.getElementById('futures-limit').value) || 50;
+      const exchange = document.getElementById('futures-exchange').value;
+      const expiryFrom = document.getElementById('futures-expiry-from').value;
+      const expiryTo = document.getElementById('futures-expiry-to').value;
+
+      state.pagination.futures.offset = offset;
+
+      const params = {
+        q: query,
+        limit,
+        offset
+      };
+      if (exchange) params.exchange = exchange;
+      if (expiryFrom) params.expiry_from = expiryFrom;
+      if (expiryTo) params.expiry_to = expiryTo;
+
+      const data = await makeRequest('/vayu/futures', params, { tab: 'futures' });
+      
+      if (!data) return null;
+
+      displayResults('futures', data.data.instruments || [], data.data.pagination || {}, append);
+      updatePagination('futures', data.data.pagination || {});
+      return data;
+    }
+
+    async function searchOptions(query = '', offset = 0, append = false) {
+      const limit = parseInt(document.getElementById('options-limit').value) || 50;
+      const exchange = document.getElementById('options-exchange').value;
+      const optionType = document.getElementById('options-type').value;
+      const expiryFrom = document.getElementById('options-expiry-from').value;
+      const expiryTo = document.getElementById('options-expiry-to').value;
+      const strikeMin = document.getElementById('options-strike-min').value;
+      const strikeMax = document.getElementById('options-strike-max').value;
+
+      state.pagination.options.offset = offset;
+
+      const params = {
+        q: query,
+        limit,
+        offset
+      };
+      if (exchange) params.exchange = exchange;
+      if (optionType) params.option_type = optionType;
+      if (expiryFrom) params.expiry_from = expiryFrom;
+      if (expiryTo) params.expiry_to = expiryTo;
+      if (strikeMin) params.strike_min = parseFloat(strikeMin);
+      if (strikeMax) params.strike_max = parseFloat(strikeMax);
+
+      const data = await makeRequest('/vayu/options', params, { tab: 'options' });
+      
+      if (!data) return null;
+
+      displayResults('options', data.data.instruments || [], data.data.pagination || {}, append);
+      updatePagination('options', data.data.pagination || {});
+      return data;
+    }
+
+    async function searchMCX(query = '', offset = 0, append = false) {
+      const limit = parseInt(document.getElementById('mcx-limit').value) || 50;
+      const expiryFrom = document.getElementById('mcx-expiry-from').value;
+      const expiryTo = document.getElementById('mcx-expiry-to').value;
+
+      state.pagination.mcx.offset = offset;
+
+      const params = {
+        q: query,
+        limit,
+        offset
+      };
+      if (expiryFrom) params.expiry_from = expiryFrom;
+      if (expiryTo) params.expiry_to = expiryTo;
+
+      const data = await makeRequest('/vayu/commodities', params, { tab: 'mcx' });
+      
+      if (!data) return null;
+
+      displayResults('mcx', data.data.instruments || [], data.data.pagination || {}, append);
+      updatePagination('mcx', data.data.pagination || {});
+      return data;
+    }
+
+    // Display Functions
+    function displayResults(tab, instruments, pagination, append = false) {
+      const container = document.getElementById(`${tab}-results`);
+      const countEl = document.getElementById(`${tab}-count`);
+
+      if (!instruments || instruments.length === 0) {
+        if (!append) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">🔍</div>
+              <div class="empty-state-title">No instruments found</div>
+              <div class="empty-state-message">Try adjusting your search criteria or filters</div>
+            </div>
+          `;
+          countEl.textContent = '0 results';
+        }
+        return;
+      }
+
+      const currentCount = append ? container.querySelectorAll('.instrument-card').length : 0;
+      const totalShown = currentCount + instruments.length;
+      countEl.textContent = `Showing ${totalShown}${pagination.total ? ` of ${pagination.total}` : ''} results`;
+
+      const cardsHtml = instruments.map(instrument => {
+        const exchangeBadge = getExchangeBadge(instrument.exchange);
+        let cardHtml = `
+          <div class="instrument-card">
+            <div class="card-symbol">
+              ${instrument.symbol || 'N/A'}
+              ${instrument.option_type ? `<span class="option-badge ${instrument.option_type.toLowerCase()}">${instrument.option_type}</span>` : ''}
+            </div>
+            <span class="card-exchange ${exchangeBadge.class}">${exchangeBadge.text}</span>
+            ${instrument.last_price !== null && instrument.last_price !== undefined ? `<div class="card-price">${formatCurrency(instrument.last_price)}</div>` : ''}
+            <div class="card-details">
+              ${instrument.token ? `
+                <div class="card-detail">
+                  <span class="card-detail-label">Token:</span>
+                  <span class="card-token" onclick="copyToClipboard('${instrument.token}')" title="Click to copy">${instrument.token}</span>
+                </div>
+              ` : ''}
+              ${instrument.expiry_date ? `
+                <div class="card-detail">
+                  <span class="card-detail-label">Expiry:</span>
+                  <span class="card-detail-value">${formatDate(instrument.expiry_date)}</span>
+                </div>
+              ` : ''}
+              ${instrument.strike_price !== null && instrument.strike_price !== undefined ? `
+                <div class="card-detail">
+                  <span class="card-detail-label">Strike:</span>
+                  <span class="card-detail-value">${formatCurrency(instrument.strike_price)}</span>
+                </div>
+              ` : ''}
+              ${instrument.instrument_name ? `
+                <div class="card-detail">
+                  <span class="card-detail-label">Type:</span>
+                  <span class="card-detail-value">${instrument.instrument_name}</span>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `;
+        return cardHtml;
+      }).join('');
+
+      if (append) {
+        container.insertAdjacentHTML('beforeend', cardsHtml);
+      } else {
+        container.innerHTML = cardsHtml;
+      }
+    }
+
+    function updatePagination(tab, pagination) {
+      const paginationEl = document.getElementById(`${tab}-pagination`);
+      state.pagination[tab].total = pagination.total || 0;
+      state.pagination[tab].hasMore = pagination.hasMore || false;
+
+      if (!pagination.hasMore) {
+        paginationEl.innerHTML = '';
+        return;
+      }
+
+      paginationEl.innerHTML = `
+        <button class="btn btn-secondary" onclick="loadMore('${tab}')">
+          Load More
+        </button>
+      `;
+    }
+
+    async function loadMore(tab) {
+      const pagination = state.pagination[tab];
+      if (!pagination.hasMore) return;
+
+      const limit = parseInt(document.getElementById(`${tab}-limit`).value) || 50;
+      const newOffset = pagination.offset + limit;
+      state.pagination[tab].offset = newOffset;
+
+      const query = document.getElementById(`${tab}-search`).value;
+      
+      let data;
+      switch(tab) {
+        case 'equity':
+          data = await searchEquities(query, newOffset, true);
+          break;
+        case 'futures':
+          data = await searchFutures(query, newOffset, true);
+          break;
+        case 'options':
+          data = await searchOptions(query, newOffset, true);
+          break;
+        case 'mcx':
+          data = await searchMCX(query, newOffset, true);
+          break;
+      }
+    }
+
+    function showLoading(tab) {
+      const container = document.getElementById(`${tab}-results`);
+      container.innerHTML = Array(6).fill(0).map(() => '<div class="skeleton-card"></div>').join('');
+    }
+
+    // Debounce Function
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+
+    // Event Listeners
+    document.getElementById('saveApiKey').addEventListener('click', () => {
+      const apiKey = document.getElementById('apiKey').value.trim();
+      if (!apiKey) {
+        showError('Please enter an API key');
+        return;
+      }
+      state.apiKey = apiKey;
+      localStorage.setItem(API_KEY_STORAGE, apiKey);
+      log('API key saved', 'success');
+      hideError();
+      alert('API key saved successfully!');
+    });
+
+    document.getElementById('dismissError').addEventListener('click', hideError);
+
+    // Load saved API key
+    if (state.apiKey) {
+      document.getElementById('apiKey').value = state.apiKey;
+      log('API key loaded from storage', 'info');
+    }
+
+    // Tab Switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetTab = tab.getAttribute('data-tab');
+        state.currentTab = targetTab;
+
+        // Update tab UI
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(`${targetTab}-tab`).classList.add('active');
+
+        // Reset pagination
+        state.pagination[targetTab].offset = 0;
+
+        log(`Switched to ${targetTab} tab`, 'info');
+
+        // Auto search if there's a query
+        const searchInput = document.getElementById(`${targetTab}-search`);
+        if (searchInput.value.trim()) {
+          const debouncedSearch = debounce(() => {
+            showLoading(targetTab);
+            switch(targetTab) {
+              case 'equity':
+                searchEquities(searchInput.value.trim());
+                break;
+              case 'futures':
+                searchFutures(searchInput.value.trim());
+                break;
+              case 'options':
+                searchOptions(searchInput.value.trim());
+                break;
+              case 'mcx':
+                searchMCX(searchInput.value.trim());
+                break;
+            }
+          }, DEBOUNCE_DELAY);
+          debouncedSearch();
+        }
+      });
+    });
+
+    // Search Input Listeners with Debounce
+    ['equity', 'futures', 'options', 'mcx'].forEach(tab => {
+      const searchInput = document.getElementById(`${tab}-search`);
+      const debouncedSearch = debounce(() => {
+        state.pagination[tab].offset = 0;
+        showLoading(tab);
+        const query = searchInput.value.trim();
+        switch(tab) {
+          case 'equity':
+            searchEquities(query);
+            break;
+          case 'futures':
+            searchFutures(query);
+            break;
+          case 'options':
+            searchOptions(query);
+            break;
+          case 'mcx':
+            searchMCX(query);
+            break;
+        }
+      }, DEBOUNCE_DELAY);
+
+      searchInput.addEventListener('input', debouncedSearch);
+
+      // Filter change listeners
+      const filters = tab === 'options' 
+        ? ['exchange', 'type', 'expiry-from', 'expiry-to', 'strike-min', 'strike-max', 'limit']
+        : tab === 'futures'
+        ? ['exchange', 'expiry-from', 'expiry-to', 'limit']
+        : tab === 'mcx'
+        ? ['expiry-from', 'expiry-to', 'limit']
+        : ['exchange', 'limit'];
+
+      filters.forEach(filter => {
+        const el = document.getElementById(`${tab}-${filter}`);
+        if (el) {
+          el.addEventListener('change', debouncedSearch);
+        }
+      });
+    });
+
+    // Make copyToClipboard global
+    window.copyToClipboard = copyToClipboard;
+    window.loadMore = loadMore;
+
+    log('Search Watchlist initialized', 'success');
+  </script>
+</body>
+</html>
+

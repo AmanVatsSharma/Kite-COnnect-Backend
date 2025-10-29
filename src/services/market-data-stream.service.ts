@@ -77,28 +77,44 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
   private async handleTicks(ticks: any[]) {
     try {
+      console.log(`[MarketDataStreamService] Received ${ticks.length} ticks from provider`);
+      this.logger.debug(`[StreamBatching] Handling ${ticks.length} ticks`);
+      
       for (const tick of ticks) {
         const instrumentToken = tick.instrument_token;
         
         // Update subscribed instruments set first
         this.subscribedInstruments.add(instrumentToken);
         
+        console.log(`[MarketDataStreamService] Processing tick for token ${instrumentToken}: last_price=${tick.last_price}`);
+        
         // Store market data in database and broadcast (non-blocking if DB fails)
         try {
           await this.stockService.storeMarketData(instrumentToken, tick);
+          console.log(`[MarketDataStreamService] Successfully stored and broadcasted tick for token ${instrumentToken}`);
         } catch (storeError) {
           // Log but continue processing - broadcast still happens
+          console.error(`[MarketDataStreamService] Failed to store tick for ${instrumentToken}:`, storeError);
           this.logger.debug(`Failed to store tick for ${instrumentToken}, continuing with broadcast: ${storeError.message}`);
         }
       }
+      
+      console.log(`[MarketDataStreamService] Completed processing ${ticks.length} ticks`);
     } catch (error) {
+      console.error(`[MarketDataStreamService] Error handling ticks:`, error);
       this.logger.error('Error handling ticks', error);
     }
   }
 
   async subscribeToInstruments(instrumentTokens: number[], mode: 'ltp' | 'ohlcv' | 'full' = 'ltp', clientId?: string) {
     try {
+      console.log(`[MarketDataStreamService] subscribeToInstruments called: tokens=${JSON.stringify(instrumentTokens)}, mode=${mode}, clientId=${clientId || 'none'}`);
+      this.logger.log(`[StreamBatching] Received subscription request for ${instrumentTokens.length} instruments with mode=${mode} from client=${clientId || 'unknown'}`);
+      
       // Queue subscriptions for batching instead of immediate execution
+      const newTokens: number[] = [];
+      const existingTokens: number[] = [];
+      
       instrumentTokens.forEach(token => {
         if (!this.subscriptionQueue.has(token)) {
           this.subscriptionQueue.set(token, {
@@ -106,27 +122,39 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             timestamp: Date.now(),
             clients: new Set()
           });
+          newTokens.push(token);
+          console.log(`[MarketDataStreamService] Added new token ${token} to subscription queue with mode=${mode}`);
+        } else {
+          existingTokens.push(token);
         }
         
         const subscription = this.subscriptionQueue.get(token)!;
         if (clientId) {
           subscription.clients.add(clientId);
+          console.log(`[MarketDataStreamService] Added client ${clientId} to subscription for token ${token}`);
         }
         
         // Update mode if it's higher priority (full > ohlcv > ltp)
         const modePriority = { 'ltp': 1, 'ohlcv': 2, 'full': 3 };
+        const oldMode = subscription.mode;
         if (modePriority[mode] > modePriority[subscription.mode]) {
           subscription.mode = mode;
+          console.log(`[MarketDataStreamService] Upgraded mode for token ${token} from ${oldMode} to ${mode}`);
         }
       });
 
       // Start batching interval if not already started
       if (!this.subscriptionBatchInterval) {
+        console.log(`[MarketDataStreamService] Starting subscription batch processing interval`);
         this.startSubscriptionBatching();
       }
 
-      this.logger.log(`[StreamBatching] Queued ${instrumentTokens.length} instruments for subscription with mode=${mode}`);
+      this.logger.log(`[StreamBatching] Queued ${instrumentTokens.length} instruments (${newTokens.length} new, ${existingTokens.length} existing) for subscription with mode=${mode}, client=${clientId || 'unknown'}`);
+      if (newTokens.length > 0) {
+        console.log(`[MarketDataStreamService] New tokens queued: ${JSON.stringify(newTokens)}`);
+      }
     } catch (error) {
+      console.error(`[MarketDataStreamService] Error queuing instrument subscriptions:`, error);
       this.logger.error('Error queuing instrument subscriptions', error);
       throw error;
     }
@@ -169,9 +197,14 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      console.log(`[MarketDataStreamService] Processing subscription batch: ${this.subscriptionQueue.size} subscriptions, ${this.unsubscriptionQueue.size} unsubscriptions`);
+      this.logger.log(`[StreamBatching] Processing batch: ${this.subscriptionQueue.size} subscriptions, ${this.unsubscriptionQueue.size} unsubscriptions`);
+
       const provider = await this.providerResolver.resolveForWebsocket();
       const ticker = provider.getTicker();
       if (!ticker || !this.isStreaming) {
+        console.warn(`[MarketDataStreamService] Cannot process batch: ticker=${!!ticker}, isStreaming=${this.isStreaming}`);
+        this.logger.warn(`[StreamBatching] Cannot process: ticker=${!!ticker}, isStreaming=${this.isStreaming}`);
         return;
       }
 
@@ -179,6 +212,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       if (this.subscriptionQueue.size > 0) {
         const subscriptions = Array.from(this.subscriptionQueue.entries());
         const tokensToSubscribe = subscriptions.map(([token]) => token);
+        
+        console.log(`[MarketDataStreamService] Processing ${tokensToSubscribe.length} subscriptions: ${JSON.stringify(tokensToSubscribe)}`);
         
         // Group by mode for efficient batching
         const modeGroups = new Map<string, number[]>();
@@ -189,27 +224,41 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           modeGroups.get(sub.mode)!.push(token);
         });
 
+        console.log(`[MarketDataStreamService] Grouped subscriptions by mode:`, Array.from(modeGroups.entries()).map(([mode, tokens]) => `${mode}: ${tokens.length} tokens`));
+
         // Subscribe by mode groups
         for (const [mode, tokens] of modeGroups) {
+          console.log(`[MarketDataStreamService] Calling ticker.subscribe() for ${tokens.length} tokens with mode=${mode}`);
+          this.logger.log(`[StreamBatching] Subscribing ${tokens.length} tokens with mode=${mode} to provider`);
           ticker.subscribe(tokens, mode as 'ltp' | 'ohlcv' | 'full');
-          tokens.forEach(token => this.subscribedInstruments.add(token));
+          tokens.forEach(token => {
+            this.subscribedInstruments.add(token);
+            console.log(`[MarketDataStreamService] Added token ${token} to subscribedInstruments set`);
+          });
         }
 
         this.logger.log(`[StreamBatching] Processed ${tokensToSubscribe.length} subscriptions in ${modeGroups.size} mode groups`);
+        console.log(`[MarketDataStreamService] Completed subscription batch processing for ${tokensToSubscribe.length} tokens`);
         this.subscriptionQueue.clear();
       }
 
       // Process unsubscriptions
       if (this.unsubscriptionQueue.size > 0) {
         const tokensToUnsubscribe = Array.from(this.unsubscriptionQueue);
+        console.log(`[MarketDataStreamService] Processing ${tokensToUnsubscribe.length} unsubscriptions: ${JSON.stringify(tokensToUnsubscribe)}`);
         ticker.unsubscribe(tokensToUnsubscribe);
-        tokensToUnsubscribe.forEach(token => this.subscribedInstruments.delete(token));
+        tokensToUnsubscribe.forEach(token => {
+          this.subscribedInstruments.delete(token);
+          console.log(`[MarketDataStreamService] Removed token ${token} from subscribedInstruments set`);
+        });
         
         this.logger.log(`[StreamBatching] Processed ${tokensToUnsubscribe.length} unsubscriptions`);
+        console.log(`[MarketDataStreamService] Completed unsubscription batch processing for ${tokensToUnsubscribe.length} tokens`);
         this.unsubscriptionQueue.clear();
       }
 
     } catch (error) {
+      console.error(`[MarketDataStreamService] Error processing subscription batch:`, error);
       this.logger.error('[StreamBatching] Error processing subscription batch', error);
     }
   }

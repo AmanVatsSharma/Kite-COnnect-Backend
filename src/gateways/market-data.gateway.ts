@@ -244,10 +244,14 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       });
 
       // Delegate subscription to streaming service with mode support and client tracking
+      console.log(`[MarketDataGateway] Subscribing client ${client.id} to ${instruments.length} instruments: ${JSON.stringify(instruments)} with mode=${mode}`);
       await this.subscribeToInstruments(instruments, mode, client.id);
 
       // Join instrument rooms for targeted broadcast
-      instruments.forEach(token => client.join(`instrument:${token}`));
+      instruments.forEach(token => {
+        client.join(`instrument:${token}`);
+        console.log(`[MarketDataGateway] Client ${client.id} joined room for instrument:${token}`);
+      });
 
       // Send confirmation with mode information
       client.emit('subscription_confirmed', {
@@ -258,6 +262,7 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       });
 
       this.logger.log(`Client ${client.id} subscribed to ${instruments.length} instruments with mode=${mode}`);
+      console.log(`[MarketDataGateway] Subscription confirmed sent to client ${client.id} for ${instruments.length} instruments`);
     } catch (error) {
       this.logger.error('Error handling instrument subscription', error);
       client.emit('error', { message: 'Failed to subscribe to instruments' });

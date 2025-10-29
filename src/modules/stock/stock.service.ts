@@ -10,6 +10,7 @@ import { MarketDataProvider } from '../../providers/market-data.provider';
 import { RedisService } from '../../services/redis.service';
 import { RequestBatchingService } from '../../services/request-batching.service';
 import { MarketDataGateway } from '../../gateways/market-data.gateway';
+import { NativeWebSocketGateway } from '../../gateways/native-websocket.gateway';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
 import { Inject, forwardRef } from '@nestjs/common';
 
@@ -31,6 +32,7 @@ export class StockService {
     private requestBatchingService: RequestBatchingService,
     private vortexInstrumentService: VortexInstrumentService,
     @Inject(forwardRef(() => MarketDataGateway)) private marketDataGateway: MarketDataGateway,
+    @Inject(forwardRef(() => NativeWebSocketGateway)) private nativeWebSocketGateway: NativeWebSocketGateway,
   ) {}
 
   async syncInstruments(exchange?: string, opts?: { provider?: 'kite' | 'vortex'; csv_url?: string; headers?: Record<string, any>; apiKey?: string }): Promise<{ synced: number; updated: number }> {
@@ -383,7 +385,20 @@ export class StockService {
       }
 
       // Always broadcast to WebSocket clients (even if DB save failed)
-      await this.marketDataGateway.broadcastMarketData(instrumentToken, data);
+      // Broadcast to both Socket.IO and native WebSocket gateways
+      try {
+        await this.marketDataGateway.broadcastMarketData(instrumentToken, data);
+        this.logger.debug(`[StockService] Broadcasted market data for token ${instrumentToken} to MarketDataGateway`);
+      } catch (gatewayError) {
+        this.logger.warn(`[StockService] Failed to broadcast to MarketDataGateway: ${gatewayError.message}`);
+      }
+      
+      try {
+        await this.nativeWebSocketGateway.broadcastMarketData(instrumentToken, data);
+        this.logger.debug(`[StockService] Broadcasted market data for token ${instrumentToken} to NativeWebSocketGateway`);
+      } catch (nativeGatewayError) {
+        this.logger.warn(`[StockService] Failed to broadcast to NativeWebSocketGateway: ${nativeGatewayError.message}`);
+      }
     } catch (error) {
       this.logger.error('Error storing market data', error);
       // Don't throw - allow tick processing to continue

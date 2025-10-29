@@ -1,138 +1,54 @@
-# Watchlist Integration Guide for Trading Apps
+# Vayu Market Data API - Watchlist Integration Guide
 
-Complete guide for integrating live market data, watchlists, and WebSocket streaming for Equities, Futures, Options, and MCX.
+Complete API reference for building search boxes, watchlists, and market data integrations using Vayu endpoints.
 
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Quick Start](#quick-start)
-4. [Search & Discovery](#search--discovery)
-5. [Adding to Watchlist](#adding-to-watchlist)
-6. [WebSocket Streaming](#websocket-streaming)
-7. [Examples by Asset Type](#examples-by-asset-type)
-8. [Error Handling](#error-handling)
-
----
-
-## Overview
-
-Your trading app will:
-
-1. **Search** instruments (equity, futures, options, MCX)
-2. **Get token** for each instrument
-3. **Store** token + metadata in your watchlist
-4. **Connect** to WebSocket with your API key
-5. **Subscribe** to live prices using tokens
-6. **Receive** real-time market data
-
----
-
-## Architecture
-
-```
-Your Trading App
-    ↓
-1. Search instruments → GET /api/stock/vayu/equities?q=RELIANCE
-2. Get instrument token (e.g., 738561)
-3. Store {token: 738561, symbol: "RELIANCE"} in watchlist
-4. Connect WebSocket → ws://api.yourdomain.com/market-data?api_key=YOUR_KEY
-5. Subscribe to tokens → socket.emit('subscribe_instruments', {instruments: [738561], mode: 'ltp'})
-6. Receive live prices → socket.on('market_data', (data) => {...})
-```
+**Base URL**: `https://marketdata.vedpragya.com`  
+**Authentication**: All endpoints require `x-api-key` header
 
 ---
 
 ## Quick Start
 
-### Step 1: Get Your API Key
-
-Contact support to receive your API key.
-
-### Step 2: Search for Instruments
-
+### Authentication
 ```javascript
-// Search for equity stocks
-const response = await fetch('https://api.yourdomain.com/api/stock/vayu/equities?q=RELIANCE', {
-  headers: {
-    'x-api-key': 'YOUR_API_KEY'
-  }
-});
-
-const { data } = await response.json();
-// data.instruments = [{ token: 738561, symbol: "RELIANCE", ... }]
-```
-
-### Step 3: Add to Watchlist
-
-Store instrument details in your local storage/database:
-
-```javascript
-const watchlistItem = {
-  token: data.instruments[0].token,
-  symbol: data.instruments[0].symbol,
-  exchange: 'NSE_EQ',
-  last_price: null, // Will be updated via WebSocket
-  added_at: new Date()
+const headers = {
+  'x-api-key': 'YOUR_API_KEY'
 };
-
-// Save to your database
-await saveToWatchlist(watchlistItem);
 ```
 
-### Step 4: Connect WebSocket
-
+### Base Configuration
 ```javascript
-const io = require('socket.io-client');
-
-const socket = io('wss://api.yourdomain.com/market-data', {
-  extraHeaders: {
-    'x-api-key': 'YOUR_API_KEY'
-  }
-});
-
-socket.on('connected', () => {
-  console.log('WebSocket connected!');
-});
-```
-
-### Step 5: Subscribe to Live Prices
-
-```javascript
-// Subscribe to all instruments in your watchlist
-const tokens = watchlist.map(item => item.token);
-
-socket.emit('subscribe_instruments', {
-  instruments: tokens,
-  mode: 'ltp' // ltp = Last Traded Price only (22 bytes)
-});
-
-socket.on('subscription_confirmed', (data) => {
-  console.log('Subscribed to:', data.instruments);
-});
-
-// Receive live price updates
-socket.on('market_data', (data) => {
-  const token = data.instrumentToken;
-  const price = data.data.last_price;
-  
-  // Update your watchlist UI
-  updateWatchlistPrice(token, price);
-});
+const BASE_URL = 'https://marketdata.vedpragya.com';
+const API_PREFIX = '/api/stock';
 ```
 
 ---
 
-## Search & Discovery
+## Search & Discovery Endpoints
 
-### 1. Search Equities (Stocks)
+### 1. Search Equities
 
+Search equity stocks by symbol (case-insensitive).
+
+**Endpoint**: `GET /api/stock/vayu/equities`
+
+**Query Parameters**:
+- `q` (string, optional) - Search query (e.g., "RELIANCE", "rel")
+- `exchange` (string, optional) - Filter by exchange (e.g., "NSE_EQ")
+- `limit` (number, optional) - Max results (default: 50)
+- `offset` (number, optional) - Pagination offset
+
+**Request Example**:
 ```javascript
-// Search for any equity stock (case-insensitive)
-// Example: Search for "rel" will find "RELIANCE", "RELTECH", etc.
-GET /api/stock/vayu/equities?q=rel&limit=10
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/equities?q=RELIANCE&limit=10`,
+  { headers }
+);
+const { success, data } = await response.json();
+```
 
-// Response
+**Response Structure**:
+```json
 {
   "success": true,
   "data": {
@@ -142,29 +58,44 @@ GET /api/stock/vayu/equities?q=rel&limit=10
         "symbol": "RELIANCE",
         "exchange": "NSE_EQ",
         "last_price": 2580.50
-      },
-      {
-        "token": 123456,
-        "symbol": "RELTECH",
-        "exchange": "NSE_EQ",
-        "last_price": 450.75
       }
     ],
     "pagination": {
-      "total": 2,
+      "total": 1,
       "hasMore": false
     }
   }
 }
 ```
 
+**Use Case**: Search box autocomplete for equity stocks
+
+---
+
 ### 2. Search Futures
 
-```javascript
-// Search futures for a symbol
-GET /api/stock/vayu/futures?q=NIFTY&limit=10
+Search futures contracts by symbol.
 
-// Response
+**Endpoint**: `GET /api/stock/vayu/futures`
+
+**Query Parameters**:
+- `q` (string, optional) - Symbol search
+- `exchange` (string, optional) - Exchange filter
+- `expiry_from` (string, optional) - Expiry date from (YYYYMMDD)
+- `expiry_to` (string, optional) - Expiry date to (YYYYMMDD)
+- `limit` (number, optional)
+- `offset` (number, optional)
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/futures?q=NIFTY&limit=10`,
+  { headers }
+);
+```
+
+**Response Structure**:
+```json
 {
   "success": true,
   "data": {
@@ -176,18 +107,43 @@ GET /api/stock/vayu/futures?q=NIFTY&limit=10
         "expiry_date": "20241228",
         "last_price": 19250.30
       }
-    ]
+    ],
+    "pagination": { "total": 1, "hasMore": false }
   }
 }
 ```
 
+**Use Case**: Futures watchlist, expiry-based filtering
+
+---
+
 ### 3. Search Options
 
-```javascript
-// Search options chain
-GET /api/stock/vayu/options?q=NIFTY&option_type=CE&strike_min=19200&strike_max=19300&limit=20
+Search options contracts with strike and expiry filters.
 
-// Response
+**Endpoint**: `GET /api/stock/vayu/options`
+
+**Query Parameters**:
+- `q` (string, optional) - Symbol search
+- `exchange` (string, optional)
+- `option_type` (string, optional) - "CE" or "PE"
+- `expiry_from` (string, optional) - YYYYMMDD
+- `expiry_to` (string, optional) - YYYYMMDD
+- `strike_min` (number, optional)
+- `strike_max` (number, optional)
+- `limit` (number, optional)
+- `offset` (number, optional)
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/options?q=NIFTY&option_type=CE&strike_min=19200&strike_max=19300&limit=20`,
+  { headers }
+);
+```
+
+**Response Structure**:
+```json
 {
   "success": true,
   "data": {
@@ -201,18 +157,39 @@ GET /api/stock/vayu/options?q=NIFTY&option_type=CE&strike_min=19200&strike_max=1
         "option_type": "CE",
         "last_price": 125.50
       }
-    ]
+    ],
+    "pagination": { "total": 1, "hasMore": false }
   }
 }
 ```
 
-### 4. Search MCX Commodities
+**Use Case**: Options chain search, strike-based filtering
 
+---
+
+### 4. Search Commodities (MCX)
+
+Search MCX commodity futures.
+
+**Endpoint**: `GET /api/stock/vayu/commodities`
+
+**Query Parameters**:
+- `q` (string, optional) - Symbol search (e.g., "GOLD")
+- `expiry_from` (string, optional) - YYYYMMDD
+- `expiry_to` (string, optional) - YYYYMMDD
+- `limit` (number, optional)
+- `offset` (number, optional)
+
+**Request Example**:
 ```javascript
-// Search commodities
-GET /api/stock/vayu/commodities?q=GOLD&limit=10
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/commodities?q=GOLD&limit=10`,
+  { headers }
+);
+```
 
-// Response
+**Response Structure**:
+```json
 {
   "success": true,
   "data": {
@@ -221,83 +198,289 @@ GET /api/stock/vayu/commodities?q=GOLD&limit=10
         "token": 234567,
         "symbol": "GOLDM",
         "exchange": "MCX_FO",
+        "instrument_name": "GOLD",
         "expiry_date": "20241229",
         "last_price": 62580.00
+      }
+    ],
+    "pagination": { "total": 1, "hasMore": false }
+  }
+}
+```
+
+**Use Case**: MCX watchlist, commodity trading
+
+---
+
+### 5. Universal Instrument Search
+
+Search across all instrument types (equities, futures, options, commodities).
+
+**Endpoint**: `GET /api/stock/vayu/instruments/search`
+
+**Query Parameters**:
+- `q` (string, required) - Search query (case-insensitive)
+- `limit` (number, optional) - Max results (default: 50)
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/instruments/search?q=rel&limit=20`,
+  { headers }
+);
+```
+
+**Response Structure**:
+```json
+{
+  "success": true,
+  "data": {
+    "instruments": [
+      {
+        "token": 738561,
+        "symbol": "RELIANCE",
+        "exchange": "NSE_EQ",
+        "instrument_name": "EQ"
       }
     ]
   }
 }
 ```
 
-### 5. Get Options Chain
+**Use Case**: Universal search box, multi-asset discovery
 
+---
+
+### 6. Search Tickers by Format
+
+Search using Vayu ticker format (e.g., NSE_EQ_RELIANCE).
+
+**Endpoint**: `GET /api/stock/vayu/tickers/search`
+
+**Query Parameters**:
+- `q` (string, required) - Ticker format query (e.g., "NSE_EQ_RELIANCE")
+
+**Request Example**:
 ```javascript
-// Get full options chain for a symbol
-GET /api/stock/vayu/options/chain/NIFTY
-
-// Response
-{
-  "success": true,
-  "data": {
-    "symbol": "NIFTY",
-    "expiries": ["20241228", "20250102", "20250109"],
-    "strikes": [19200, 19250, 19300, ...],
-    "options": {
-      "20241228": {
-        "19250": {
-          "CE": { token: 123, last_price: 125.50 },
-          "PE": { token: 124, last_price: 115.20 }
-        }
-      }
-    }
-  }
-}
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/tickers/search?q=NSE_EQ_RELIANCE`,
+  { headers }
+);
 ```
 
-### 6. Case-Insensitive Universal Search
-
-```javascript
-// Search across all instruments (equities, futures, options, commodities)
-// Query is automatically converted to uppercase for case-insensitive search
-GET /api/stock/instruments/search?q=rel&limit=20
-
-// Response includes all instrument types starting with "rel"
+**Response Structure**:
+```json
 {
   "success": true,
   "data": [
     {
-      "instrument_token": 738561,
-      "tradingsymbol": "RELIANCE",
-      "name": "Reliance Industries Limited",
-      "exchange": "NSE",
-      "instrument_type": "EQ"
-    },
-    {
-      "instrument_token": 123456,
-      "tradingsymbol": "RELTECH",
-      "name": "Religare Technologies",
-      "exchange": "NSE",
-      "instrument_type": "EQ"
+      "token": 738561,
+      "symbol": "RELIANCE",
+      "exchange": "NSE_EQ",
+      "instrument_name": "EQ",
+      "expiry_date": null,
+      "option_type": null,
+      "strike_price": null,
+      "last_price": 2580.50
     }
   ]
 }
 ```
 
-**Note:** The search is case-insensitive. "rel" will match "RELIANCE", "Reliance", "RELTECH", etc.
+**Use Case**: Ticker-based lookup, symbol resolution
 
-### 7. Batch Lookup
+---
 
+### 7. Get Options Chain
+
+Get complete options chain for a symbol with all expiries and strikes.
+
+**Endpoint**: `GET /api/stock/vayu/options/chain/:symbol`
+
+**Path Parameter**:
+- `symbol` (string, required) - Symbol (e.g., "NIFTY")
+
+**Request Example**:
 ```javascript
-// Get multiple instruments by token
-POST /api/stock/vayu/instruments/batch
-Content-Type: application/json
-x-api-key: YOUR_API_KEY
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/options/chain/NIFTY`,
+  { headers }
+);
+```
 
+**Response Structure**:
+```json
 {
-  "tokens": [738561, 11536, 26000] // Multiple tokens
+  "success": true,
+  "data": {
+    "symbol": "NIFTY",
+    "expiries": ["20241228", "20250102", "20250109"],
+    "strikes": [19200, 19250, 19300],
+    "options": {
+      "20241228": {
+        "19250": {
+          "CE": {
+            "token": 123,
+            "last_price": 125.50
+          },
+          "PE": {
+            "token": 124,
+            "last_price": 115.20
+          }
+        }
+      }
+    },
+    "performance": {
+      "queryTime": 45
+    }
+  }
 }
+```
 
-// Response
+**Use Case**: Options chain display, OI analysis
+
+---
+
+## Lookup & Details Endpoints
+
+### 8. List Instruments with Filters
+
+Get instruments with advanced filtering options.
+
+**Endpoint**: `GET /api/stock/vayu/instruments`
+
+**Query Parameters**:
+- `exchange` (string, optional) - e.g., "NSE_EQ"
+- `instrument_name` (string, optional) - e.g., "EQ"
+- `symbol` (string, optional) - e.g., "RELIANCE"
+- `option_type` (string, optional) - "CE" or "PE"
+- `is_active` (boolean, optional)
+- `limit` (number, optional)
+- `offset` (number, optional)
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/instruments?exchange=NSE_EQ&limit=50`,
+  { headers }
+);
+```
+
+**Response Structure**:
+```json
+{
+  "success": true,
+  "data": {
+    "instruments": [...],
+    "total": 1000,
+    "pagination": { "hasMore": true }
+  }
+}
+```
+
+---
+
+### 9. Get Instrument by Token
+
+Retrieve specific instrument details by token.
+
+**Endpoint**: `GET /api/stock/vayu/instruments/:token`
+
+**Path Parameter**:
+- `token` (number, required) - Instrument token
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/instruments/738561`,
+  { headers }
+);
+```
+
+**Response Structure**:
+```json
+{
+  "success": true,
+  "data": {
+    "instrument": {
+      "token": 738561,
+      "symbol": "RELIANCE",
+      "exchange": "NSE_EQ",
+      "instrument_name": "EQ",
+      "tick": 0.05,
+      "lot_size": 1
+    }
+  }
+}
+```
+
+**Use Case**: Token-to-instrument resolution, watchlist details
+
+---
+
+### 10. Get Ticker by Symbol
+
+Get live price and metadata by Vayu ticker symbol.
+
+**Endpoint**: `GET /api/stock/vayu/tickers/:symbol`
+
+**Path Parameter**:
+- `symbol` (string, required) - Ticker format (e.g., "NSE_EQ_RELIANCE")
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/tickers/NSE_EQ_RELIANCE`,
+  { headers }
+);
+```
+
+**Response Structure**:
+```json
+{
+  "success": true,
+  "data": {
+    "token": 738561,
+    "symbol": "RELIANCE",
+    "exchange": "NSE_EQ",
+    "instrument_name": "EQ",
+    "last_price": 2580.50
+  }
+}
+```
+
+---
+
+### 11. Batch Lookup
+
+Get multiple instruments by token in single request (max 100 tokens).
+
+**Endpoint**: `POST /api/stock/vayu/instruments/batch`
+
+**Request Body**:
+```json
+{
+  "tokens": [738561, 11536, 26000]
+}
+```
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/instruments/batch`,
+  {
+    method: 'POST',
+    headers: {
+      ...headers,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ tokens: [738561, 11536, 26000] })
+  }
+);
+```
+
+**Response Structure**:
+```json
 {
   "success": true,
   "data": {
@@ -310,500 +493,305 @@ x-api-key: YOUR_API_KEY
       }
     },
     "ltp": {
-      "738561": { last_price: 2580.50 },
-      "11536": { last_price: 44550.30 },
-      "26000": { last_price: 19245.60 }
+      "738561": { "last_price": 2580.50 },
+      "11536": { "last_price": 44550.30 }
+    },
+    "performance": {
+      "queryTime": 12
     }
+  }
+}
+```
+
+**Use Case**: Bulk watchlist refresh, efficient multi-instrument lookup
+
+---
+
+## Analytics & Stats Endpoints
+
+### 12. Instrument Statistics
+
+Get instrument database statistics.
+
+**Endpoint**: `GET /api/stock/vayu/instruments/stats`
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/instruments/stats`,
+  { headers }
+);
+```
+
+**Response Structure**:
+```json
+{
+  "success": true,
+  "data": {
+    "total": 50000,
+    "byExchange": { "NSE_EQ": 2000, "NSE_FO": 15000 },
+    "byInstrumentType": { "EQ": 2000, "FUTSTK": 5000 }
   }
 }
 ```
 
 ---
 
-## Adding to Watchlist
+### 13. Cached Statistics
 
-### Example: Build a Complete Watchlist
+Get cached instrument statistics (faster response).
+
+**Endpoint**: `GET /api/stock/vayu/instruments/cached-stats`
+
+**Response includes**: total, byExchange, byInstrumentType, lastSync, queryTime
+
+---
+
+### 14. Popular Instruments
+
+Get popular/most-traded instruments with caching.
+
+**Endpoint**: `GET /api/stock/vayu/instruments/popular`
+
+**Query Parameters**:
+- `limit` (number, optional) - Max instruments (default: 50)
+
+**Request Example**:
+```javascript
+const response = await fetch(
+  `${BASE_URL}${API_PREFIX}/vayu/instruments/popular?limit=50`,
+  { headers }
+);
+```
+
+**Response Structure**:
+```json
+{
+  "success": true,
+  "data": {
+    "instruments": [
+      {
+        "token": 738561,
+        "symbol": "RELIANCE",
+        "exchange": "NSE_EQ",
+        "last_price": 2580.50
+      }
+    ],
+    "performance": { "queryTime": 5 }
+  }
+}
+```
+
+**Use Case**: Default watchlist suggestions, popular stocks display
+
+---
+
+## Admin/Utility Endpoints
+
+### 15. Sync Instruments
+
+Manually sync instruments from CSV (admin only).
+
+**Endpoint**: `POST /api/stock/vayu/instruments/sync`
+
+**Query Parameters**:
+- `exchange` (string, optional)
+- `csv_url` (string, optional) - Override CSV URL
+
+---
+
+### 16. Clear Cache
+
+Clear Vayu cache (admin only).
+
+**Endpoint**: `POST /api/stock/vayu/cache/clear`
+
+**Request Body**:
+```json
+{
+  "pattern": "vortex:*" // optional, defaults to vortex:*
+}
+```
+
+---
+
+## Usage Scenarios
+
+### Building a Search Box
+
+```javascript
+// Debounced search function
+async function searchInstruments(query, type = 'equities') {
+  if (!query || query.length < 2) return [];
+  
+  const endpoint = `/api/stock/vayu/${type}`;
+  const response = await fetch(
+    `${BASE_URL}${endpoint}?q=${encodeURIComponent(query)}&limit=10`,
+    { headers }
+  );
+  const { data } = await response.json();
+  return data.instruments;
+}
+
+// Universal search
+async function universalSearch(query) {
+  const response = await fetch(
+    `${BASE_URL}/api/stock/vayu/instruments/search?q=${encodeURIComponent(query)}&limit=20`,
+    { headers }
+  );
+  const { data } = await response.json();
+  return data.instruments;
+}
+```
+
+### Creating a Watchlist
 
 ```javascript
 class WatchlistManager {
   constructor(apiKey) {
     this.apiKey = apiKey;
-    this.watchlist = [];
+    this.items = [];
   }
 
-  // Search and add equity
-  async addEquity(query) {
-    const response = await fetch(`https://api.yourdomain.com/api/stock/vayu/equities?q=${query}`, {
-      headers: { 'x-api-key': this.apiKey }
-    });
+  async addFromSearch(query, type = 'equities') {
+    const response = await fetch(
+      `${BASE_URL}/api/stock/vayu/${type}?q=${query}&limit=1`,
+      { headers: { 'x-api-key': this.apiKey } }
+    );
     const { data } = await response.json();
     
     if (data.instruments.length > 0) {
-      const instrument = data.instruments[0];
-      this.watchlist.push({
-        token: instrument.token,
-        symbol: instrument.symbol,
-        exchange: instrument.exchange,
-        type: 'equity',
-        last_price: null,
-        change: null,
+      const inst = data.instruments[0];
+      this.items.push({
+        token: inst.token,
+        symbol: inst.symbol,
+        exchange: inst.exchange,
+        last_price: inst.last_price,
         added_at: new Date()
       });
     }
   }
 
-  // Add future
-  async addFuture(query) {
-    const response = await fetch(`https://api.yourdomain.com/api/stock/vayu/futures?q=${query}&limit=1`, {
-      headers: { 'x-api-key': this.apiKey }
-    });
-    const { data } = await response.json();
+  async refreshBatch() {
+    const tokens = this.items.map(i => i.token);
+    if (tokens.length === 0) return;
     
-    if (data.instruments.length > 0) {
-      const instrument = data.instruments[0];
-      this.watchlist.push({
-        token: instrument.token,
-        symbol: instrument.symbol,
-        exchange: instrument.exchange,
-        expiry_date: instrument.expiry_date,
-        type: 'future',
-        last_price: null,
-        added_at: new Date()
-      });
-    }
-  }
-
-  // Add option
-  async addOption(symbol, expiry, strike, optionType) {
-    const response = await fetch(`https://api.yourdomain.com/api/stock/vayu/options?q=${symbol}&expiry_from=${expiry}&expiry_to=${expiry}&strike_min=${strike}&strike_max=${strike}&option_type=${optionType}&limit=1`, {
-      headers: { 'x-api-key': this.apiKey }
-    });
-    const { data } = await response.json();
-    
-    if (data.instruments.length > 0) {
-      const instrument = data.instruments[0];
-      this.watchlist.push({
-        token: instrument.token,
-        symbol: instrument.symbol,
-        expiry_date: instrument.expiry_date,
-        strike_price: instrument.strike_price,
-        option_type: optionType,
-        type: 'option',
-        last_price: null,
-        added_at: new Date()
-      });
-    }
-  }
-
-  // Get all tokens for WebSocket subscription
-  getTokens() {
-    return this.watchlist.map(item => item.token);
-  }
-}
-
-// Usage
-const watchlist = new WatchlistManager('YOUR_API_KEY');
-
-// Add popular stocks
-await watchlist.addEquity('RELIANCE');
-await watchlist.addEquity('TCS');
-await watchlist.addEquity('HDFC BANK');
-
-// Add NIFTY future
-await watchlist.addFuture('NIFTY');
-
-// Add NIFTY 19250 CE option
-await watchlist.addOption('NIFTY', '20241228', 19250, 'CE');
-
-console.log('Watchlist tokens:', watchlist.getTokens());
-```
-
----
-
-## WebSocket Streaming
-
-### Connection
-
-```javascript
-const socket = io('wss://api.yourdomain.com/market-data', {
-  extraHeaders: {
-    'x-api-key': 'YOUR_API_KEY'
-  },
-  reconnection: true,
-  reconnectionDelay: 1000
-});
-```
-
-### Events
-
-#### Client → Server
-
-**Subscribe to instruments**
-```javascript
-socket.emit('subscribe_instruments', {
-  instruments: [738561, 11536, 26000],
-  mode: 'ltp' // 'ltp' | 'ohlcv' | 'full'
-});
-
-socket.emit('unsubscribe_instruments', {
-  instruments: [738561]
-});
-
-socket.emit('get_quote', {
-  instruments: [738561] // Get current price (not streaming)
-});
-```
-
-#### Server → Client
-
-**Connected**
-```javascript
-socket.on('connected', (data) => {
-  console.log('Connected:', data.message);
-  console.log('Client ID:', data.clientId);
-});
-```
-
-**Subscription Confirmed**
-```javascript
-socket.on('subscription_confirmed', (data) => {
-  console.log('Subscribed to:', data.instruments);
-  console.log('Mode:', data.mode);
-});
-```
-
-**Market Data (Live Prices)**
-```javascript
-socket.on('market_data', (data) => {
-  console.log('Token:', data.instrumentToken);
-  console.log('Price:', data.data.last_price);
-  console.log('Timestamp:', data.timestamp);
-  
-  // Update your UI
-  updatePrice(data.instrumentToken, data.data.last_price);
-});
-
-// Data structure for each mode:
-// 'ltp' mode: { instrumentToken, data: { last_price }, timestamp }
-// 'ohlcv' mode: { instrumentToken, data: { last_price, ohlc, volume }, timestamp }
-// 'full' mode: { instrumentToken, data: { last_price, ohlc, volume, depth }, timestamp }
-```
-
-**Error**
-```javascript
-socket.on('error', (error) => {
-  console.error('WebSocket error:', error.message);
-});
-```
-
----
-
-## Complete Example: Equity Watchlist
-
-```javascript
-const io = require('socket.io-client');
-
-class EquityWatchlistApp {
-  constructor(apiKey) {
-    this.apiKey = apiKey;
-    this.watchlist = [];
-    this.socket = null;
-  }
-
-  // 1. Search and add equity
-  async searchAndAddEquity(query) {
-    try {
-      const response = await fetch(`https://api.yourdomain.com/api/stock/vayu/equities?q=${query}&limit=1`, {
-        headers: { 'x-api-key': this.apiKey }
-      });
-      const result = await response.json();
-      
-      if (result.data.instruments.length > 0) {
-        const instrument = result.data.instruments[0];
-        this.watchlist.push({
-          token: instrument.token,
-          symbol: instrument.symbol,
-          exchange: instrument.exchange,
-          last_price: instrument.last_price,
-          change: 0,
-          change_percent: 0
-        });
-        this.renderWatchlist();
-        return instrument;
+    const response = await fetch(
+      `${BASE_URL}/api/stock/vayu/instruments/batch`,
+      {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ tokens })
       }
-    } catch (error) {
-      console.error('Failed to add equity:', error);
-    }
-  }
-
-  // 2. Connect to WebSocket
-  connectWebSocket() {
-    this.socket = io('wss://api.yourdomain.com/market-data', {
-      extraHeaders: { 'x-api-key': this.apiKey }
-    });
-
-    this.socket.on('connected', () => {
-      console.log('✅ Connected to market data stream');
-      this.subscribeToWatchlist();
-    });
-
-    this.socket.on('market_data', (data) => {
-      this.updatePrice(data.instrumentToken, data.data.last_price);
-    });
-
-    this.socket.on('error', (error) => {
-      console.error('❌ WebSocket error:', error.message);
-    });
-  }
-
-  // 3. Subscribe to all instruments in watchlist
-  subscribeToWatchlist() {
-    if (this.socket && this.watchlist.length > 0) {
-      const tokens = this.watchlist.map(item => item.token);
-      
-      this.socket.emit('subscribe_instruments', {
-        instruments: tokens,
-        mode: 'ltp'
-      });
-
-      this.socket.on('subscription_confirmed', () => {
-        console.log('✅ Subscribed to watchlist');
-      });
-    }
-  }
-
-  // 4. Update price in watchlist
-  updatePrice(token, price) {
-    const item = this.watchlist.find(i => i.token === token);
-    if (item) {
-      const previousPrice = item.last_price;
-      item.last_price = price;
-      item.change = price - previousPrice;
-      item.change_percent = ((price - previousPrice) / previousPrice) * 100;
-      this.renderWatchlist();
-    }
-  }
-
-  // 5. Render watchlist UI (example)
-  renderWatchlist() {
-    console.log('\n📊 Watchlist:');
-    this.watchlist.forEach(item => {
-      const changeColor = item.change >= 0 ? '🟢' : '🔴';
-      console.log(`${changeColor} ${item.symbol}: ₹${item.last_price} (${item.change_percent.toFixed(2)}%)`);
+    );
+    const { data } = await response.json();
+    
+    // Update watchlist with fresh prices
+    this.items.forEach(item => {
+      if (data.ltp[item.token]) {
+        item.last_price = data.ltp[item.token].last_price;
+      }
     });
   }
 }
-
-// Usage
-const app = new EquityWatchlistApp('YOUR_API_KEY');
-
-// Add stocks to watchlist (case-insensitive search)
-// User types "rel" and sees "RELIANCE" in results
-await app.searchAndAddEquity('rel');
-await app.searchAndAddEquity('tcs');
-await app.searchAndAddEquity('hdfc');
-await app.searchAndAddEquity('infy');
-
-// Connect and start receiving live prices
-app.connectWebSocket();
 ```
 
----
-
-## Examples by Asset Type
-
-### Equities Watchlist
+### Options Chain Display
 
 ```javascript
-// Popular stocks to add
-const stocks = ['RELIANCE', 'TCS', 'HDFC BANK', 'ICICI BANK', 'INFY'];
-
-for (const symbol of stocks) {
-  const response = await fetch(`https://api.yourdomain.com/api/stock/vayu/equities?q=${symbol}&limit=1`, {
-    headers: { 'x-api-key': 'YOUR_API_KEY' }
-  });
+async function loadOptionsChain(symbol) {
+  const response = await fetch(
+    `${BASE_URL}/api/stock/vayu/options/chain/${symbol}`,
+    { headers }
+  );
   const { data } = await response.json();
-  if (data.instruments.length > 0) {
-    watchlist.push(data.instruments[0]);
-  }
+  
+  // data.expiries - list of expiry dates
+  // data.strikes - list of strike prices
+  // data.options[expiry][strike] - CE/PE objects with tokens and prices
+  return data;
 }
-```
-
-### Futures Watchlist
-
-```javascript
-// Add NIFTY and BANK NIFTY futures
-const response = await fetch('https://api.yourdomain.com/api/stock/vayu/futures?q=NIFTY&limit=5', {
-  headers: { 'x-api-key': 'YOUR_API_KEY' }
-});
-const { data } = await response.json();
-
-// Get nearest expiry
-const nearestFutures = data.instruments.sort((a, b) => 
-  a.expiry_date.localeCompare(b.expiry_date)
-)[0];
-watchlist.push(nearestFutures);
-```
-
-### Options Watchlist
-
-```javascript
-// Add OTM and ATM options
-const strike = 19250;
-const expiry = '20241228';
-
-// ATM call option
-await fetch(`https://api.yourdomain.com/api/stock/vayu/options?q=NIFTY&expiry_from=${expiry}&expiry_to=${expiry}&strike_min=${strike}&strike_max=${strike}&option_type=CE&limit=1`, {
-  headers: { 'x-api-key': 'YOUR_API_KEY' }
-});
-
-// Add to watchlist...
-```
-
-### MCX Commodities
-
-```javascript
-// Add GOLD and SILVER futures
-const goldResponse = await fetch('https://api.yourdomain.com/api/stock/vayu/commodities?q=GOLD&limit=1', {
-  headers: { 'x-api-key': 'YOUR_API_KEY' }
-});
-const { data } = await goldResponse.json();
-watchlist.push(data.instruments[0]);
 ```
 
 ---
 
 ## Error Handling
 
+### Common HTTP Status Codes
+
+- **200** - Success
+- **400** - Bad Request (invalid parameters, missing required fields)
+- **401** - Unauthorized (missing or invalid API key)
+- **404** - Not Found (instrument/ticker not found)
+- **429** - Rate limit exceeded
+- **500** - Internal server error
+
+### Error Response Format
+
+```json
+{
+  "success": false,
+  "message": "Error description",
+  "error": "Detailed error message"
+}
+```
+
+### Handling Errors
+
 ```javascript
-socket.on('error', (error) => {
-  if (error.message.includes('Missing x-api-key')) {
-    // Show login prompt
-  } else if (error.message.includes('Invalid API key')) {
-    // Refresh API key
-  } else if (error.message.includes('Connection limit exceeded')) {
-    // Show upgrade message
-  } else {
-    // Generic error handling
-  }
-});
-
-socket.on('disconnect', (reason) => {
-  if (reason === 'io server disconnect') {
-    // Server disconnected, reconnect manually
-    socket.connect();
-  }
-});
-```
-
----
-
-## API Reference Quick Links
-
-### Search Endpoints
-- `GET /api/stock/instruments/search?q=QUERY` - Universal search (case-insensitive)
-- `GET /api/stock/vayu/equities?q=QUERY` - Search equities (case-insensitive)
-- `GET /api/stock/vayu/futures?q=QUERY` - Search futures (case-insensitive)
-- `GET /api/stock/vayu/options?q=QUERY&option_type=CE` - Search options (case-insensitive)
-- `GET /api/stock/vayu/commodities?q=QUERY` - Search MCX commodities (case-insensitive)
-- `GET /api/stock/vayu/options/chain/SYMBOL` - Get options chain
-
-### WebSocket Events
-- Connect: `io('wss://api.yourdomain.com/market-data')`
-- Subscribe: `socket.emit('subscribe_instruments', {instruments: [], mode: 'ltp'})`
-- Unsubscribe: `socket.emit('unsubscribe_instruments', {instruments: []})`
-- Listen: `socket.on('market_data', callback)`
-
----
-
-## Complete Working Example
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Live Watchlist</title>
-  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-</head>
-<body>
-  <input type="text" id="searchInput" placeholder="Search stocks...">
-  <button onclick="searchAndAdd()">Add to Watchlist</button>
+try {
+  const response = await fetch(url, { headers });
+  const data = await response.json();
   
-  <div id="watchlist"></div>
-
-  <script>
-    const API_KEY = 'YOUR_API_KEY';
-    const watchlist = [];
-    let socket;
-
-    // Connect WebSocket
-    socket = io('wss://api.yourdomain.com/market-data', {
-      extraHeaders: { 'x-api-key': API_KEY }
-    });
-
-    socket.on('connected', () => {
-      console.log('✅ Connected');
-      subscribeAll();
-    });
-
-    socket.on('market_data', (data) => {
-      updatePrice(data.instrumentToken, data.data.last_price);
-    });
-
-    // Search and add
-    async function searchAndAdd() {
-      const query = document.getElementById('searchInput').value;
-      const response = await fetch(`https://api.yourdomain.com/api/stock/vayu/equities?q=${query}&limit=1`, {
-        headers: { 'x-api-key': API_KEY }
-      });
-      const result = await response.json();
-      
-      if (result.data.instruments.length > 0) {
-        watchlist.push(result.data.instruments[0]);
-        renderWatchlist();
-        subscribeAll();
-      }
+  if (!data.success) {
+    console.error('API Error:', data.message);
+    // Handle error
+  }
+  
+  if (!response.ok) {
+    if (response.status === 401) {
+      // Handle authentication error
+    } else if (response.status === 404) {
+      // Handle not found
     }
-
-    // Subscribe to all
-    function subscribeAll() {
-      if (watchlist.length > 0) {
-        socket.emit('subscribe_instruments', {
-          instruments: watchlist.map(i => i.token),
-          mode: 'ltp'
-        });
-      }
-    }
-
-    // Update price
-    function updatePrice(token, price) {
-      const item = watchlist.find(i => i.token === token);
-      if (item) {
-        item.last_price = price;
-        renderWatchlist();
-      }
-    }
-
-    // Render UI
-    function renderWatchlist() {
-      const div = document.getElementById('watchlist');
-      div.innerHTML = watchlist.map(item => `
-        <div style="padding: 10px; border: 1px solid #ccc; margin: 5px;">
-          <strong>${item.symbol}</strong><br>
-          ₹${item.last_price}
-        </div>
-      `).join('');
-    }
-  </script>
-</body>
-</html>
+  }
+} catch (error) {
+  console.error('Network error:', error);
+}
 ```
 
 ---
 
-## Support
+## Best Practices
 
-- Documentation: https://docs.yourdomain.com
-- API Status: https://status.yourdomain.com
-- Support: support@yourdomain.com
+1. **Search Debouncing**: Debounce search queries (300-500ms) to reduce API calls
+2. **Batch Operations**: Use batch endpoint for multiple instrument lookups
+3. **Caching**: Cache popular instruments and search results client-side
+4. **Pagination**: Use limit/offset for large result sets
+5. **Error Retry**: Implement exponential backoff for failed requests
+6. **Rate Limiting**: Respect rate limits, implement client-side throttling
 
+---
+
+## Quick Reference
+
+| Endpoint | Method | Use Case |
+|----------|--------|----------|
+| `/api/stock/vayu/equities` | GET | Equity search box |
+| `/api/stock/vayu/futures` | GET | Futures search |
+| `/api/stock/vayu/options` | GET | Options search |
+| `/api/stock/vayu/commodities` | GET | MCX search |
+| `/api/stock/vayu/instruments/search` | GET | Universal search |
+| `/api/stock/vayu/tickers/search` | GET | Ticker lookup |
+| `/api/stock/vayu/options/chain/:symbol` | GET | Options chain |
+| `/api/stock/vayu/instruments/:token` | GET | Token lookup |
+| `/api/stock/vayu/instruments/batch` | POST | Bulk lookup |
+| `/api/stock/vayu/instruments/popular` | GET | Popular stocks |
+
+---
+
+**Base URL**: `https://marketdata.vedpragya.com`  
+**All endpoints require**: `x-api-key` header

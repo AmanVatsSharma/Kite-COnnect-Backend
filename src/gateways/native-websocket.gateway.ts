@@ -215,6 +215,7 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
     });
 
     // Subscribe to streaming service
+    console.log(`[NativeWebSocketGateway] Subscribing client ${clientId} to ${instruments.length} instruments: ${JSON.stringify(instruments)} with mode=${mode}`);
     await this.subscribeToInstruments(instruments, mode, clientId);
 
     // Send confirmation
@@ -225,6 +226,7 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
     });
 
     this.logger.log(`Client ${clientId} subscribed to ${instruments.length} instruments with mode=${mode}`);
+    console.log(`[NativeWebSocketGateway] Subscription confirmed sent to client ${clientId} for ${instruments.length} instruments`);
   }
 
   private async handleUnsubscribe(client: WebSocketWithData, data: any) {

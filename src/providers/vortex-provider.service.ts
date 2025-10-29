@@ -331,10 +331,42 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         this.ws.on('message', (data: any) => {
           if (typeof data === 'string') {
             try { 
-              const j = JSON.parse(data.toString()); 
-              if (j?.type === 'postback') { 
+              const j = JSON.parse(data.toString());
+              
+              // Handle subscription confirmations and errors
+              // Vortex may send confirmation/error messages for subscriptions
+              if (j?.message_type === 'subscribed' || j?.status === 'subscribed' || (j?.type === 'subscription' && j?.status === 'success')) {
+                const token = j?.token;
+                const exchange = j?.exchange;
+                if (token) {
+                  // Confirm subscription was successful
+                  if (!this.subscribed.has(token)) {
+                    this.subscribed.add(token);
+                    self.logger.log(`[Vortex] Subscription confirmed by server for token ${token} (exchange: ${exchange || 'unknown'})`);
+                  }
+                }
+              } else if (j?.message_type === 'unsubscribed' || j?.status === 'unsubscribed') {
+                const token = j?.token;
+                if (token) {
+                  this.subscribed.delete(token);
+                  self.logger.log(`[Vortex] Unsubscription confirmed by server for token ${token}`);
+                }
+              } else if (j?.error || j?.status === 'error' || j?.message_type === 'error') {
+                const token = j?.token;
+                const errorMsg = j?.error || j?.message || 'Unknown error';
+                if (token) {
+                  // Remove from subscribed Set if subscription failed
+                  this.subscribed.delete(token);
+                  this.modeByToken.delete(token);
+                  this.exchangeByToken.delete(token);
+                  self.logger.error(`[Vortex] Subscription error for token ${token}: ${errorMsg}`);
+                } else {
+                  self.logger.error(`[Vortex] Received error message: ${errorMsg}`);
+                }
+              } else if (j?.type === 'postback') { 
                 self.logger.debug('[Vortex] Received postback message');
               } else {
+                // Log other text messages for debugging
                 self.logger.debug(`[Vortex] Received text message: ${data.toString()}`);
               }
             } catch (e) {
@@ -355,12 +387,20 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       }
       disconnect() { try { this.ws?.close(); } catch {} }
       subscribe(tokens: number[], mode: 'ltp' | 'ohlcv' | 'full' = 'ltp') {
+        // Filter out tokens that are already subscribed
         const unique = tokens.filter(t => !this.subscribed.has(t));
         const available = Math.max(0, self.maxSubscriptionsPerSocket - this.subscribed.size);
         const toAdd = unique.slice(0, available);
         const dropped = unique.slice(available);
+        
         if (toAdd.length === 0 && unique.length > 0) {
           self.logger.warn(`[Vortex] Subscription limit (${self.maxSubscriptionsPerSocket}) reached; dropping ${unique.length} tokens`);
+        }
+        
+        // Check WebSocket state before proceeding
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          self.logger.warn(`[Vortex] Cannot subscribe to ${toAdd.length} tokens: WebSocket is not OPEN (state: ${this.ws?.readyState ?? 'null'})`);
+          return;
         }
         
         // Set mode for all tokens before subscribing
@@ -368,31 +408,77 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
           this.modeByToken.set(token, mode);
         });
         
+        self.logger.log(`[Vortex] Processing subscription for ${toAdd.length} tokens with mode=${mode}`);
+        
         // Fire-and-forget: resolve exchanges per token and send subscribe frames
         (async () => {
           try {
             const exMapRaw = await self.getExchangesForTokens(toAdd.map(t => String(t)));
+            const successfullySubscribed: number[] = [];
+            
             for (const t of toAdd) {
-              const tokenMode = this.modeByToken.get(t) || mode;
-              const ex = (exMapRaw.get(String(t)) || 'NSE_EQ') as 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
-              this.exchangeByToken.set(t, ex);
-              this.send({ exchange: ex, token: t, mode: tokenMode, message_type: 'subscribe' });
-              this.subscribed.add(t);
+              // Double-check WebSocket state before each send
+              if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                self.logger.warn(`[Vortex] WebSocket disconnected while subscribing token ${t}, skipping remaining tokens`);
+                break;
+              }
+              
+              try {
+                const tokenMode = this.modeByToken.get(t) || mode;
+                const ex = (exMapRaw.get(String(t)) || 'NSE_EQ') as 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+                this.exchangeByToken.set(t, ex);
+                
+                // Send subscription message
+                this.send({ exchange: ex, token: t, mode: tokenMode, message_type: 'subscribe' });
+                
+                // Only mark as subscribed AFTER successfully sending
+                // Note: We assume send() succeeded if WebSocket is OPEN (send() catches errors but doesn't throw)
+                // In production, Vortex server should send confirmation which we'll handle separately
+                this.subscribed.add(t);
+                successfullySubscribed.push(t);
+                
+                self.logger.debug(`[Vortex] Sent subscription request for token ${t} (exchange: ${ex}, mode: ${tokenMode})`);
+              } catch (tokenError) {
+                self.logger.error(`[Vortex] Failed to subscribe token ${t}`, tokenError as any);
+                // Don't add to subscribed Set if send failed
+              }
             }
-            if (toAdd.length) self.logger.log(`[Vortex] Subscribed ${toAdd.length} tokens with mode=${mode}, exchanges: ` + toAdd.map(t => `${t}:${this.exchangeByToken.get(t)}`).join(','));
+            
+            if (successfullySubscribed.length > 0) {
+              self.logger.log(`[Vortex] Successfully sent subscription requests for ${successfullySubscribed.length}/${toAdd.length} tokens with mode=${mode}`);
+              self.logger.debug(`[Vortex] Subscribed tokens: ${successfullySubscribed.map(t => `${t}:${this.exchangeByToken.get(t)}`).join(', ')}`);
+            }
           } catch (e) {
             self.logger.error('[Vortex] subscribe exchange resolution failed, using NSE_EQ fallback', e as any);
             // Fallback: send with NSE_EQ to avoid silent failure
+            const fallbackSubscribed: number[] = [];
             for (const t of toAdd) {
-              const tokenMode = this.modeByToken.get(t) || mode;
-              this.exchangeByToken.set(t, 'NSE_EQ');
-              this.send({ exchange: 'NSE_EQ', token: t, mode: tokenMode, message_type: 'subscribe' });
-              this.subscribed.add(t);
+              // Double-check WebSocket state
+              if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                self.logger.warn(`[Vortex] WebSocket disconnected during fallback subscription, skipping token ${t}`);
+                break;
+              }
+              
+              try {
+                const tokenMode = this.modeByToken.get(t) || mode;
+                this.exchangeByToken.set(t, 'NSE_EQ');
+                this.send({ exchange: 'NSE_EQ', token: t, mode: tokenMode, message_type: 'subscribe' });
+                this.subscribed.add(t);
+                fallbackSubscribed.push(t);
+                self.logger.debug(`[Vortex] Sent fallback subscription for token ${t} with NSE_EQ`);
+              } catch (tokenError) {
+                self.logger.error(`[Vortex] Failed fallback subscription for token ${t}`, tokenError as any);
+              }
             }
-            if (toAdd.length) self.logger.log(`[Vortex] Fallback subscribed ${toAdd.length} tokens with NSE_EQ`);
+            if (fallbackSubscribed.length > 0) {
+              self.logger.log(`[Vortex] Fallback subscribed ${fallbackSubscribed.length} tokens with NSE_EQ`);
+            }
           }
         })();
-        if (dropped.length) self.logger.warn(`[Vortex] Dropped ${dropped.length} subscriptions due to limit`);
+        
+        if (dropped.length) {
+          self.logger.warn(`[Vortex] Dropped ${dropped.length} subscriptions due to limit (${this.subscribed.size}/${self.maxSubscriptionsPerSocket})`);
+        }
       }
       unsubscribe(tokens: number[]) {
         // Fire-and-forget: ensure exchange mapping exists for tokens
