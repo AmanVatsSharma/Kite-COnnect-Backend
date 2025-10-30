@@ -26,8 +26,12 @@ export class KiteConnectService implements OnModuleInit {
       const accessToken = this.configService.get('KITE_ACCESS_TOKEN');
 
       if (!apiKey || !accessToken) {
-        this.logger.warn('Kite Connect credentials not found. Starting without Kite.');
-        this.logger.warn('Use /api/auth/kite/login to authenticate and enable ticker.');
+        this.logger.warn(
+          'Kite Connect credentials not found. Starting without Kite.',
+        );
+        this.logger.warn(
+          'Use /api/auth/kite/login to authenticate and enable ticker.',
+        );
         return;
       }
 
@@ -47,12 +51,18 @@ export class KiteConnectService implements OnModuleInit {
       if (!this.kite) {
         const apiKey = this.configService.get('KITE_API_KEY');
         if (!apiKey) throw new Error('Kite API key not configured');
-        this.kite = new KiteConnect({ api_key: apiKey, access_token: accessToken });
+        this.kite = new KiteConnect({
+          api_key: apiKey,
+          access_token: accessToken,
+        });
       } else if (typeof (this.kite as any).setAccessToken === 'function') {
         (this.kite as any).setAccessToken(accessToken);
       } else {
         const apiKey = this.configService.get('KITE_API_KEY');
-        this.kite = new KiteConnect({ api_key: apiKey, access_token: accessToken });
+        this.kite = new KiteConnect({
+          api_key: apiKey,
+          access_token: accessToken,
+        });
       }
       this.logger.log('Kite access token updated');
     } catch (error) {
@@ -161,7 +171,10 @@ export class KiteConnectService implements OnModuleInit {
       return undefined as any;
     }
 
-    const ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
+    const ticker = new KiteTicker({
+      api_key: apiKey,
+      access_token: accessToken,
+    });
 
     ticker.on('connect', () => {
       this.isConnected = true;

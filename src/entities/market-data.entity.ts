@@ -1,4 +1,12 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  Index,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { Instrument } from './instrument.entity';
 
 @Entity('market_data')
@@ -54,6 +62,9 @@ export class MarketData {
   created_at: Date;
 
   @ManyToOne(() => Instrument, { eager: false })
-  @JoinColumn({ name: 'instrument_token', referencedColumnName: 'instrument_token' })
+  @JoinColumn({
+    name: 'instrument_token',
+    referencedColumnName: 'instrument_token',
+  })
   instrument: Instrument;
 }

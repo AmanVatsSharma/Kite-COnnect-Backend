@@ -1,13 +1,26 @@
-import { MigrationInterface, QueryRunner, Table, TableColumn, TableIndex } from 'typeorm';
+import {
+  MigrationInterface,
+  QueryRunner,
+  Table,
+  TableColumn,
+  TableIndex,
+} from 'typeorm';
 
-export class AddApiKeyProviderAndInstrumentMappings1700000000000 implements MigrationInterface {
+export class AddApiKeyProviderAndInstrumentMappings1700000000000
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Add provider column to api_keys (nullable)
     const hasProvider = await queryRunner.hasColumn('api_keys', 'provider');
     if (!hasProvider) {
       await queryRunner.addColumn(
         'api_keys',
-        new TableColumn({ name: 'provider', type: 'varchar', length: '16', isNullable: true })
+        new TableColumn({
+          name: 'provider',
+          type: 'varchar',
+          length: '16',
+          isNullable: true,
+        }),
       );
     }
 
@@ -18,9 +31,25 @@ export class AddApiKeyProviderAndInstrumentMappings1700000000000 implements Migr
         new Table({
           name: 'instrument_mappings',
           columns: [
-            { name: 'id', type: 'int', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },
-            { name: 'provider', type: 'varchar', length: '16', isNullable: false },
-            { name: 'provider_token', type: 'varchar', length: '64', isNullable: false },
+            {
+              name: 'id',
+              type: 'int',
+              isPrimary: true,
+              isGenerated: true,
+              generationStrategy: 'increment',
+            },
+            {
+              name: 'provider',
+              type: 'varchar',
+              length: '16',
+              isNullable: false,
+            },
+            {
+              name: 'provider_token',
+              type: 'varchar',
+              length: '64',
+              isNullable: false,
+            },
             { name: 'instrument_token', type: 'int', isNullable: false },
             { name: 'created_at', type: 'timestamp', default: 'now()' },
             { name: 'updated_at', type: 'timestamp', default: 'now()' },
@@ -48,5 +77,3 @@ export class AddApiKeyProviderAndInstrumentMappings1700000000000 implements Migr
     }
   }
 }
-
-

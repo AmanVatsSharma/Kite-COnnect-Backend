@@ -12,7 +12,9 @@ export class ApiKeyService {
   ) {}
 
   async validateApiKey(key: string): Promise<ApiKey | null> {
-    const record = await this.apiKeyRepo.findOne({ where: { key, is_active: true } });
+    const record = await this.apiKeyRepo.findOne({
+      where: { key, is_active: true },
+    });
     return record || null;
   }
 

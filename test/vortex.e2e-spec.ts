@@ -23,9 +23,9 @@ describe('Vortex Integration (e2e, smoke)', () => {
     const res = await request(app.getHttpServer()).get('/health').expect(200);
     expect(res.body?.services?.vortexHttp).toBeDefined();
 
-    const res2 = await request(app.getHttpServer()).get('/health/detailed').expect(200);
+    const res2 = await request(app.getHttpServer())
+      .get('/health/detailed')
+      .expect(200);
     expect(res2.body?.services?.vortexHttp).toBeDefined();
   });
 });
-
-

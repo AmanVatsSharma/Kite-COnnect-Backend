@@ -15,7 +15,10 @@ import { RequestBatchingService } from '../../services/request-batching.service'
 import { MarketDataGateway } from '../../gateways/market-data.gateway';
 import { MarketDataStreamService } from '../../services/market-data-stream.service';
 import { HealthController } from '../../controllers/health.controller';
-import { AuthController, VortexAuthController } from '../../controllers/auth.controller';
+import {
+  AuthController,
+  VortexAuthController,
+} from '../../controllers/auth.controller';
 import { MetricsService } from '../../services/metrics.service';
 import { ApiKeyService } from '../../services/api-key.service';
 import { AdminController } from '../../controllers/admin.controller';
@@ -28,13 +31,30 @@ import { VortexSession } from '../../entities/vortex-session.entity';
 import { VortexInstrument } from '../../entities/vortex-instrument.entity';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
 import { NativeWebSocketGateway } from '../../gateways/native-websocket.gateway';
+import { ProviderQueueService } from '../../services/provider-queue.service';
+import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Instrument, MarketData, Subscription, ApiKey, KiteSession, InstrumentMapping, VortexSession, VortexInstrument]),
+    TypeOrmModule.forFeature([
+      Instrument,
+      MarketData,
+      Subscription,
+      ApiKey,
+      KiteSession,
+      InstrumentMapping,
+      VortexSession,
+      VortexInstrument,
+    ]),
     ScheduleModule.forRoot(),
   ],
-  controllers: [StockController, HealthController, AuthController, VortexAuthController, AdminController],
+  controllers: [
+    StockController,
+    HealthController,
+    AuthController,
+    VortexAuthController,
+    AdminController,
+  ],
   providers: [
     StockService,
     KiteProviderService,
@@ -44,6 +64,8 @@ import { NativeWebSocketGateway } from '../../gateways/native-websocket.gateway'
     RedisService,
     ApiKeyService,
     RequestBatchingService,
+    ProviderQueueService,
+    LtpMemoryCacheService,
     MarketDataGateway,
     NativeWebSocketGateway,
     MarketDataStreamService,
@@ -52,6 +74,11 @@ import { NativeWebSocketGateway } from '../../gateways/native-websocket.gateway'
     AdminGuard,
     MetricsInterceptor,
   ],
-  exports: [StockService, MarketDataGateway, MarketDataStreamService, VortexInstrumentService],
+  exports: [
+    StockService,
+    MarketDataGateway,
+    MarketDataStreamService,
+    VortexInstrumentService,
+  ],
 })
 export class StockModule {}

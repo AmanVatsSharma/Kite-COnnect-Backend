@@ -1,4 +1,10 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiKey } from '../entities/api-key.entity';
@@ -18,7 +24,9 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('Missing x-api-key');
     }
 
-    const keyRecord = await this.apiKeyRepo.findOne({ where: { key: apiKey, is_active: true } });
+    const keyRecord = await this.apiKeyRepo.findOne({
+      where: { key: apiKey, is_active: true },
+    });
     if (!keyRecord) {
       throw new UnauthorizedException('Invalid API key');
     }

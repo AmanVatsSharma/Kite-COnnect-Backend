@@ -105,12 +105,20 @@ describe('StockService', () => {
     }).compile();
 
     service = module.get<StockService>(StockService);
-    instrumentRepository = module.get<Repository<Instrument>>(getRepositoryToken(Instrument));
-    marketDataRepository = module.get<Repository<MarketData>>(getRepositoryToken(MarketData));
-    subscriptionRepository = module.get<Repository<Subscription>>(getRepositoryToken(Subscription));
+    instrumentRepository = module.get<Repository<Instrument>>(
+      getRepositoryToken(Instrument),
+    );
+    marketDataRepository = module.get<Repository<MarketData>>(
+      getRepositoryToken(MarketData),
+    );
+    subscriptionRepository = module.get<Repository<Subscription>>(
+      getRepositoryToken(Subscription),
+    );
     kiteConnectService = module.get<KiteConnectService>(KiteConnectService);
     redisService = module.get<RedisService>(RedisService);
-    requestBatchingService = module.get<RequestBatchingService>(RequestBatchingService);
+    requestBatchingService = module.get<RequestBatchingService>(
+      RequestBatchingService,
+    );
     marketDataGateway = module.get<MarketDataGateway>(MarketDataGateway);
   });
 
@@ -138,7 +146,9 @@ describe('StockService', () => {
         getMany: jest.fn().mockResolvedValue(mockInstruments),
       };
 
-      mockInstrumentRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
+      mockInstrumentRepository.createQueryBuilder.mockReturnValue(
+        mockQueryBuilder,
+      );
 
       const result = await service.getInstruments({
         exchange: 'NSE',
@@ -152,7 +162,7 @@ describe('StockService', () => {
       });
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
         'instrument.exchange = :exchange',
-        { exchange: 'NSE' }
+        { exchange: 'NSE' },
       );
     });
   });
@@ -162,7 +172,7 @@ describe('StockService', () => {
       const mockCachedQuotes = {
         '738561': {
           instrument_token: 738561,
-          last_price: 2500.50,
+          last_price: 2500.5,
         },
       };
 
@@ -178,7 +188,7 @@ describe('StockService', () => {
       const mockQuotes = {
         '738561': {
           instrument_token: 738561,
-          last_price: 2500.50,
+          last_price: 2500.5,
         },
       };
 
@@ -188,8 +198,14 @@ describe('StockService', () => {
       const result = await service.getQuotes([738561]);
 
       expect(result).toEqual(mockQuotes);
-      expect(mockRequestBatchingService.getQuote).toHaveBeenCalledWith(['738561']);
-      expect(mockRedisService.cacheQuote).toHaveBeenCalledWith(['738561'], mockQuotes, 30);
+      expect(mockRequestBatchingService.getQuote).toHaveBeenCalledWith([
+        '738561',
+      ]);
+      expect(mockRedisService.cacheQuote).toHaveBeenCalledWith(
+        ['738561'],
+        mockQuotes,
+        30,
+      );
     });
   });
 
@@ -212,14 +228,16 @@ describe('StockService', () => {
         getMany: jest.fn().mockResolvedValue(mockInstruments),
       };
 
-      mockInstrumentRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
+      mockInstrumentRepository.createQueryBuilder.mockReturnValue(
+        mockQueryBuilder,
+      );
 
       const result = await service.searchInstruments('RELIANCE', 10);
 
       expect(result).toEqual(mockInstruments);
       expect(mockQueryBuilder.where).toHaveBeenCalledWith(
         'instrument.tradingsymbol LIKE :query',
-        { query: '%RELIANCE%' }
+        { query: '%RELIANCE%' },
       );
     });
   });

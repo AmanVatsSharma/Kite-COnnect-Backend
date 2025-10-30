@@ -1,13 +1,13 @@
 /**
  * Native WebSocket Gateway
- * 
+ *
  * Provides native WebSocket support (non-Socket.IO) for clients that prefer
  * the standard WebSocket API without Socket.IO overhead.
- * 
+ *
  * Endpoint: /ws
  * Protocol: Native WebSocket (ws:// or wss://)
  * Authentication: Query parameter ?api_key=YOUR_KEY
- * 
+ *
  * Message Format:
  * - Client → Server: { "event": "subscribe", "data": {...} }
  * - Server → Client: { "event": "market_data", "data": {...} }
@@ -46,7 +46,9 @@ interface WebSocketWithData extends WebSocket {
     origin: '*',
   },
 })
-export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class NativeWebSocketGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
@@ -57,7 +59,8 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
     private redisService: RedisService,
     private providerResolver: MarketDataProviderResolverService,
     private apiKeyService: ApiKeyService,
-    @Inject(forwardRef(() => MarketDataStreamService)) private streamService: MarketDataStreamService,
+    @Inject(forwardRef(() => MarketDataStreamService))
+    private streamService: MarketDataStreamService,
   ) {}
 
   afterInit(server: Server) {
@@ -67,15 +70,20 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
   async handleConnection(client: WebSocketWithData, request: any) {
     const clientId = `native-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     client.clientId = clientId;
-    
+
     this.logger.log(`Native WebSocket client connected: ${clientId}`);
 
     // Parse query parameters for API key
     const url = new URL(request.url, 'http://dummy.com');
-    const apiKey = url.searchParams.get('api_key') || request.headers['x-api-key'] || '';
+    const apiKey =
+      url.searchParams.get('api_key') || request.headers['x-api-key'] || '';
 
     if (!apiKey) {
-      this.sendError(client, 'WS_AUTH_MISSING', 'Missing API key. Include ?api_key=YOUR_KEY in connection URL.');
+      this.sendError(
+        client,
+        'WS_AUTH_MISSING',
+        'Missing API key. Include ?api_key=YOUR_KEY in connection URL.',
+      );
       client.close(1008, 'Missing API key');
       return;
     }
@@ -90,7 +98,10 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
       }
 
       // Track connection
-      await this.apiKeyService.trackWsConnection(apiKey, record.connection_limit);
+      await this.apiKeyService.trackWsConnection(
+        apiKey,
+        record.connection_limit,
+      );
       client.apiKey = apiKey;
 
       // Initialize subscription
@@ -108,10 +119,15 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
         clientId: clientId,
         timestamp: new Date().toISOString(),
       });
-
     } catch (err) {
-      this.logger.warn(`Connection rejected for ${clientId}: ${err?.message || err}`);
-      this.sendError(client, 'WS_CONNECTION_ERROR', err?.message || 'Connection failed');
+      this.logger.warn(
+        `Connection rejected for ${clientId}: ${err?.message || err}`,
+      );
+      this.sendError(
+        client,
+        'WS_CONNECTION_ERROR',
+        err?.message || 'Connection failed',
+      );
       client.close(1011, 'Internal error');
       return;
     }
@@ -130,7 +146,10 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
     if (subscription) {
       // Unsubscribe from instruments
       if (subscription.instruments.length > 0) {
-        await this.unsubscribeFromInstruments(subscription.instruments, clientId);
+        await this.unsubscribeFromInstruments(
+          subscription.instruments,
+          clientId,
+        );
       }
       this.clientSubscriptions.delete(clientId);
     }
@@ -172,7 +191,11 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
       }
     } catch (error) {
       this.logger.error('Error parsing message', error);
-      this.sendError(client, 'WS_INVALID_MESSAGE', 'Invalid JSON message format');
+      this.sendError(
+        client,
+        'WS_INVALID_MESSAGE',
+        'Invalid JSON message format',
+      );
     }
   }
 
@@ -181,19 +204,35 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
     const subscription = this.clientSubscriptions.get(clientId);
 
     if (!subscription) {
-      this.sendError(client, 'WS_SUBSCRIPTION_NOT_FOUND', 'Client subscription not found');
+      this.sendError(
+        client,
+        'WS_SUBSCRIPTION_NOT_FOUND',
+        'Client subscription not found',
+      );
       return;
     }
 
     const { instruments, mode = 'ltp' } = data;
 
-    if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
-      this.sendError(client, 'WS_INVALID_INSTRUMENTS', 'Invalid instruments array');
+    if (
+      !instruments ||
+      !Array.isArray(instruments) ||
+      instruments.length === 0
+    ) {
+      this.sendError(
+        client,
+        'WS_INVALID_INSTRUMENTS',
+        'Invalid instruments array',
+      );
       return;
     }
 
     if (!['ltp', 'ohlcv', 'full'].includes(mode)) {
-      this.sendError(client, 'WS_INVALID_MODE', 'Invalid mode. Must be ltp, ohlcv, or full');
+      this.sendError(
+        client,
+        'WS_INVALID_MODE',
+        'Invalid mode. Must be ltp, ohlcv, or full',
+      );
       return;
     }
 
@@ -201,7 +240,11 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
       // Check streaming status
       const status = await this.streamService.getStreamingStatus();
       if (!status?.isStreaming) {
-        this.sendError(client, 'WS_STREAM_INACTIVE', 'Streaming is not active. Ask admin to start stream.');
+        this.sendError(
+          client,
+          'WS_STREAM_INACTIVE',
+          'Streaming is not active. Ask admin to start stream.',
+        );
         return;
       }
     } catch (e) {
@@ -209,13 +252,17 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
     }
 
     // Update subscription
-    subscription.instruments = [...new Set([...subscription.instruments, ...instruments])];
-    instruments.forEach(token => {
+    subscription.instruments = [
+      ...new Set([...subscription.instruments, ...instruments]),
+    ];
+    instruments.forEach((token) => {
       subscription.modeByInstrument.set(token, mode);
     });
 
     // Subscribe to streaming service
-    console.log(`[NativeWebSocketGateway] Subscribing client ${clientId} to ${instruments.length} instruments: ${JSON.stringify(instruments)} with mode=${mode}`);
+    console.log(
+      `[NativeWebSocketGateway] Subscribing client ${clientId} to ${instruments.length} instruments: ${JSON.stringify(instruments)} with mode=${mode}`,
+    );
     await this.subscribeToInstruments(instruments, mode, clientId);
 
     // Send confirmation
@@ -225,8 +272,12 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
       timestamp: new Date().toISOString(),
     });
 
-    this.logger.log(`Client ${clientId} subscribed to ${instruments.length} instruments with mode=${mode}`);
-    console.log(`[NativeWebSocketGateway] Subscription confirmed sent to client ${clientId} for ${instruments.length} instruments`);
+    this.logger.log(
+      `Client ${clientId} subscribed to ${instruments.length} instruments with mode=${mode}`,
+    );
+    console.log(
+      `[NativeWebSocketGateway] Subscription confirmed sent to client ${clientId} for ${instruments.length} instruments`,
+    );
   }
 
   private async handleUnsubscribe(client: WebSocketWithData, data: any) {
@@ -234,7 +285,11 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
     const subscription = this.clientSubscriptions.get(clientId);
 
     if (!subscription) {
-      this.sendError(client, 'WS_SUBSCRIPTION_NOT_FOUND', 'Client subscription not found');
+      this.sendError(
+        client,
+        'WS_SUBSCRIPTION_NOT_FOUND',
+        'Client subscription not found',
+      );
       return;
     }
 
@@ -242,12 +297,13 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
 
     // Remove instruments
     subscription.instruments = subscription.instruments.filter(
-      token => !instruments.includes(token)
+      (token) => !instruments.includes(token),
     );
 
     // Check if still subscribed
-    const stillSubscribed = Array.from(this.clientSubscriptions.values())
-      .some(sub => sub.instruments.some(token => instruments.includes(token)));
+    const stillSubscribed = Array.from(this.clientSubscriptions.values()).some(
+      (sub) => sub.instruments.some((token) => instruments.includes(token)),
+    );
 
     if (!stillSubscribed) {
       await this.unsubscribeFromInstruments(instruments, clientId);
@@ -258,21 +314,31 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
       timestamp: new Date().toISOString(),
     });
 
-    this.logger.log(`Client ${clientId} unsubscribed from ${instruments.length} instruments`);
+    this.logger.log(
+      `Client ${clientId} unsubscribed from ${instruments.length} instruments`,
+    );
   }
 
   private async handleGetQuote(client: WebSocketWithData, data: any) {
     try {
       const { instruments, ltp_only } = data;
 
-      if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
-        this.sendError(client, 'WS_INVALID_INSTRUMENTS', 'Invalid instruments array');
+      if (
+        !instruments ||
+        !Array.isArray(instruments) ||
+        instruments.length === 0
+      ) {
+        this.sendError(
+          client,
+          'WS_INVALID_INSTRUMENTS',
+          'Invalid instruments array',
+        );
         return;
       }
 
       // Check cache
       const cachedQuote = await this.redisService.getCachedQuote(
-        instruments.map(token => token.toString())
+        instruments.map((token) => token.toString()),
       );
 
       if (cachedQuote) {
@@ -287,7 +353,7 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
       // Fetch from provider
       const provider = await this.providerResolver.resolveForWebsocket();
       let quotes = await provider.getQuote(
-        instruments.map(token => token.toString())
+        instruments.map((token) => token.toString()),
       );
 
       // Optional: filter only tokens with valid last_price
@@ -302,9 +368,9 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
 
       // Cache result
       await this.redisService.cacheQuote(
-        instruments.map(token => token.toString()),
+        instruments.map((token) => token.toString()),
         quotes,
-        30
+        30,
       );
 
       this.sendToClient(client, 'quote_data', {
@@ -328,7 +394,7 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
         instrumentToken,
         fromDate,
         toDate,
-        interval
+        interval,
       );
 
       this.sendToClient(client, 'historical_data', {
@@ -338,33 +404,59 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
       });
     } catch (error) {
       this.logger.error('Error fetching historical data', error);
-      this.sendError(client, 'WS_HISTORICAL_ERROR', 'Failed to fetch historical data');
+      this.sendError(
+        client,
+        'WS_HISTORICAL_ERROR',
+        'Failed to fetch historical data',
+      );
     }
   }
 
-  private async subscribeToInstruments(instruments: number[], mode: 'ltp' | 'ohlcv' | 'full' = 'ltp', clientId?: string) {
+  private async subscribeToInstruments(
+    instruments: number[],
+    mode: 'ltp' | 'ohlcv' | 'full' = 'ltp',
+    clientId?: string,
+  ) {
     try {
       const status = await this.streamService.getStreamingStatus();
       if (!status?.isStreaming) {
-        this.logger.warn('subscribeToInstruments ignored: streaming not active');
+        this.logger.warn(
+          'subscribeToInstruments ignored: streaming not active',
+        );
         return;
       }
-      await this.streamService.subscribeToInstruments(instruments, mode, clientId);
-      this.logger.log(`[NativeWS Gateway] Queued subscription for ${instruments.length} instruments with mode=${mode} for client=${clientId}`);
+      await this.streamService.subscribeToInstruments(
+        instruments,
+        mode,
+        clientId,
+      );
+      this.logger.log(
+        `[NativeWS Gateway] Queued subscription for ${instruments.length} instruments with mode=${mode} for client=${clientId}`,
+      );
     } catch (error) {
       this.logger.error('Error queuing instrument subscriptions', error);
     }
   }
 
-  private async unsubscribeFromInstruments(instruments: number[], clientId?: string) {
+  private async unsubscribeFromInstruments(
+    instruments: number[],
+    clientId?: string,
+  ) {
     try {
       const status = await this.streamService.getStreamingStatus();
       if (!status?.isStreaming) {
-        this.logger.warn('unsubscribeFromInstruments ignored: streaming not active');
+        this.logger.warn(
+          'unsubscribeFromInstruments ignored: streaming not active',
+        );
         return;
       }
-      await this.streamService.unsubscribeFromInstruments(instruments, clientId);
-      this.logger.log(`[NativeWS Gateway] Queued unsubscription for ${instruments.length} instruments for client=${clientId}`);
+      await this.streamService.unsubscribeFromInstruments(
+        instruments,
+        clientId,
+      );
+      this.logger.log(
+        `[NativeWS Gateway] Queued unsubscription for ${instruments.length} instruments for client=${clientId}`,
+      );
     } catch (error) {
       this.logger.error('Error queuing instrument unsubscriptions', error);
     }
@@ -373,8 +465,9 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
   // Broadcast market data to native WebSocket clients
   async broadcastMarketData(instrumentToken: number, data: any) {
     try {
-      const subscribedClients = Array.from(this.clientSubscriptions.values())
-        .filter(sub => sub.instruments.includes(instrumentToken));
+      const subscribedClients = Array.from(
+        this.clientSubscriptions.values(),
+      ).filter((sub) => sub.instruments.includes(instrumentToken));
 
       if (subscribedClients.length > 0) {
         const message = {
@@ -387,12 +480,15 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
         };
 
         // Broadcast to all clients in this gateway
-        this.server.clients.forEach(client => {
+        this.server.clients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN) {
             const clientId = (client as any).clientId;
             const subscription = this.clientSubscriptions.get(clientId);
-            
-            if (subscription && subscription.instruments.includes(instrumentToken)) {
+
+            if (
+              subscription &&
+              subscription.instruments.includes(instrumentToken)
+            ) {
               this.sendToClient(client as WebSocketWithData, 'market_data', {
                 instrumentToken,
                 data,
@@ -402,10 +498,15 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
           }
         });
 
-        this.logger.log(`[NativeWS Gateway] Broadcasted tick ${instrumentToken} to ${subscribedClients.length} clients`);
+        this.logger.log(
+          `[NativeWS Gateway] Broadcasted tick ${instrumentToken} to ${subscribedClients.length} clients`,
+        );
       }
     } catch (error) {
-      this.logger.error('[NativeWS Gateway] Error broadcasting market data', error);
+      this.logger.error(
+        '[NativeWS Gateway] Error broadcasting market data',
+        error,
+      );
     }
   }
 
@@ -422,12 +523,13 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
   getConnectionStats() {
     return {
       totalConnections: this.clientSubscriptions.size,
-      subscriptions: Array.from(this.clientSubscriptions.values()).map(sub => ({
-        userId: sub.userId,
-        instrumentCount: sub.instruments.length,
-        subscriptionType: sub.subscriptionType,
-      })),
+      subscriptions: Array.from(this.clientSubscriptions.values()).map(
+        (sub) => ({
+          userId: sub.userId,
+          instrumentCount: sub.instruments.length,
+          subscriptionType: sub.subscriptionType,
+        }),
+      ),
     };
   }
 }
-

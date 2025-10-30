@@ -1,11 +1,18 @@
-import { Entity, PrimaryColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 
 /**
  * VortexInstrument Entity
- * 
+ *
  * Represents instruments from Vortex API CSV data.
  * Separate from Kite instruments to avoid conflicts and maintain data integrity.
- * 
+ *
  * CSV Field Mappings:
  * - token → token (primary key)
  * - exchange → exchange (NSE_EQ, NSE_FO, NSE_CUR, MCX_FO)

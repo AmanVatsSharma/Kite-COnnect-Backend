@@ -66,17 +66,19 @@ export class HealthController {
         this.marketDataStreamService.getStreamingStatus(),
         this.vortexProvider.ping?.(),
       ]);
-      
+
       const healthData = {
         provider: (await this.resolver.getGlobalProviderName()) || 'env',
         streaming: streamingStatus,
         vortex: vortexPing,
         timestamp: new Date().toISOString(),
       };
-      
+
       // Log health check for monitoring
-      console.log(`[Health] Market data health check: provider=${healthData.provider}, streaming=${streamingStatus.isStreaming}, vortex=${vortexPing?.httpOk}`);
-      
+      console.log(
+        `[Health] Market data health check: provider=${healthData.provider}, streaming=${streamingStatus.isStreaming}, vortex=${vortexPing?.httpOk}`,
+      );
+
       return healthData;
     } catch (error) {
       console.error('[Health] Market data health check failed:', error);

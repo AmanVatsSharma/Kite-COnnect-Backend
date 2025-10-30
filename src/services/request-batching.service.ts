@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MarketDataProvider } from '../providers/market-data.provider';
+import { ProviderQueueService } from './provider-queue.service';
 
 interface PendingRequest {
   resolve: (value: any) => void;
@@ -30,10 +31,10 @@ export class RequestBatchingService {
     batchedCalls: 0,
     deduplicationRatio: 0,
     lastBatchTime: 0,
-    modeBreakdown: {}
+    modeBreakdown: {},
   };
 
-  constructor() {
+  constructor(private providerQueue: ProviderQueueService) {
     // Log batching metrics every 10 seconds
     setInterval(() => {
       this.logBatchingMetrics();
@@ -52,16 +53,20 @@ export class RequestBatchingService {
     return this.batchRequest(tokens, 'ohlc', provider);
   }
 
-  private async batchRequest(tokens: string[], requestType: 'quote' | 'ltp' | 'ohlc', provider: MarketDataProvider): Promise<any> {
+  private async batchRequest(
+    tokens: string[],
+    requestType: 'quote' | 'ltp' | 'ohlc',
+    provider: MarketDataProvider,
+  ): Promise<any> {
     return new Promise((resolve, reject) => {
       // Use a time-based key for per-second batching
       const batchWindow = Math.floor(Date.now() / this.batchTimeout);
       const requestKey = `${requestType}_${batchWindow}`;
-      
+
       // Add request to pending queue
       if (!this.pendingRequests.has(requestKey)) {
         this.pendingRequests.set(requestKey, []);
-        
+
         // Schedule batch processing for this window
         setTimeout(() => {
           this.processBatch(requestKey, provider);
@@ -78,7 +83,8 @@ export class RequestBatchingService {
 
       // Update metrics
       this.batchMetrics.totalRequests++;
-      this.batchMetrics.modeBreakdown[requestType] = (this.batchMetrics.modeBreakdown[requestType] || 0) + 1;
+      this.batchMetrics.modeBreakdown[requestType] =
+        (this.batchMetrics.modeBreakdown[requestType] || 0) + 1;
     });
   }
 
@@ -96,18 +102,25 @@ export class RequestBatchingService {
       const allTokens = new Set<string>();
       const requestType = requests[0].requestType;
 
-      requests.forEach(request => {
-        request.tokens.forEach(token => allTokens.add(token));
+      requests.forEach((request) => {
+        request.tokens.forEach((token) => allTokens.add(token));
       });
 
       const tokensArray = Array.from(allTokens);
-      const deduplicationRatio = requests.length > 0 ? (tokensArray.length / (requests.reduce((sum, req) => sum + req.tokens.length, 0))) * 100 : 100;
-      
+      const deduplicationRatio =
+        requests.length > 0
+          ? (tokensArray.length /
+              requests.reduce((sum, req) => sum + req.tokens.length, 0)) *
+            100
+          : 100;
+
       // Update metrics
       this.batchMetrics.uniqueInstruments += tokensArray.length;
       this.batchMetrics.lastBatchTime = startTime;
 
-      this.logger.log(`[Batching] Processing batch: ${requests.length} user requests → ${tokensArray.length} unique instruments (${deduplicationRatio.toFixed(1)}% deduplication)`);
+      this.logger.log(
+        `[Batching] Processing batch: ${requests.length} user requests → ${tokensArray.length} unique instruments (${deduplicationRatio.toFixed(1)}% deduplication)`,
+      );
 
       // Split into chunks if too large
       const chunks = this.chunkArray(tokensArray, this.maxBatchSize);
@@ -117,21 +130,24 @@ export class RequestBatchingService {
       // Process each chunk
       for (const chunk of chunks) {
         let chunkResult: any;
-        
+
         try {
           const chunkStartTime = Date.now();
-          
-          switch (requestType) {
-            case 'quote':
-              chunkResult = await provider.getQuote(chunk);
-              break;
-            case 'ltp':
-              chunkResult = await provider.getLTP(chunk);
-              break;
-            case 'ohlc':
-              chunkResult = await provider.getOHLC(chunk);
-              break;
-          }
+          const endpoint =
+            requestType === 'quote' ? 'quotes' : (requestType as any);
+          chunkResult = await this.providerQueue.execute(
+            endpoint as any,
+            async () => {
+              switch (requestType) {
+                case 'quote':
+                  return await provider.getQuote(chunk);
+                case 'ltp':
+                  return await provider.getLTP(chunk);
+                case 'ohlc':
+                  return await provider.getOHLC(chunk);
+              }
+            },
+          );
 
           batchedCalls++;
           const chunkTime = Date.now() - chunkStartTime;
@@ -142,13 +158,18 @@ export class RequestBatchingService {
               results.set(key, value);
             });
           }
-          
-          this.logger.debug(`[Batching] Chunk ${chunk.length} tokens processed in ${chunkTime}ms`);
+
+          this.logger.debug(
+            `[Batching] Chunk ${chunk.length} tokens processed in ${chunkTime}ms`,
+          );
         } catch (error) {
-          this.logger.error(`[Batching] Error processing chunk for ${requestType}`, error);
+          this.logger.error(
+            `[Batching] Error processing chunk for ${requestType}`,
+            error,
+          );
           // Reject all requests in this chunk
-          requests.forEach(request => {
-            if (request.tokens.some(token => chunk.includes(token))) {
+          requests.forEach((request) => {
+            if (request.tokens.some((token) => chunk.includes(token))) {
               request.reject(error);
             }
           });
@@ -159,19 +180,32 @@ export class RequestBatchingService {
       // Update batching metrics
       this.batchMetrics.batchedCalls += batchedCalls;
       const totalTime = Date.now() - startTime;
-      const reductionPercentage = requests.length > 0 ? ((requests.length - batchedCalls) / requests.length) * 100 : 0;
+      const reductionPercentage =
+        requests.length > 0
+          ? ((requests.length - batchedCalls) / requests.length) * 100
+          : 0;
 
-      this.logger.log(`[Batching] Batch completed: ${requests.length} requests → ${batchedCalls} provider calls (${reductionPercentage.toFixed(1)}% reduction) in ${totalTime}ms`);
+      this.logger.log(
+        `[Batching] Batch completed: ${requests.length} requests → ${batchedCalls} provider calls (${reductionPercentage.toFixed(1)}% reduction) in ${totalTime}ms`,
+      );
 
       // Enrichment pass: ensure last_price present; do one provider.getLTP call for missing
       try {
-        const missingTokens = Array.from(new Set<string>(
-          Array.from(results.entries())
-            .filter(([, v]) => !Number.isFinite((v as any)?.last_price) || (((v as any)?.last_price ?? 0) <= 0))
-            .map(([k]) => k)
-        ));
+        const missingTokens = Array.from(
+          new Set<string>(
+            Array.from(results.entries())
+              .filter(
+                ([, v]) =>
+                  !Number.isFinite((v as any)?.last_price) ||
+                  ((v as any)?.last_price ?? 0) <= 0,
+              )
+              .map(([k]) => k),
+          ),
+        );
         if (missingTokens.length) {
-          this.logger.warn(`[Batching] Missing LTP for ${missingTokens.length}/${results.size} tokens → fetching LTP fallback`);
+          this.logger.warn(
+            `[Batching] Missing LTP for ${missingTokens.length}/${results.size} tokens → fetching LTP fallback`,
+          );
           const ltpMap = await provider.getLTP(missingTokens);
           for (const tok of missingTokens) {
             const lv = ltpMap?.[tok]?.last_price;
@@ -182,24 +216,29 @@ export class RequestBatchingService {
           }
         }
       } catch (enrichErr) {
-        this.logger.warn('[Batching] LTP enrichment failed (non-fatal)', enrichErr as any);
+        this.logger.warn(
+          '[Batching] LTP enrichment failed (non-fatal)',
+          enrichErr as any,
+        );
       }
 
       // Resolve all requests with their respective data (after enrichment)
-      requests.forEach(request => {
+      requests.forEach((request) => {
         const requestData: any = {};
-        request.tokens.forEach(token => {
+        request.tokens.forEach((token) => {
           if (results.has(token)) {
             requestData[token] = results.get(token);
           }
         });
         request.resolve(requestData);
       });
-
     } catch (error) {
-      this.logger.error(`[Batching] Error processing batch for ${requestKey}`, error);
+      this.logger.error(
+        `[Batching] Error processing batch for ${requestKey}`,
+        error,
+      );
       // Reject all requests
-      requests.forEach(request => {
+      requests.forEach((request) => {
         request.reject(error);
       });
     }
@@ -215,9 +254,11 @@ export class RequestBatchingService {
 
   // Method to get batch statistics
   getBatchStats() {
-    const totalPending = Array.from(this.pendingRequests.values())
-      .reduce((sum, requests) => sum + requests.length, 0);
-    
+    const totalPending = Array.from(this.pendingRequests.values()).reduce(
+      (sum, requests) => sum + requests.length,
+      0,
+    );
+
     return {
       pendingRequests: totalPending,
       batchTimeout: this.batchTimeout,
@@ -229,11 +270,17 @@ export class RequestBatchingService {
   // Method to log batching metrics periodically
   private logBatchingMetrics() {
     if (this.batchMetrics.totalRequests > 0) {
-      const avgDeduplication = this.batchMetrics.batchedCalls > 0 
-        ? ((this.batchMetrics.totalRequests - this.batchMetrics.batchedCalls) / this.batchMetrics.totalRequests) * 100 
-        : 0;
-      
-      this.logger.log(`[Batching] Metrics: ${this.batchMetrics.totalRequests} total requests, ${this.batchMetrics.batchedCalls} provider calls, ${avgDeduplication.toFixed(1)}% reduction, modes: ${JSON.stringify(this.batchMetrics.modeBreakdown)}`);
+      const avgDeduplication =
+        this.batchMetrics.batchedCalls > 0
+          ? ((this.batchMetrics.totalRequests -
+              this.batchMetrics.batchedCalls) /
+              this.batchMetrics.totalRequests) *
+            100
+          : 0;
+
+      this.logger.log(
+        `[Batching] Metrics: ${this.batchMetrics.totalRequests} total requests, ${this.batchMetrics.batchedCalls} provider calls, ${avgDeduplication.toFixed(1)}% reduction, modes: ${JSON.stringify(this.batchMetrics.modeBreakdown)}`,
+      );
     }
   }
 
@@ -245,7 +292,7 @@ export class RequestBatchingService {
       batchedCalls: 0,
       deduplicationRatio: 0,
       lastBatchTime: 0,
-      modeBreakdown: {}
+      modeBreakdown: {},
     };
   }
 }

@@ -17,9 +17,17 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   private disableReconnect = false;
   private currentApiKey: string | null = null;
   private currentAccessToken: string | null = null;
-  private lastTickerError: { message: string; code?: any; status?: any; time: string } | null = null;
+  private lastTickerError: {
+    message: string;
+    code?: any;
+    status?: any;
+    time: string;
+  } | null = null;
 
-  constructor(private configService: ConfigService, private redisService: RedisService) {}
+  constructor(
+    private configService: ConfigService,
+    private redisService: RedisService,
+  ) {}
 
   async onModuleInit() {
     await this.initialize();
@@ -32,20 +40,30 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       let accessToken = this.configService.get('KITE_ACCESS_TOKEN');
       if (!accessToken && this.redisService?.isRedisAvailable?.()) {
         try {
-          accessToken = await this.redisService.get<string>('kite:access_token') || undefined;
-          if (accessToken) this.logger.log('[Kite] Loaded access token from Redis cache');
+          accessToken =
+            (await this.redisService.get<string>('kite:access_token')) ||
+            undefined;
+          if (accessToken)
+            this.logger.log('[Kite] Loaded access token from Redis cache');
         } catch {}
       }
 
       if (!apiKey || !accessToken) {
-        this.logger.warn('[Kite] Credentials not found. Provider will operate in degraded mode.');
-        this.logger.warn('[Kite] Visit /api/auth/kite/login to authenticate and enable ticker.');
+        this.logger.warn(
+          '[Kite] Credentials not found. Provider will operate in degraded mode.',
+        );
+        this.logger.warn(
+          '[Kite] Visit /api/auth/kite/login to authenticate and enable ticker.',
+        );
         return;
       }
 
       this.currentApiKey = apiKey;
       this.currentAccessToken = accessToken;
-      this.kite = new KiteConnect({ api_key: apiKey, access_token: accessToken });
+      this.kite = new KiteConnect({
+        api_key: apiKey,
+        access_token: accessToken,
+      });
       this.logger.log('[Kite] Client initialized successfully');
     } catch (error) {
       this.logger.error('[Kite] Failed to initialize client', error as any);
@@ -56,16 +74,24 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     try {
       this.currentAccessToken = accessToken;
       if (!this.kite) {
-        const apiKey = this.currentApiKey || this.configService.get('KITE_API_KEY');
+        const apiKey =
+          this.currentApiKey || this.configService.get('KITE_API_KEY');
         if (!apiKey) throw new Error('Kite API key not configured');
         this.currentApiKey = apiKey;
-        this.kite = new KiteConnect({ api_key: apiKey, access_token: accessToken });
+        this.kite = new KiteConnect({
+          api_key: apiKey,
+          access_token: accessToken,
+        });
       } else if (typeof (this.kite as any).setAccessToken === 'function') {
         (this.kite as any).setAccessToken(accessToken);
       } else {
-        const apiKey = this.currentApiKey || this.configService.get('KITE_API_KEY');
+        const apiKey =
+          this.currentApiKey || this.configService.get('KITE_API_KEY');
         this.currentApiKey = apiKey;
-        this.kite = new KiteConnect({ api_key: apiKey, access_token: accessToken });
+        this.kite = new KiteConnect({
+          api_key: apiKey,
+          access_token: accessToken,
+        });
       }
       this.logger.log('[Kite] Access token updated');
     } catch (error) {
@@ -80,7 +106,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         throw new Error('Kite provider not initialized');
       }
       const instruments = await this.kite.getInstruments(exchange);
-      this.logger.log(`[Kite] Fetched ${Object.keys(instruments).length} instruments`);
+      this.logger.log(
+        `[Kite] Fetched ${Object.keys(instruments).length} instruments`,
+      );
       return Object.values(instruments);
     } catch (error) {
       this.logger.error('[Kite] Failed to fetch instruments', error as any);
@@ -153,13 +181,17 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   initializeTicker(): TickerLike {
     if (this.ticker) return this.ticker;
     const apiKey = this.currentApiKey || this.configService.get('KITE_API_KEY');
-    const accessToken = this.currentAccessToken || this.configService.get('KITE_ACCESS_TOKEN');
+    const accessToken =
+      this.currentAccessToken || this.configService.get('KITE_ACCESS_TOKEN');
     if (!apiKey || !accessToken) {
       this.logger.warn('[Kite] Credentials missing; ticker not initialized');
       return undefined as any;
     }
 
-    const ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
+    const ticker = new KiteTicker({
+      api_key: apiKey,
+      access_token: accessToken,
+    });
 
     ticker.on('connect', () => {
       this.isConnected = true;
@@ -172,17 +204,24 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     });
     ticker.on('disconnect', (...args: any[]) => {
       this.isConnected = false;
-      this.logger.warn('[Kite] Ticker disconnected ' + this.stringifyArgs(args));
+      this.logger.warn(
+        '[Kite] Ticker disconnected ' + this.stringifyArgs(args),
+      );
       if (this.disableReconnect) {
-        this.logger.warn('[Kite] Reconnect disabled due to previous auth errors');
+        this.logger.warn(
+          '[Kite] Reconnect disabled due to previous auth errors',
+        );
         return;
       }
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-        this.logger.warn(`[Kite] Max reconnect attempts (${this.maxReconnectAttempts}) reached; stopping`);
+        this.logger.warn(
+          `[Kite] Max reconnect attempts (${this.maxReconnectAttempts}) reached; stopping`,
+        );
         return;
       }
       this.reconnectAttempts++;
-      const delayMs = 1000 + Math.floor(Math.random() * 2000) + this.reconnectAttempts * 500;
+      const delayMs =
+        1000 + Math.floor(Math.random() * 2000) + this.reconnectAttempts * 500;
       setTimeout(() => {
         try {
           ticker.connect();
@@ -194,22 +233,35 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
 
     // Optional events if exposed by SDK; safe to attach even if never emitted
     ticker.on('reconnect', (...args: any[]) => {
-      this.logger.warn('[Kite] Ticker reconnect event ' + this.stringifyArgs(args));
+      this.logger.warn(
+        '[Kite] Ticker reconnect event ' + this.stringifyArgs(args),
+      );
     });
     ticker.on('noreconnect', (...args: any[]) => {
-      this.logger.warn('[Kite] Ticker noreconnect event ' + this.stringifyArgs(args));
+      this.logger.warn(
+        '[Kite] Ticker noreconnect event ' + this.stringifyArgs(args),
+      );
     });
     ticker.on('close', (...args: any[]) => {
       this.logger.warn('[Kite] Ticker close event ' + this.stringifyArgs(args));
     });
     ticker.on('error', (error: any) => {
       const pretty = this.formatError(error);
-      this.lastTickerError = { message: pretty, code: (error && (error.code || error?.data?.code)) || undefined, status: (error && (error.status || error?.data?.status)) || undefined, time: new Date().toISOString() };
+      this.lastTickerError = {
+        message: pretty,
+        code: (error && (error.code || error?.data?.code)) || undefined,
+        status: (error && (error.status || error?.data?.status)) || undefined,
+        time: new Date().toISOString(),
+      };
       this.logger.error('[Kite] Ticker error: ' + pretty);
       if (this.isAuthError(error)) {
         this.disableReconnect = true;
-        this.logger.warn('[Kite] Disabling reconnect due to authentication error. Visit /api/auth/kite/login to re-authenticate.');
-        try { ticker.disconnect?.(); } catch {}
+        this.logger.warn(
+          '[Kite] Disabling reconnect due to authentication error. Visit /api/auth/kite/login to re-authenticate.',
+        );
+        try {
+          ticker.disconnect?.();
+        } catch {}
       }
     });
 
@@ -229,7 +281,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       try {
         ticker?.connect?.();
       } catch (e) {
-        this.logger.error('[Kite] Failed to connect ticker after restart', e as any);
+        this.logger.error(
+          '[Kite] Failed to connect ticker after restart',
+          e as any,
+        );
       }
       this.logger.log('[Kite] Ticker restarted');
     } catch (error) {
@@ -246,7 +301,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   }
 
   private isAuthError(error: any): boolean {
-    const msg = (error?.message || error?.toString?.() || '').toString().toLowerCase();
+    const msg = (error?.message || error?.toString?.() || '')
+      .toString()
+      .toLowerCase();
     if (!msg) return false;
     return (
       msg.includes('token') ||
@@ -263,12 +320,17 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     try {
       if (!error) return 'unknown';
       if (typeof error === 'string') return error;
-      const msg = error.message || error.reason || error.error || error.toString?.();
+      const msg =
+        error.message || error.reason || error.error || error.toString?.();
       const details: any = {};
-      ['code','status','type'].forEach(k => { if (error[k] !== undefined) details[k] = error[k]; });
+      ['code', 'status', 'type'].forEach((k) => {
+        if (error[k] !== undefined) details[k] = error[k];
+      });
       if (error.data && typeof error.data === 'object') {
         const d: any = {};
-        ['error_type','message','status','code'].forEach(k => { if (error.data[k] !== undefined) d[k] = error.data[k]; });
+        ['error_type', 'message', 'status', 'code'].forEach((k) => {
+          if (error.data[k] !== undefined) d[k] = error.data[k];
+        });
         if (Object.keys(d).length) details.data = d;
       }
       const parts = [] as string[];
@@ -283,9 +345,14 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   private stringifyArgs(args: any[]): string {
     try {
       if (!args || !args.length) return '';
-      const safe = args.map(a => {
+      const safe = args.map((a) => {
         if (a === undefined || a === null) return a;
-        if (typeof a === 'string' || typeof a === 'number' || typeof a === 'boolean') return a;
+        if (
+          typeof a === 'string' ||
+          typeof a === 'number' ||
+          typeof a === 'boolean'
+        )
+          return a;
         return JSON.stringify(a);
       });
       return safe.join(' ');
@@ -312,8 +379,6 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     if (!v) return null;
     const s = String(v);
     if (s.length <= 6) return '****';
-    return `${s.slice(0,2)}****${s.slice(-4)}`;
+    return `${s.slice(0, 2)}****${s.slice(-4)}`;
   }
 }
-
-

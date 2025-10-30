@@ -26,8 +26,17 @@ export class MarketDataProviderResolverService {
   ) {}
 
   // HTTP resolution priority: header x-provider -> API key provider -> global override -> env DATA_PROVIDER
-  async resolveForHttp(headers: Record<string, any>, apiKey?: string): Promise<MarketDataProvider> {
-    const headerValue = (headers?.['x-provider'] || headers?.['X-Provider'] || '').toString().toLowerCase();
+  async resolveForHttp(
+    headers: Record<string, any>,
+    apiKey?: string,
+  ): Promise<MarketDataProvider> {
+    const headerValue = (
+      headers?.['x-provider'] ||
+      headers?.['X-Provider'] ||
+      ''
+    )
+      .toString()
+      .toLowerCase();
     if (headerValue === 'kite' || headerValue === 'vortex') {
       this.logger.log(`[Resolver][HTTP] Using header provider=${headerValue}`);
       return this.getProvider(headerValue as ProviderName);
@@ -35,13 +44,20 @@ export class MarketDataProviderResolverService {
 
     if (apiKey) {
       try {
-        const rec = await this.apiKeyRepo.findOne({ where: { key: apiKey, is_active: true } });
+        const rec = await this.apiKeyRepo.findOne({
+          where: { key: apiKey, is_active: true },
+        });
         if (rec?.provider === 'kite' || rec?.provider === 'vortex') {
-          this.logger.log(`[Resolver][HTTP] Using API key provider=${rec.provider}`);
+          this.logger.log(
+            `[Resolver][HTTP] Using API key provider=${rec.provider}`,
+          );
           return this.getProvider(rec.provider as ProviderName);
         }
       } catch (e) {
-        this.logger.warn('[Resolver][HTTP] API key lookup failed; continuing', e as any);
+        this.logger.warn(
+          '[Resolver][HTTP] API key lookup failed; continuing',
+          e as any,
+        );
       }
     }
 
@@ -51,18 +67,29 @@ export class MarketDataProviderResolverService {
       return this.getProvider(global);
     }
 
-    const envName = (this.config.get('DATA_PROVIDER', 'kite') || 'kite').toLowerCase() as ProviderName;
+    const envName = (
+      this.config.get('DATA_PROVIDER', 'kite') || 'kite'
+    ).toLowerCase() as ProviderName;
     this.logger.log(`[Resolver][HTTP] Using env provider=${envName}`);
     return this.getProvider(envName);
   }
 
   // WS uses a single global provider for all connections
   async resolveForWebsocket(): Promise<MarketDataProvider> {
-    const name = (await this.getGlobalProviderName()) || (this.config.get('DATA_PROVIDER', 'kite') as ProviderName);
+    const name =
+      (await this.getGlobalProviderName()) ||
+      (this.config.get('DATA_PROVIDER', 'kite') as ProviderName);
     this.logger.log(`[Resolver][WS] Using global provider=${name}`);
     const provider = this.getProvider(name);
     // Ensure provider is initialized for WS path
-    try { await provider.initialize(); } catch (e) { this.logger.warn('[Resolver][WS] provider.initialize() failed (non-fatal)', e as any); }
+    try {
+      await provider.initialize();
+    } catch (e) {
+      this.logger.warn(
+        '[Resolver][WS] provider.initialize() failed (non-fatal)',
+        e as any,
+      );
+    }
     return provider;
   }
 
@@ -76,7 +103,9 @@ export class MarketDataProviderResolverService {
       }
     } catch (e) {
       this.inMemoryGlobalProvider = name;
-      this.logger.warn('[Resolver] Redis not available; using in-memory global provider');
+      this.logger.warn(
+        '[Resolver] Redis not available; using in-memory global provider',
+      );
     }
   }
 
@@ -91,7 +120,10 @@ export class MarketDataProviderResolverService {
     return null;
   }
 
-  private async ensureInitialized(instance: MarketDataProvider, name: ProviderName) {
+  private async ensureInitialized(
+    instance: MarketDataProvider,
+    name: ProviderName,
+  ) {
     try {
       await instance.initialize();
     } catch (e) {
@@ -110,5 +142,3 @@ export class MarketDataProviderResolverService {
     return instance;
   }
 }
-
-

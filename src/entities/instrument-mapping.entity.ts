@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, Index, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  Index,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 @Entity('instrument_mappings')
 @Index(['provider', 'provider_token'], { unique: true })
@@ -21,5 +28,3 @@ export class InstrumentMapping {
   @UpdateDateColumn()
   updated_at: Date;
 }
-
-

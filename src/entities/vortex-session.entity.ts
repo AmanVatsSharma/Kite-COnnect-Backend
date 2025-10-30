@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
 
 @Entity('vortex_sessions')
 @Index(['is_active'])
@@ -24,5 +31,3 @@ export class VortexSession {
   @UpdateDateColumn()
   updated_at: Date;
 }
-
-

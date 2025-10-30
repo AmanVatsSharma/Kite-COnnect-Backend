@@ -1,6 +1,14 @@
-import { MigrationInterface, QueryRunner, Table, TableColumn, TableIndex } from 'typeorm';
+import {
+  MigrationInterface,
+  QueryRunner,
+  Table,
+  TableColumn,
+  TableIndex,
+} from 'typeorm';
 
-export class CreateVortexInstruments1700000000001 implements MigrationInterface {
+export class CreateVortexInstruments1700000000001
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Create vortex_instruments table
     const exists = await queryRunner.hasTable('vortex_instruments');
@@ -10,13 +18,50 @@ export class CreateVortexInstruments1700000000001 implements MigrationInterface 
           name: 'vortex_instruments',
           columns: [
             { name: 'token', type: 'int', isPrimary: true },
-            { name: 'exchange', type: 'varchar', length: '16', isNullable: false },
-            { name: 'symbol', type: 'varchar', length: '64', isNullable: false },
-            { name: 'instrument_name', type: 'varchar', length: '64', isNullable: false },
-            { name: 'expiry_date', type: 'varchar', length: '8', isNullable: true },
-            { name: 'option_type', type: 'varchar', length: '2', isNullable: true },
-            { name: 'strike_price', type: 'decimal', precision: 10, scale: 2, isNullable: true },
-            { name: 'tick', type: 'decimal', precision: 10, scale: 4, default: 0.05 },
+            {
+              name: 'exchange',
+              type: 'varchar',
+              length: '16',
+              isNullable: false,
+            },
+            {
+              name: 'symbol',
+              type: 'varchar',
+              length: '64',
+              isNullable: false,
+            },
+            {
+              name: 'instrument_name',
+              type: 'varchar',
+              length: '64',
+              isNullable: false,
+            },
+            {
+              name: 'expiry_date',
+              type: 'varchar',
+              length: '8',
+              isNullable: true,
+            },
+            {
+              name: 'option_type',
+              type: 'varchar',
+              length: '2',
+              isNullable: true,
+            },
+            {
+              name: 'strike_price',
+              type: 'decimal',
+              precision: 10,
+              scale: 2,
+              isNullable: true,
+            },
+            {
+              name: 'tick',
+              type: 'decimal',
+              precision: 10,
+              scale: 4,
+              default: 0.05,
+            },
             { name: 'lot_size', type: 'int', default: 1 },
             { name: 'is_active', type: 'boolean', default: true },
             { name: 'created_at', type: 'timestamp', default: 'now()' },

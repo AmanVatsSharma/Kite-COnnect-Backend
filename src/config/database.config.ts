@@ -9,14 +9,25 @@ import { InstrumentMapping } from '../entities/instrument-mapping.entity';
 import { VortexSession } from '../entities/vortex-session.entity';
 import { VortexInstrument } from '../entities/vortex-instrument.entity';
 
-export const getDatabaseConfig = (configService: ConfigService): TypeOrmModuleOptions => ({
+export const getDatabaseConfig = (
+  configService: ConfigService,
+): TypeOrmModuleOptions => ({
   type: 'postgres',
   host: configService.get('DB_HOST', 'localhost'),
   port: configService.get('DB_PORT', 5432),
   username: configService.get('DB_USERNAME', 'trading_user'),
   password: configService.get('DB_PASSWORD', 'trading_password'),
   database: configService.get('DB_DATABASE', 'trading_app'),
-  entities: [Instrument, MarketData, Subscription, KiteSession, ApiKey, InstrumentMapping, VortexSession, VortexInstrument],
+  entities: [
+    Instrument,
+    MarketData,
+    Subscription,
+    KiteSession,
+    ApiKey,
+    InstrumentMapping,
+    VortexSession,
+    VortexInstrument,
+  ],
   synchronize: true, // Auto-sync schema for now (creates missing tables)
   logging: configService.get('NODE_ENV') === 'development',
   migrations: ['dist/migrations/*.js'],

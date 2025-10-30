@@ -13,6 +13,8 @@ import { MarketDataGateway } from '../../gateways/market-data.gateway';
 import { NativeWebSocketGateway } from '../../gateways/native-websocket.gateway';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
 import { Inject, forwardRef } from '@nestjs/common';
+import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
+import { MetricsService } from '../../services/metrics.service';
 
 @Injectable()
 export class StockService {
@@ -31,26 +33,55 @@ export class StockService {
     private redisService: RedisService,
     private requestBatchingService: RequestBatchingService,
     private vortexInstrumentService: VortexInstrumentService,
-    @Inject(forwardRef(() => MarketDataGateway)) private marketDataGateway: MarketDataGateway,
-    @Inject(forwardRef(() => NativeWebSocketGateway)) private nativeWebSocketGateway: NativeWebSocketGateway,
+    @Inject(forwardRef(() => MarketDataGateway))
+    private marketDataGateway: MarketDataGateway,
+    @Inject(forwardRef(() => NativeWebSocketGateway))
+    private nativeWebSocketGateway: NativeWebSocketGateway,
+    private ltpCache: LtpMemoryCacheService,
+    private metrics: MetricsService,
   ) {}
 
-  async syncInstruments(exchange?: string, opts?: { provider?: 'kite' | 'vortex'; csv_url?: string; headers?: Record<string, any>; apiKey?: string }): Promise<{ synced: number; updated: number }> {
+  async syncInstruments(
+    exchange?: string,
+    opts?: {
+      provider?: 'kite' | 'vortex';
+      csv_url?: string;
+      headers?: Record<string, any>;
+      apiKey?: string;
+    },
+  ): Promise<{ synced: number; updated: number }> {
     try {
       const httpHeaders = opts?.headers || {};
-      const providerInstance = await this.providerResolver.resolveForHttp(httpHeaders, opts?.apiKey);
-      const providerName = ((httpHeaders['x-provider'] || opts?.provider) as string | undefined)?.toString().toLowerCase();
-      const effectiveProvider: 'kite' | 'vortex' = providerName === 'vortex' ? 'vortex' : 'kite';
-      this.logger.log(`Starting instrument sync for exchange=${exchange || 'all'} via provider=${providerName}`);
+      const providerInstance = await this.providerResolver.resolveForHttp(
+        httpHeaders,
+        opts?.apiKey,
+      );
+      const providerName = (
+        (httpHeaders['x-provider'] || opts?.provider) as string | undefined
+      )
+        ?.toString()
+        .toLowerCase();
+      const effectiveProvider: 'kite' | 'vortex' =
+        providerName === 'vortex' ? 'vortex' : 'kite';
+      this.logger.log(
+        `Starting instrument sync for exchange=${exchange || 'all'} via provider=${providerName}`,
+      );
 
       // Delegate Vortex sync to VortexInstrumentService
       if (effectiveProvider === 'vortex') {
-        this.logger.log('Delegating Vortex instrument sync to VortexInstrumentService');
-        return await this.vortexInstrumentService.syncVortexInstruments(exchange, opts?.csv_url);
+        this.logger.log(
+          'Delegating Vortex instrument sync to VortexInstrumentService',
+        );
+        return await this.vortexInstrumentService.syncVortexInstruments(
+          exchange,
+          opts?.csv_url,
+        );
       }
 
       // Continue with Kite sync logic
-      const instruments = await providerInstance.getInstruments(exchange, { csvUrl: opts?.csv_url });
+      const instruments = await providerInstance.getInstruments(exchange, {
+        csvUrl: opts?.csv_url,
+      });
       let synced = 0;
       let updated = 0;
 
@@ -75,7 +106,7 @@ export class StockService {
               instrument_type: kiteInstrument.instrument_type,
               segment: kiteInstrument.segment,
               exchange: kiteInstrument.exchange,
-            }
+            },
           );
           updated++;
         } else {
@@ -101,25 +132,36 @@ export class StockService {
         // Vortex mapping is handled by VortexInstrumentService
         try {
           const providerToken = String(kiteInstrument.instrument_token);
-          const existingMap = await this.mappingRepository.findOne({ where: { provider: 'kite', provider_token: providerToken } });
+          const existingMap = await this.mappingRepository.findOne({
+            where: { provider: 'kite', provider_token: providerToken },
+          });
           if (existingMap) {
-            if (existingMap.instrument_token !== kiteInstrument.instrument_token) {
+            if (
+              existingMap.instrument_token !== kiteInstrument.instrument_token
+            ) {
               existingMap.instrument_token = kiteInstrument.instrument_token;
               await this.mappingRepository.save(existingMap);
             }
           } else {
-            await this.mappingRepository.save(this.mappingRepository.create({
-              provider: 'kite',
-              provider_token: providerToken,
-              instrument_token: kiteInstrument.instrument_token,
-            }));
+            await this.mappingRepository.save(
+              this.mappingRepository.create({
+                provider: 'kite',
+                provider_token: providerToken,
+                instrument_token: kiteInstrument.instrument_token,
+              }),
+            );
           }
         } catch (e) {
-          this.logger.warn(`Mapping upsert failed for token ${kiteInstrument.instrument_token}`, e as any);
+          this.logger.warn(
+            `Mapping upsert failed for token ${kiteInstrument.instrument_token}`,
+            e as any,
+          );
         }
       }
 
-      this.logger.log(`Instrument sync completed. Synced: ${synced}, Updated: ${updated}`);
+      this.logger.log(
+        `Instrument sync completed. Synced: ${synced}, Updated: ${updated}`,
+      );
       return { synced, updated };
     } catch (error) {
       this.logger.error('Error syncing instruments', error);
@@ -136,24 +178,31 @@ export class StockService {
     offset?: number;
   }): Promise<{ instruments: Instrument[]; total: number }> {
     try {
-      const queryBuilder = this.instrumentRepository.createQueryBuilder('instrument');
+      const queryBuilder =
+        this.instrumentRepository.createQueryBuilder('instrument');
 
       if (filters?.exchange) {
-        queryBuilder.andWhere('instrument.exchange = :exchange', { exchange: filters.exchange });
+        queryBuilder.andWhere('instrument.exchange = :exchange', {
+          exchange: filters.exchange,
+        });
       }
 
       if (filters?.instrument_type) {
-        queryBuilder.andWhere('instrument.instrument_type = :instrument_type', { 
-          instrument_type: filters.instrument_type 
+        queryBuilder.andWhere('instrument.instrument_type = :instrument_type', {
+          instrument_type: filters.instrument_type,
         });
       }
 
       if (filters?.segment) {
-        queryBuilder.andWhere('instrument.segment = :segment', { segment: filters.segment });
+        queryBuilder.andWhere('instrument.segment = :segment', {
+          segment: filters.segment,
+        });
       }
 
       if (filters?.is_active !== undefined) {
-        queryBuilder.andWhere('instrument.is_active = :is_active', { is_active: filters.is_active });
+        queryBuilder.andWhere('instrument.is_active = :is_active', {
+          is_active: filters.is_active,
+        });
       }
 
       const total = await queryBuilder.getCount();
@@ -177,7 +226,9 @@ export class StockService {
     }
   }
 
-  async getInstrumentByToken(instrumentToken: number): Promise<Instrument | null> {
+  async getInstrumentByToken(
+    instrumentToken: number,
+  ): Promise<Instrument | null> {
     try {
       return await this.instrumentRepository.findOne({
         where: { instrument_token: instrumentToken },
@@ -188,15 +239,22 @@ export class StockService {
     }
   }
 
-  async searchInstruments(query: string, limit: number = 20): Promise<Instrument[]> {
+  async searchInstruments(
+    query: string,
+    limit: number = 20,
+  ): Promise<Instrument[]> {
     try {
       // Normalize query: trim whitespace and convert to uppercase for case-insensitive search
       const normalizedQuery = query.trim().toUpperCase();
-      
+
       return await this.instrumentRepository
         .createQueryBuilder('instrument')
-        .where('UPPER(instrument.tradingsymbol) LIKE :query', { query: `%${normalizedQuery}%` })
-        .orWhere('UPPER(instrument.name) LIKE :query', { query: `%${normalizedQuery}%` })
+        .where('UPPER(instrument.tradingsymbol) LIKE :query', {
+          query: `%${normalizedQuery}%`,
+        })
+        .orWhere('UPPER(instrument.name) LIKE :query', {
+          query: `%${normalizedQuery}%`,
+        })
         .andWhere('instrument.is_active = :is_active', { is_active: true })
         .limit(limit)
         .orderBy('instrument.tradingsymbol', 'ASC')
@@ -212,7 +270,10 @@ export class StockService {
    * Accepts forms like "NSE:SBIN", "SBIN", or "SBIN-EQ" with optional segment.
    * Returns best match and candidate list for disambiguation.
    */
-  async resolveSymbol(symbol: string, segmentHint?: string): Promise<{ instrument: Instrument | null; candidates: Instrument[] }>{
+  async resolveSymbol(
+    symbol: string,
+    segmentHint?: string,
+  ): Promise<{ instrument: Instrument | null; candidates: Instrument[] }> {
     const raw = symbol.trim().toUpperCase();
     let seg: string | undefined = segmentHint?.toUpperCase();
     let sym = raw;
@@ -231,17 +292,20 @@ export class StockService {
     }
 
     // Build query
-    const qb = this.instrumentRepository.createQueryBuilder('i')
+    const qb = this.instrumentRepository
+      .createQueryBuilder('i')
       .where('i.tradingsymbol = :sym', { sym })
       .orWhere('i.tradingsymbol LIKE :like', { like: `${sym}-%` });
     if (seg) qb.andWhere('i.segment = :seg', { seg });
-    if (instrumentType) qb.andWhere('i.instrument_type = :it', { it: instrumentType });
+    if (instrumentType)
+      qb.andWhere('i.instrument_type = :it', { it: instrumentType });
     qb.orderBy('i.segment', 'ASC');
 
     const list = await qb.getMany();
     if (list.length === 0) {
       // fallback fuzzy
-      const fuzzy = await this.instrumentRepository.createQueryBuilder('i')
+      const fuzzy = await this.instrumentRepository
+        .createQueryBuilder('i')
         .where('i.tradingsymbol LIKE :q', { q: `%${sym}%` })
         .andWhere('i.is_active = :ia', { ia: true })
         .limit(10)
@@ -252,28 +316,37 @@ export class StockService {
     // Prefer exact segment if provided, else first
     let best = list[0];
     if (seg) {
-      const exactSeg = list.find(i => i.segment?.toUpperCase() === seg);
+      const exactSeg = list.find((i) => i.segment?.toUpperCase() === seg);
       if (exactSeg) best = exactSeg;
     }
     return { instrument: best, candidates: list };
   }
 
-  async getQuotes(instrumentTokens: number[], headers?: Record<string, any>, apiKey?: string): Promise<any> {
+  async getQuotes(
+    instrumentTokens: number[],
+    headers?: Record<string, any>,
+    apiKey?: string,
+  ): Promise<any> {
     try {
       // Check cache first
       const cachedQuotes = await this.redisService.getCachedQuote(
-        instrumentTokens.map(token => token.toString())
+        instrumentTokens.map((token) => token.toString()),
       );
 
       if (cachedQuotes) {
-        this.logger.log(`Returning cached quotes for ${instrumentTokens.length} instruments`);
+        this.logger.log(
+          `Returning cached quotes for ${instrumentTokens.length} instruments`,
+        );
         return cachedQuotes;
       }
 
       // Use request batching service for efficient API calls
-      const provider = await this.providerResolver.resolveForHttp(headers || {}, apiKey);
+      const provider = await this.providerResolver.resolveForHttp(
+        headers || {},
+        apiKey,
+      );
       const quotes = await this.requestBatchingService.getQuote(
-        instrumentTokens.map(token => token.toString()),
+        instrumentTokens.map((token) => token.toString()),
         provider,
       );
       // Ensure all requested tokens exist in the result, even if provider missed them
@@ -288,32 +361,64 @@ export class StockService {
 
       // Enrich missing LTPs using recent stream cache, then provider LTP as last resort
       const missing = Object.entries(quotes)
-        .filter(([, v]: any) => !Number.isFinite(v?.last_price) || (v?.last_price ?? 0) <= 0)
+        .filter(
+          ([, v]: any) =>
+            !Number.isFinite(v?.last_price) || (v?.last_price ?? 0) <= 0,
+        )
         .map(([k]) => k);
 
       if (missing.length) {
-        this.logger.warn(`[StockService] Quotes missing LTP for ${missing.length}/${instrumentTokens.length} tokens → trying Redis last_tick cache`);
+        this.logger.warn(
+          `[StockService] Quotes missing LTP for ${missing.length}/${instrumentTokens.length} tokens → trying memory and Redis last_tick cache`,
+        );
         // Attempt to fill from Redis last_tick
         const filledFromCache: string[] = [];
+        // Memory first
         for (const tok of missing) {
           try {
-            const cache = await this.redisService.get(`last_tick:${tok}`);
+            const lp = this.ltpCache.get(tok);
+            if (Number.isFinite(lp) && (lp as any) > 0) {
+              quotes[tok] = { ...(quotes[tok] || {}), last_price: lp };
+              filledFromCache.push(tok);
+              this.metrics.ltpCacheHitTotal.labels('memory').inc();
+            }
+          } catch {}
+        }
+        const stillForRedis = missing.filter(
+          (t) => !filledFromCache.includes(t),
+        );
+        // Redis next
+        for (const tok of stillForRedis) {
+          try {
+            const cache = await this.redisService.get<any>(`last_tick:${tok}`);
             const lp = Number(cache?.last_price);
             if (Number.isFinite(lp) && lp > 0) {
               quotes[tok] = { ...(quotes[tok] || {}), last_price: lp };
+              // warm memory cache
+              this.ltpCache.set(tok, lp);
               filledFromCache.push(tok);
+              this.metrics.ltpCacheHitTotal.labels('redis').inc();
             }
           } catch (e) {
-            this.logger.debug(`[StockService] Redis last_tick fetch failed for ${tok}`);
+            this.logger.debug(
+              `[StockService] Redis last_tick fetch failed for ${tok}`,
+            );
           }
         }
 
         // Remaining missing after cache
-        const stillMissing = missing.filter(t => !filledFromCache.includes(t));
+        const stillMissing = missing.filter(
+          (t) => !filledFromCache.includes(t),
+        );
         if (stillMissing.length) {
-          this.logger.warn(`[StockService] Still missing LTP for ${stillMissing.length} tokens → requesting provider LTP batch`);
+          this.logger.warn(
+            `[StockService] Still missing LTP for ${stillMissing.length} tokens → requesting provider LTP batch`,
+          );
           try {
-            const ltpMap = await this.requestBatchingService.getLTP(stillMissing, provider);
+            const ltpMap = await this.requestBatchingService.getLTP(
+              stillMissing,
+              provider,
+            );
             let filled = 0;
             for (const tok of stillMissing) {
               const lp = Number(ltpMap?.[tok]?.last_price);
@@ -322,21 +427,28 @@ export class StockService {
                 filled++;
               }
             }
-            this.logger.log(`[StockService] LTP fallback filled ${filled}/${stillMissing.length} tokens`);
+            this.logger.log(
+              `[StockService] LTP fallback filled ${filled}/${stillMissing.length} tokens`,
+            );
           } catch (e) {
-            this.logger.warn('[StockService] Provider LTP fallback failed', e as any);
+            this.logger.warn(
+              '[StockService] Provider LTP fallback failed',
+              e as any,
+            );
           }
         }
       }
 
       // Cache the result
       await this.redisService.cacheQuote(
-        instrumentTokens.map(token => token.toString()),
+        instrumentTokens.map((token) => token.toString()),
         quotes,
-        30
+        30,
       );
 
-      this.logger.log(`Fetched quotes for ${instrumentTokens.length} instruments`);
+      this.logger.log(
+        `Fetched quotes for ${instrumentTokens.length} instruments`,
+      );
       return quotes;
     } catch (error) {
       this.logger.error('Error fetching quotes', error);
@@ -344,11 +456,18 @@ export class StockService {
     }
   }
 
-  async getLTP(instrumentTokens: number[], headers?: Record<string, any>, apiKey?: string): Promise<any> {
+  async getLTP(
+    instrumentTokens: number[],
+    headers?: Record<string, any>,
+    apiKey?: string,
+  ): Promise<any> {
     try {
-      const provider = await this.providerResolver.resolveForHttp(headers || {}, apiKey);
+      const provider = await this.providerResolver.resolveForHttp(
+        headers || {},
+        apiKey,
+      );
       const ltp = await this.requestBatchingService.getLTP(
-        instrumentTokens.map(token => token.toString()),
+        instrumentTokens.map((token) => token.toString()),
         provider,
       );
 
@@ -360,15 +479,24 @@ export class StockService {
     }
   }
 
-  async getOHLC(instrumentTokens: number[], headers?: Record<string, any>, apiKey?: string): Promise<any> {
+  async getOHLC(
+    instrumentTokens: number[],
+    headers?: Record<string, any>,
+    apiKey?: string,
+  ): Promise<any> {
     try {
-      const provider = await this.providerResolver.resolveForHttp(headers || {}, apiKey);
+      const provider = await this.providerResolver.resolveForHttp(
+        headers || {},
+        apiKey,
+      );
       const ohlc = await this.requestBatchingService.getOHLC(
-        instrumentTokens.map(token => token.toString()),
+        instrumentTokens.map((token) => token.toString()),
         provider,
       );
 
-      this.logger.log(`Fetched OHLC for ${instrumentTokens.length} instruments`);
+      this.logger.log(
+        `Fetched OHLC for ${instrumentTokens.length} instruments`,
+      );
       return ohlc;
     } catch (error) {
       this.logger.error('Error fetching OHLC', error);
@@ -385,7 +513,10 @@ export class StockService {
     apiKey?: string,
   ): Promise<any> {
     try {
-      const provider = await this.providerResolver.resolveForHttp(headers || {}, apiKey);
+      const provider = await this.providerResolver.resolveForHttp(
+        headers || {},
+        apiKey,
+      );
       const historicalData = await provider.getHistoricalData(
         instrumentToken,
         fromDate,
@@ -393,7 +524,9 @@ export class StockService {
         interval,
       );
 
-      this.logger.log(`Fetched historical data for instrument ${instrumentToken}`);
+      this.logger.log(
+        `Fetched historical data for instrument ${instrumentToken}`,
+      );
       return historicalData;
     } catch (error) {
       this.logger.error('Error fetching historical data', error);
@@ -425,7 +558,9 @@ export class StockService {
         this.logger.log(`Stored market data for instrument ${instrumentToken}`);
       } catch (dbError) {
         // Log database error but don't block broadcasting
-        this.logger.warn(`Failed to store market data in DB for token ${instrumentToken}: ${dbError.message}. Continuing with broadcast.`);
+        this.logger.warn(
+          `Failed to store market data in DB for token ${instrumentToken}: ${dbError.message}. Continuing with broadcast.`,
+        );
       }
 
       // Cache the data (non-blocking)
@@ -440,16 +575,27 @@ export class StockService {
       // Broadcast to both Socket.IO and native WebSocket gateways
       try {
         await this.marketDataGateway.broadcastMarketData(instrumentToken, data);
-        this.logger.debug(`[StockService] Broadcasted market data for token ${instrumentToken} to MarketDataGateway`);
+        this.logger.debug(
+          `[StockService] Broadcasted market data for token ${instrumentToken} to MarketDataGateway`,
+        );
       } catch (gatewayError) {
-        this.logger.warn(`[StockService] Failed to broadcast to MarketDataGateway: ${gatewayError.message}`);
+        this.logger.warn(
+          `[StockService] Failed to broadcast to MarketDataGateway: ${gatewayError.message}`,
+        );
       }
-      
+
       try {
-        await this.nativeWebSocketGateway.broadcastMarketData(instrumentToken, data);
-        this.logger.debug(`[StockService] Broadcasted market data for token ${instrumentToken} to NativeWebSocketGateway`);
+        await this.nativeWebSocketGateway.broadcastMarketData(
+          instrumentToken,
+          data,
+        );
+        this.logger.debug(
+          `[StockService] Broadcasted market data for token ${instrumentToken} to NativeWebSocketGateway`,
+        );
       } catch (nativeGatewayError) {
-        this.logger.warn(`[StockService] Failed to broadcast to NativeWebSocketGateway: ${nativeGatewayError.message}`);
+        this.logger.warn(
+          `[StockService] Failed to broadcast to NativeWebSocketGateway: ${nativeGatewayError.message}`,
+        );
       }
     } catch (error) {
       this.logger.error('Error storing market data', error);
@@ -459,7 +605,7 @@ export class StockService {
 
   async getLastTick(instrumentToken: number): Promise<any> {
     try {
-      return await this.redisService.get(`last_tick:${instrumentToken}`);
+      return await this.redisService.get<any>(`last_tick:${instrumentToken}`);
     } catch (e) {
       this.logger.error('Error fetching last tick', e);
       return null;
@@ -474,15 +620,14 @@ export class StockService {
     try {
       const queryBuilder = this.marketDataRepository
         .createQueryBuilder('marketData')
-        .where('marketData.instrument_token = :instrumentToken', { instrumentToken })
+        .where('marketData.instrument_token = :instrumentToken', {
+          instrumentToken,
+        })
         .orderBy('marketData.timestamp', 'DESC');
 
       const total = await queryBuilder.getCount();
 
-      const data = await queryBuilder
-        .limit(limit)
-        .offset(offset)
-        .getMany();
+      const data = await queryBuilder.limit(limit).offset(offset).getMany();
 
       return { data, total };
     } catch (error) {
@@ -524,11 +669,14 @@ export class StockService {
     }
   }
 
-  async unsubscribeFromInstrument(userId: string, instrumentToken: number): Promise<void> {
+  async unsubscribeFromInstrument(
+    userId: string,
+    instrumentToken: number,
+  ): Promise<void> {
     try {
       await this.subscriptionRepository.update(
         { user_id: userId, instrument_token: instrumentToken },
-        { is_active: false }
+        { is_active: false },
       );
     } catch (error) {
       this.logger.error('Error unsubscribing from instrument', error);
@@ -550,11 +698,12 @@ export class StockService {
 
   async getSystemStats(): Promise<any> {
     try {
-      const [instrumentCount, marketDataCount, subscriptionCount] = await Promise.all([
-        this.instrumentRepository.count(),
-        this.marketDataRepository.count(),
-        this.subscriptionRepository.count({ where: { is_active: true } }),
-      ]);
+      const [instrumentCount, marketDataCount, subscriptionCount] =
+        await Promise.all([
+          this.instrumentRepository.count(),
+          this.marketDataRepository.count(),
+          this.subscriptionRepository.count({ where: { is_active: true } }),
+        ]);
 
       const batchStats = this.requestBatchingService.getBatchStats();
       const connectionStats = this.marketDataGateway.getConnectionStats();

@@ -1,4 +1,9 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  Injectable,
+  NestInterceptor,
+} from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { MetricsService } from '../services/metrics.service';
@@ -19,15 +24,23 @@ export class MetricsInterceptor implements NestInterceptor {
           const res = context.switchToHttp().getResponse();
           const status = res?.statusCode || 200;
           const duration = Number(process.hrtime.bigint() - start) / 1e9;
-          this.metrics.httpRequestsTotal.labels(method, route, String(status)).inc();
-          this.metrics.httpRequestDuration.labels(method, route, String(status)).observe(duration);
+          this.metrics.httpRequestsTotal
+            .labels(method, route, String(status))
+            .inc();
+          this.metrics.httpRequestDuration
+            .labels(method, route, String(status))
+            .observe(duration);
         },
         error: () => {
           const res = context.switchToHttp().getResponse();
           const status = res?.statusCode || 500;
           const duration = Number(process.hrtime.bigint() - start) / 1e9;
-          this.metrics.httpRequestsTotal.labels(method, route, String(status)).inc();
-          this.metrics.httpRequestDuration.labels(method, route, String(status)).observe(duration);
+          this.metrics.httpRequestsTotal
+            .labels(method, route, String(status))
+            .inc();
+          this.metrics.httpRequestDuration
+            .labels(method, route, String(status))
+            .observe(duration);
         },
       }),
     );

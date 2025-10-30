@@ -10,7 +10,7 @@ import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-   
+
   try {
     const app = await NestFactory.create<NestExpressApplication>(AppModule);
     const configService = app.get(ConfigService);
@@ -19,11 +19,19 @@ async function bootstrap() {
     const kiteApiKey = configService.get('KITE_API_KEY');
     const kiteAccessToken = configService.get('KITE_ACCESS_TOKEN');
     if (!kiteApiKey || !kiteAccessToken) {
-      logger.warn('Kite credentials not configured (KITE_API_KEY / KITE_ACCESS_TOKEN)');
-      logger.warn('The server will start without live ticker. To connect Kite:');
+      logger.warn(
+        'Kite credentials not configured (KITE_API_KEY / KITE_ACCESS_TOKEN)',
+      );
+      logger.warn(
+        'The server will start without live ticker. To connect Kite:',
+      );
       logger.warn('1) Set KITE_API_KEY and KITE_API_SECRET in .env');
-      logger.warn('2) Open GET /api/auth/kite/login to obtain the OAuth URL and complete login');
-      logger.warn('3) After callback, ticker will auto-restart with the new access token');
+      logger.warn(
+        '2) Open GET /api/auth/kite/login to obtain the OAuth URL and complete login',
+      );
+      logger.warn(
+        '3) After callback, ticker will auto-restart with the new access token',
+      );
     }
 
     // Security middleware
@@ -54,15 +62,23 @@ async function bootstrap() {
     app.setGlobalPrefix('api');
 
     // Serve static dashboard
-    app.useStaticAssets('src/public', { prefix: '/dashboard', index: ['dashboard.html'] });
+    app.useStaticAssets('src/public', {
+      prefix: '/dashboard',
+      index: ['dashboard.html'],
+    });
 
     // Swagger setup
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Trading Data Provider API')
-      .setDescription('Pluggable providers: Kite and Vortex. Use optional x-provider header for HTTP; WS uses a global provider set by admin endpoint.')
+      .setDescription(
+        'Pluggable providers: Kite and Vortex. Use optional x-provider header for HTTP; WS uses a global provider set by admin endpoint.',
+      )
       .setVersion('1.0.0')
       .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'apiKey')
-      .addApiKey({ type: 'apiKey', name: 'x-admin-token', in: 'header' }, 'admin')
+      .addApiKey(
+        { type: 'apiKey', name: 'x-admin-token', in: 'header' },
+        'admin',
+      )
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
@@ -72,11 +88,17 @@ async function bootstrap() {
     await app.listen(port);
 
     logger.log(`🚀 Trading App Backend is running on port ${port}`);
-    logger.log(`📊 Health check available at http://localhost:${port}/api/health`);
+    logger.log(
+      `📊 Health check available at http://localhost:${port}/api/health`,
+    );
     logger.log(`📘 Swagger docs at http://localhost:${port}/api/docs`);
     logger.log(`📈 WebSocket available at ws://localhost:${port}/market-data`);
     if (!kiteApiKey || !kiteAccessToken) {
-      logger.log('🟡 Kite is disconnected. Visit http://localhost:' + port + '/api/auth/kite/login to start OAuth');
+      logger.log(
+        '🟡 Kite is disconnected. Visit http://localhost:' +
+          port +
+          '/api/auth/kite/login to start OAuth',
+      );
     }
   } catch (error) {
     logger.error('❌ Failed to start application', error);

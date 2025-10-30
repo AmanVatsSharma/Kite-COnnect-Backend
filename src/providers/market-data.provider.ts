@@ -26,5 +26,3 @@ export interface MarketDataProvider {
 export type TickerLike = any;
 
 export const ProviderLogger = new Logger('MarketDataProvider');
-
-

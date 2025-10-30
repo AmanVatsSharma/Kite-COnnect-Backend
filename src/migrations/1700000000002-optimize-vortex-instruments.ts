@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class OptimizeVortexInstruments1700000000002 implements MigrationInterface {
+export class OptimizeVortexInstruments1700000000002
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Composite index for symbol + exchange searches (most common)
     await queryRunner.query(`
