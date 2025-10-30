@@ -324,6 +324,100 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     }
   }
 
+  /**
+   * Fetch LTP for explicit exchange-token pairs using Vortex REST quotes API in ltp mode.
+   * - Accepts up to 1000 pairs per HTTP request; chunks larger inputs and rate-limits per docs
+   * - Returns map keyed by "EXCHANGE-TOKEN" → { last_price }
+   */
+  async getLTPByPairs(
+    pairs: Array<{
+      exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+      token: string | number;
+    }>,
+  ): Promise<Record<string, { last_price: number | null }>> {
+    const result: Record<string, { last_price: number | null }> = {};
+    try {
+      await this.ensureTokenLoaded();
+      if (!this.http) {
+        this.logger.warn(
+          '[Vortex] getLTPByPairs called without credentials. Returning empty result.',
+        );
+        return result;
+      }
+
+      if (!Array.isArray(pairs) || pairs.length === 0) return result;
+
+      const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
+      // Sanitize and prepare keys
+      const keys: string[] = [];
+      for (const p of pairs) {
+        const ex = String(p?.exchange || '').toUpperCase();
+        const tok = String(p?.token ?? '').trim();
+        if (!allowed.has(ex)) {
+          this.logger.debug(
+            `[Vortex] getLTPByPairs: skipping unsupported exchange=${p?.exchange}`,
+          );
+          continue;
+        }
+        if (!tok || !/^\d+$/.test(tok)) {
+          this.logger.debug(
+            `[Vortex] getLTPByPairs: skipping invalid token=${p?.token}`,
+          );
+          continue;
+        }
+        keys.push(`${ex}-${tok}`);
+      }
+
+      if (keys.length === 0) return result;
+
+      // Helper to chunk array into max 1000 items
+      const MAX_PER_REQ = 1000;
+      const chunks: string[][] = [];
+      for (let i = 0; i < keys.length; i += MAX_PER_REQ) {
+        chunks.push(keys.slice(i, i + MAX_PER_REQ));
+      }
+
+      let withLtp = 0;
+      for (const chunk of chunks) {
+        await this.rateLimit('ltp');
+        const qParams = chunk
+          .map((k) => `q=${encodeURIComponent(k)}`)
+          .join('&');
+        const url = `/data/quotes?${qParams}&mode=ltp`;
+        this.logger.debug(
+          `[Vortex] getLTPByPairs request: pairs=${chunk.length}, url=${url}`,
+        );
+        try {
+          const resp = await this.http.get(url, { headers: this.authHeaders() });
+          const data = resp?.data?.data || {};
+          for (const [exToken, quote] of Object.entries<any>(data)) {
+            const raw = Number(
+              (quote && (quote as any).last_trade_price) ?? (quote as any)?.ltp,
+            );
+            const lp = Number.isFinite(raw) && raw > 0 ? raw : null;
+            if (lp !== null) withLtp++;
+            result[exToken] = { last_price: lp };
+          }
+        } catch (e) {
+          this.logger.error('[Vortex] getLTPByPairs HTTP error', e as any);
+        }
+      }
+
+      // Ensure all requested keys present in output (null when missing)
+      for (const k of keys) {
+        if (!(k in result)) result[k] = { last_price: null };
+      }
+
+      this.logger.debug(
+        `[Vortex] getLTPByPairs coverage: total=${keys.length}, withLTP=${Object.values(result).filter((v) => Number.isFinite((v as any)?.last_price) && (v as any).last_price > 0).length}`,
+      );
+      return result;
+    } catch (error) {
+      this.logger.error('[Vortex] getLTPByPairs failed (non-fatal)', error as any);
+      return result;
+    }
+  }
+
   async getOHLC(tokens: string[]): Promise<Record<string, any>> {
     try {
       await this.ensureTokenLoaded();

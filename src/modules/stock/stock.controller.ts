@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { StockService } from './stock.service';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
+import { VortexProviderService } from '../../providers/vortex-provider.service';
 import {
   ApiTags,
   ApiOperation,
@@ -34,6 +35,7 @@ export class StockController {
   constructor(
     private readonly stockService: StockService,
     private readonly vortexInstrumentService: VortexInstrumentService,
+    private readonly vortexProvider: VortexProviderService,
   ) {}
 
   @Post('instruments/sync')
@@ -910,6 +912,126 @@ export class StockController {
   }
 
   // ===== VAYU-SPECIFIC ENDPOINTS =====
+
+  @Get('vayu/ltp')
+  @ApiOperation({
+    summary:
+      'Get Vayu LTP using exchange-token pairs (q=NSE_EQ-22&q=NSE_FO-135938)',
+  })
+  @ApiQuery({
+    name: 'q',
+    required: true,
+    description:
+      'Repeat this query param for each pair, format: EXCHANGE-TOKEN (e.g., q=NSE_EQ-22)'
+  })
+  async getVayuLtpByQuery(@Query('q') q: string | string[]) {
+    try {
+      const items = Array.isArray(q) ? q : q ? [q] : [];
+      const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
+      const pairs = items
+        .map((s) => String(s || '').trim().toUpperCase())
+        .filter((s) => s.includes('-'))
+        .map((s) => {
+          const [ex, tok] = s.split('-');
+          return { exchange: ex, token: tok } as any;
+        })
+        .filter((p) => allowed.has(String(p.exchange)) && /^\d+$/.test(String(p.token)));
+
+      if (pairs.length === 0) {
+        throw new HttpException(
+          {
+            success: false,
+            message:
+              'At least one valid q=EXCHANGE-TOKEN is required (e.g., q=NSE_EQ-22)',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const data = await this.vortexProvider.getLTPByPairs(pairs as any);
+      return {
+        success: true,
+        data,
+        count: Object.keys(data || {}).length,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to fetch Vayu LTP',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('vayu/ltp')
+  @ApiOperation({ summary: 'Get Vayu LTP by JSON body of exchange-token pairs' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        pairs: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              exchange: { type: 'string', example: 'NSE_EQ' },
+              token: { oneOf: [{ type: 'string' }, { type: 'number' }], example: 22 },
+            },
+            required: ['exchange', 'token'],
+          },
+          description: 'Array of { exchange, token } objects',
+        },
+      },
+      required: ['pairs'],
+    },
+  })
+  async postVayuLtp(@Body() body: { pairs: Array<{ exchange: string; token: string | number }> }) {
+    try {
+      const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
+      const pairs = Array.isArray(body?.pairs) ? body.pairs : [];
+      const sanitized = pairs
+        .map((p) => ({
+          exchange: String(p?.exchange || '').toUpperCase(),
+          token: String(p?.token ?? '').trim(),
+        }))
+        .filter((p) => allowed.has(p.exchange) && /^\d+$/.test(p.token))
+        .map((p) => ({ exchange: p.exchange as any, token: p.token }));
+
+      if (sanitized.length === 0) {
+        throw new HttpException(
+          {
+            success: false,
+            message:
+              'pairs is required and must contain at least one valid { exchange, token } (e.g., { exchange: "NSE_EQ", token: 22 })',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const data = await this.vortexProvider.getLTPByPairs(sanitized as any);
+      return {
+        success: true,
+        data,
+        count: Object.keys(data || {}).length,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to fetch Vayu LTP',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 
   @Get('vayu/instruments')
   @ApiOperation({ summary: 'Get Vayu instruments with optional filters' })
