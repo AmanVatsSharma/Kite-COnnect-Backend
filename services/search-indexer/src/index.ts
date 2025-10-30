@@ -57,7 +57,7 @@ function toDoc(r: InstrumentRow) {
 async function applyIndexSettings(meiliBase: string, apiKey: string, index: string) {
   const h = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
   // searchable, filterable, ranking rules, typo settings
-  await axios.post(
+  await axios.patch(
     `${meiliBase}/indexes/${index}/settings`,
     {
       searchableAttributes: [
@@ -97,12 +97,17 @@ async function backfill() {
 
   const headers = meiliKey ? { Authorization: `Bearer ${meiliKey}` } : {};
 
-  // Ensure index exists with primary key
-  await axios.put(
-    `${meiliBase}/indexes/${index}`,
-    { uid: index, primaryKey: 'instrumentToken' },
-    { headers },
-  ).catch(() => undefined);
+  // Ensure index exists with primary key (POST /indexes)
+  await axios
+    .post(
+      `${meiliBase}/indexes`,
+      { uid: index, primaryKey: 'instrumentToken' },
+      { headers },
+    )
+    .catch((e) => {
+      // 409 if already exists; ignore
+      if (!(e?.response?.status === 409)) throw e;
+    });
 
   await applyIndexSettings(meiliBase, meiliKey, index);
 

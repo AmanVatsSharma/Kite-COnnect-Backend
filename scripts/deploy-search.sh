@@ -138,7 +138,7 @@ show_compose_ps
 wait_for_http http://localhost:3002/api/health 30 2
 
 info "Checking Meilisearch health from inside search-api container ..."
-if ! docker compose exec -T trading-search-api sh -lc "curl -fsS http://meilisearch:7700/health >/dev/null"; then
+if ! docker compose exec -T search-api sh -lc "curl -fsS http://meilisearch:7700/health >/dev/null"; then
   err "Meilisearch health failed from search-api"
   docker compose logs --tail 200 search-api meilisearch | sed 's/^/  /'
   exit 1
