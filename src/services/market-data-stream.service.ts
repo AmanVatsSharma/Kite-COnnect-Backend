@@ -277,6 +277,38 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Batch helper for last known LTPs from Redis for tokens.
+   * Always returns all requested tokens, logs per miss, never throws.
+   * @param tokens string[] array of instrument tokens as string or number
+   * @returns { token: { last_price: number|null } }
+   */
+  async getRecentLTP(tokens: string[]): Promise<Record<string, { last_price: number | null }>> {
+    const out: Record<string, { last_price: number | null }> = {};
+    if (!Array.isArray(tokens) || tokens.length === 0) return out;
+    let found = 0, missed = 0;
+    for (const tRaw of tokens) {
+      const t = tRaw.toString();
+      try {
+        const data: any = await this.redisService.get(`last_tick:${t}`);
+        const lp = Number(data?.last_price);
+        if (Number.isFinite(lp) && lp > 0) {
+          out[t] = { last_price: lp };
+          found++;
+        } else {
+          out[t] = { last_price: null };
+          missed++;
+        }
+      } catch (err) {
+        this.logger.warn(`[MarketDataStreamService] Redis fetch failed for last_tick:${t}`, err);
+        out[t] = { last_price: null };
+        missed++;
+      }
+    }
+    this.logger.debug(`[MarketDataStreamService] getRecentLTP complete. Tokens=${tokens.length}, found=${found}, missed=${missed}`);
+    return out;
+  }
+
   // Cron job to sync instruments daily
   @Cron(CronExpression.EVERY_DAY_AT_6AM)
   async syncInstrumentsDaily() {
