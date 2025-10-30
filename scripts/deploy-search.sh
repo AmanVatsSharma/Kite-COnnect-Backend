@@ -92,12 +92,17 @@ if [ ! -f docker-compose.yml ]; then
   err "docker-compose.yml not found. Run from project root"; exit 1
 fi
 
-# Check host port usage
+# Check host port usage (allow if it's our search-api service)
 if port_in_use 3002; then
-  err "Host port 3002 is already in use. Free it or update mapping in docker-compose.yml"
-  exit 1
+  if docker compose ps search-api 2>/dev/null | grep -q "0.0.0.0:3002->3000"; then
+    ok "Host port 3002 is in use by search-api (expected)"
+  else
+    err "Host port 3002 is already in use by another process. Free it or change mapping in docker-compose.yml"
+    exit 1
+  fi
+else
+  ok "Host port 3002 is free"
 fi
-ok "Host port 3002 is free"
 
 # Nginx config presence hint (we don't overwrite; only test/reload)
 if [ $HAS_NGINX -eq 1 ]; then
