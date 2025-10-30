@@ -186,17 +186,19 @@ services:
     build: ./services/search-indexer
     container_name: trading-search-indexer
     environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USERNAME=trading_user
-      - DB_PASSWORD=trading_password
-      - DB_DATABASE=trading_app
+      - DB_HOST=${INDEXER_DB_HOST:-postgres}
+      - DB_PORT=${INDEXER_DB_PORT:-5432}
+      - DB_USERNAME=${INDEXER_DB_USER:-trading_user}
+      - DB_PASSWORD=${INDEXER_DB_PASSWORD:-trading_password}
+      - DB_DATABASE=${INDEXER_DB_NAME:-trading_app}
       - MEILI_HOST=http://meilisearch:7700
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
       - MEILI_INDEX=instruments_v1
       - INDEXER_MODE=backfill-and-watch
       - INDEXER_BATCH_SIZE=2000
       - INDEXER_POLL_SEC=300
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
