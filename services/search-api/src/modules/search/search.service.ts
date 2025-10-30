@@ -54,13 +54,30 @@ export class SearchService {
     }
   }
 
+  private async safeMeiliSearch(index: string, body: any): Promise<any> {
+    try {
+      const resp = await this.meili.post(`/indexes/${index}/search`, body);
+      return resp.data || { hits: [] };
+    } catch (err: any) {
+      const code = err?.response?.status;
+      const m = err?.response?.data?.message || err?.message;
+      if (code === 404) {
+        // Index not found or no results yet – degrade gracefully
+        this.logger.warn(`Meili search 404 (likely index missing): ${m}`);
+        return { hits: [] };
+      }
+      this.logger.error(`Meili search failed: ${m}`);
+      return { hits: [] };
+    }
+  }
+
   // Starts-with boosted search then contains fallback; returns deduped list
   async searchInstruments(q: string, limit = 10, filters: any = {}) {
     const index = process.env.MEILI_INDEX || 'instruments_v1';
     const attributesToRetrieve = ['instrumentToken', 'symbol', 'tradingSymbol', 'companyName', 'exchange', 'segment', 'instrumentType'];
     const filterExpr = this.buildFilter(filters);
 
-    const startsWith = await this.meili.post(`/indexes/${index}/search`, {
+    const startsWith = await this.safeMeiliSearch(index, {
       q,
       limit,
       attributesToRetrieve,
@@ -69,11 +86,11 @@ export class SearchService {
     });
 
     // If enough, return
-    const primary: SearchResultItem[] = startsWith.data.hits || [];
+    const primary: SearchResultItem[] = startsWith.hits || [];
     if (primary.length >= limit) return primary.slice(0, limit);
 
     // Fallback broader search (contains)
-    const contains = await this.meili.post(`/indexes/${index}/search`, {
+    const contains = await this.safeMeiliSearch(index, {
       q,
       limit,
       attributesToRetrieve,
@@ -81,7 +98,7 @@ export class SearchService {
       matchingStrategy: 'last',
     });
 
-    const merged = this.dedupeByToken([...primary, ...(contains.data.hits || [])]);
+    const merged = this.dedupeByToken([...primary, ...(contains.hits || [])]);
     return merged.slice(0, limit);
   }
 
@@ -89,13 +106,13 @@ export class SearchService {
     const index = process.env.MEILI_INDEX || 'instruments_v1';
     const filterExpr = this.buildFilter(filters);
     const facets = ['exchange', 'segment', 'instrumentType', 'expiryDate'];
-    const resp = await this.meili.post(`/indexes/${index}/search`, {
+    const resp = await this.safeMeiliSearch(index, {
       q: '',
       limit: 0,
       filter: filterExpr,
       facets,
     });
-    return resp.data?.facetDistribution || {};
+    return (resp as any)?.facetDistribution || {};
   }
 
   async hydrateQuotes(tokens: number[], mode: 'ltp' | 'ohlc' | 'full' = 'ltp') {
