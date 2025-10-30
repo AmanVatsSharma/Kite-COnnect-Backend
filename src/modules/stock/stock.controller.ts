@@ -226,9 +226,10 @@ export class StockController {
   @ApiOperation({ summary: 'Get quotes for instruments with mode selection (ltp|ohlc|full)' })
   @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: falcon|vayu' })
   @ApiQuery({ name: 'mode', required: false, example: 'full', description: 'ltp | ohlc | full (default: full)' })
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
   @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
   @ApiResponse({ status: 200, description: 'Quote data response' })
-  async getQuotes(@Body() body: { instruments: number[] }, @Request() req: any, @Query('mode') mode?: 'ltp' | 'ohlc' | 'full') {
+  async getQuotes(@Body() body: { instruments: number[] }, @Request() req: any, @Query('mode') mode?: 'ltp' | 'ohlc' | 'full', @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       const { instruments } = body;
       if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
@@ -251,6 +252,7 @@ export class StockController {
         );
       }
       const modeNorm = (mode || 'full').toLowerCase();
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
       let quotes: any;
       if (modeNorm === 'ltp') {
         quotes = await this.stockService.getLTP(instruments, req.headers, req.headers?.['x-api-key'] || req.query?.['api_key']);
@@ -259,11 +261,22 @@ export class StockController {
       } else {
         quotes = await this.stockService.getQuotes(instruments, req.headers, req.headers?.['x-api-key'] || req.query?.['api_key']);
       }
+
+      // Optional filtering: only include tokens with a valid last_price
+      if (ltpOnly && quotes && typeof quotes === 'object') {
+        const filtered: Record<string, any> = {};
+        Object.entries(quotes).forEach(([k, v]: any) => {
+          const lp = v?.last_price;
+          if (Number.isFinite(lp) && lp > 0) filtered[k] = v;
+        });
+        quotes = filtered;
+      }
       return {
         success: true,
         data: quotes,
         timestamp: new Date().toISOString(),
         mode: modeNorm,
+        ltp_only: ltpOnly || false,
       };
     } catch (error) {
       if (error instanceof HttpException) {

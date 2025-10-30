@@ -181,6 +181,24 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         if (!tokenPart) continue;
         out[tokenPart] = this.normalizeQuote(quote);
       }
+      // Enrichment: ensure last_price is present by fetching LTP for missing tokens in one shot
+      const missingLtp = Object.entries(out)
+        .filter(([, v]) => !Number.isFinite(v?.last_price) || (v?.last_price ?? 0) <= 0)
+        .map(([k]) => k);
+      if (missingLtp.length) {
+        this.logger.warn(`[Vortex] getQuote missing LTP for ${missingLtp.length}/${tokens.length} tokens → fetching LTP fallback`);
+        try {
+          const ltpMap = await this.getLTP(missingLtp);
+          for (const tok of missingLtp) {
+            const lv = ltpMap?.[tok]?.last_price;
+            if (Number.isFinite(lv) && lv > 0) {
+              out[tok] = { ...(out[tok] || {}), last_price: lv };
+            }
+          }
+        } catch (e) {
+          this.logger.warn('[Vortex] LTP fallback during getQuote failed', e as any);
+        }
+      }
       return out;
     } catch (error) {
       this.logger.error('[Vortex] getQuote failed (non-fatal)', error as any);
@@ -233,12 +251,33 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       for (const [exToken, quote] of Object.entries<any>(data)) {
         const tokenPart = exToken.split('-').pop();
         if (!tokenPart) continue;
-        out[tokenPart] = { ohlc: {
-          open: quote?.open_price,
-          high: quote?.high_price,
-          low: quote?.low_price,
-          close: quote?.close_price,
-        } };
+        out[tokenPart] = { 
+          last_price: quote?.last_trade_price,
+          ohlc: {
+            open: quote?.open_price,
+            high: quote?.high_price,
+            low: quote?.low_price,
+            close: quote?.close_price,
+          }
+        };
+      }
+      // Enrichment: fetch LTP for any tokens without a valid last_price
+      const missingLtp = Object.entries(out)
+        .filter(([, v]) => !Number.isFinite(v?.last_price) || (v?.last_price ?? 0) <= 0)
+        .map(([k]) => k);
+      if (missingLtp.length) {
+        this.logger.warn(`[Vortex] getOHLC missing LTP for ${missingLtp.length}/${tokens.length} tokens → fetching LTP fallback`);
+        try {
+          const ltpMap = await this.getLTP(missingLtp);
+          for (const tok of missingLtp) {
+            const lv = ltpMap?.[tok]?.last_price;
+            if (Number.isFinite(lv) && lv > 0) {
+              out[tok] = { ...(out[tok] || {}), last_price: lv };
+            }
+          }
+        } catch (e) {
+          this.logger.warn('[Vortex] LTP fallback during getOHLC failed', e as any);
+        }
       }
       return out;
     } catch (error) {

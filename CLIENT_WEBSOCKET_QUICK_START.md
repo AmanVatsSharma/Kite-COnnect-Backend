@@ -49,6 +49,16 @@ socket.on('error', (error) => {
 });
 ```
 
+## LTP-only snapshot
+
+Request only instruments with a valid LTP in snapshot queries:
+
+```javascript
+socket.emit('get_quote', { instruments: [26000, 11536], ltp_only: true });
+```
+
+The server enriches missing LTPs first; instruments still lacking a finite `last_price > 0` are filtered out.
+
 ### Python
 
 ```python

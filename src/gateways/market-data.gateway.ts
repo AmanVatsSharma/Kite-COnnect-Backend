@@ -361,11 +361,11 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
    */
   @SubscribeMessage('get_quote')
   async handleGetQuote(
-    @MessageBody() data: { instruments: number[] },
+    @MessageBody() data: { instruments: number[]; ltp_only?: boolean },
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      const { instruments } = data;
+      const { instruments, ltp_only } = data;
       
       if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
         client.emit('error', { message: 'Invalid instruments array' });
@@ -388,9 +388,19 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
 
       // Fetch via resolved HTTP provider (header routing is ignored for WS; global applies)
       const provider = await this.providerResolver.resolveForWebsocket();
-      const quotes = await provider.getQuote(
+      let quotes = await provider.getQuote(
         instruments.map(token => token.toString())
       );
+
+      // Optional: filter only tokens with valid last_price
+      if (ltp_only && quotes && typeof quotes === 'object') {
+        const filtered: Record<string, any> = {};
+        Object.entries(quotes).forEach(([k, v]: any) => {
+          const lp = v?.last_price;
+          if (Number.isFinite(lp) && lp > 0) filtered[k] = v;
+        });
+        quotes = filtered;
+      }
 
       // Cache the result
       await this.redisService.cacheQuote(
@@ -403,6 +413,7 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
         data: quotes,
         cached: false,
         timestamp: new Date().toISOString(),
+        ltp_only: !!ltp_only,
       });
     } catch (error) {
       this.logger.error('Error fetching quotes', error);

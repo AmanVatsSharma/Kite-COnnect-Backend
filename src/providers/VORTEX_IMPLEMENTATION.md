@@ -65,6 +65,26 @@ The WebSocket sends binary data in three packet sizes:
 ```
 
 ## HTTP API Integration
+## LTP enrichment flow
+
+```
+Client → REST / WS (get_quote)
+           |
+           v
+Provider.getQuote / getOHLC
+  ├─ Map Vortex response → include last_price when present
+  ├─ If missing/invalid last_price:
+  │    └─ Single fallback call: getLTP(tokens_missing)
+  │         └─ Merge last_price into results
+  └─ Return unified shape
+
+Optional ltp_only filter (REST/WS snapshot):
+  └─ Drop instruments where last_price is not finite or ≤ 0
+```
+
+Notes:
+- This minimizes extra network calls by batching LTP fallback per request.
+- Streaming ticks always include `last_price` from the binary parser.
 
 ### Quotes Endpoint
 ```typescript

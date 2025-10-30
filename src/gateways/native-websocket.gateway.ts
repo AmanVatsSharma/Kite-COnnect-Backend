@@ -263,7 +263,7 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
 
   private async handleGetQuote(client: WebSocketWithData, data: any) {
     try {
-      const { instruments } = data;
+      const { instruments, ltp_only } = data;
 
       if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
         this.sendError(client, 'WS_INVALID_INSTRUMENTS', 'Invalid instruments array');
@@ -286,9 +286,19 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
 
       // Fetch from provider
       const provider = await this.providerResolver.resolveForWebsocket();
-      const quotes = await provider.getQuote(
+      let quotes = await provider.getQuote(
         instruments.map(token => token.toString())
       );
+
+      // Optional: filter only tokens with valid last_price
+      if (ltp_only && quotes && typeof quotes === 'object') {
+        const filtered: Record<string, any> = {};
+        Object.entries(quotes).forEach(([k, v]: any) => {
+          const lp = v?.last_price;
+          if (Number.isFinite(lp) && lp > 0) filtered[k] = v;
+        });
+        quotes = filtered;
+      }
 
       // Cache result
       await this.redisService.cacheQuote(
@@ -301,6 +311,7 @@ export class NativeWebSocketGateway implements OnGatewayInit, OnGatewayConnectio
         data: quotes,
         cached: false,
         timestamp: new Date().toISOString(),
+        ltp_only: !!ltp_only,
       });
     } catch (error) {
       this.logger.error('Error fetching quotes', error);

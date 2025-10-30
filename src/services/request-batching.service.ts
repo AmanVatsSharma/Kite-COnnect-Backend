@@ -163,7 +163,29 @@ export class RequestBatchingService {
 
       this.logger.log(`[Batching] Batch completed: ${requests.length} requests → ${batchedCalls} provider calls (${reductionPercentage.toFixed(1)}% reduction) in ${totalTime}ms`);
 
-      // Resolve all requests with their respective data
+      // Enrichment pass: ensure last_price present; do one provider.getLTP call for missing
+      try {
+        const missingTokens = Array.from(new Set<string>(
+          Array.from(results.entries())
+            .filter(([, v]) => !Number.isFinite((v as any)?.last_price) || (((v as any)?.last_price ?? 0) <= 0))
+            .map(([k]) => k)
+        ));
+        if (missingTokens.length) {
+          this.logger.warn(`[Batching] Missing LTP for ${missingTokens.length}/${results.size} tokens → fetching LTP fallback`);
+          const ltpMap = await provider.getLTP(missingTokens);
+          for (const tok of missingTokens) {
+            const lv = ltpMap?.[tok]?.last_price;
+            if (Number.isFinite(lv) && lv > 0) {
+              const orig = results.get(tok) || {};
+              results.set(tok, { ...(orig as any), last_price: lv });
+            }
+          }
+        }
+      } catch (enrichErr) {
+        this.logger.warn('[Batching] LTP enrichment failed (non-fatal)', enrichErr as any);
+      }
+
+      // Resolve all requests with their respective data (after enrichment)
       requests.forEach(request => {
         const requestData: any = {};
         request.tokens.forEach(token => {

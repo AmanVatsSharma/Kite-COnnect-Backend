@@ -38,6 +38,17 @@ socket.emit('subscribe', {
   mode: 'ltp' // Modes: 'ltp', 'ohlcv', 'full'
 });
 
+## LTP-only filtering
+
+All REST and WebSocket quote responses now include `last_price` when available. You can request only instruments with a valid LTP using the optional flag below:
+
+- REST: `POST /api/stock/quotes?mode=full&ltp_only=true`
+- WebSocket snapshot: `socket.emit('get_quote', { instruments: [...], ltp_only: true })`
+
+Behavior:
+- Instruments without a finite `last_price > 0` are omitted from the response when `ltp_only` is true.
+- The system attempts to enrich missing LTPs via a fallback LTP fetch before filtering.
+
 // Confirm subscription
 socket.on('subscription_confirmed', (data) => {
   console.log('Subscription confirmed for:', data.instruments);
