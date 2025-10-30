@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { Client } from 'pg';
+import { parse as csvParse } from 'csv-parse/sync';
 
 type InstrumentRow = {
   instrument_token: number;
@@ -116,37 +117,114 @@ async function backfill() {
   // eslint-disable-next-line no-console
   console.log(`[indexer] starting backfill, batchSize=${batchSize}`);
 
-  const total = await withPg(async (pg) => {
-    const res = await pg.query('SELECT COUNT(*)::int AS n FROM instruments WHERE is_active = true');
-    return res.rows[0].n as number;
-  });
+  let usedSource: 'postgres' | 'csv' | 'none' = 'none';
+  let total = 0;
+  try {
+    total = await withPg(async (pg) => {
+      const res = await pg.query('SELECT COUNT(*)::int AS n FROM instruments WHERE is_active = true');
+      return res.rows[0].n as number;
+    });
+  } catch (e: any) {
+    // eslint-disable-next-line no-console
+    console.log(`[indexer] Postgres not reachable (${e?.message}). Will try CSV if available.`);
+    total = 0;
+  }
   // eslint-disable-next-line no-console
   console.log(`[indexer] active instruments=${total}`);
 
-  let offset = 0;
-  while (offset < total) {
-    const rows = await withPg(async (pg) => {
-      const res = await pg.query<InstrumentRow>(
-        `SELECT instrument_token, tradingsymbol, name, exchange, segment, instrument_type, expiry, strike, lot_size, is_active, updated_at
-         FROM instruments WHERE is_active = true ORDER BY instrument_token ASC OFFSET $1 LIMIT $2`,
-        [offset, batchSize],
+  if (total > 0) {
+    usedSource = 'postgres';
+    let offset = 0;
+    while (offset < total) {
+      const rows = await withPg(async (pg) => {
+        const res = await pg.query<InstrumentRow>(
+          `SELECT instrument_token, tradingsymbol, name, exchange, segment, instrument_type, expiry, strike, lot_size, is_active, updated_at
+           FROM instruments WHERE is_active = true ORDER BY instrument_token ASC OFFSET $1 LIMIT $2`,
+          [offset, batchSize],
+        );
+        return res.rows;
+      });
+      if (!rows.length) break;
+      const docs = rows.map(toDoc);
+      await axios.post(
+        `${meiliBase}/indexes/${index}/documents?primaryKey=instrumentToken`,
+        docs,
+        { headers },
       );
-      return res.rows;
-    });
-    if (!rows.length) break;
-    const docs = rows.map(toDoc);
-    await axios.post(
-      `${meiliBase}/indexes/${index}/documents?primaryKey=instrumentToken`,
-      docs,
-      { headers },
-    );
-    offset += rows.length;
+      offset += rows.length;
+      // eslint-disable-next-line no-console
+      console.log(`[indexer] upserted ${offset}/${total}`);
+    }
     // eslint-disable-next-line no-console
-    console.log(`[indexer] upserted ${offset}/${total}`);
+    console.log('[indexer] backfill complete (postgres)');
+    return;
   }
 
+  // Fallback: CSV-based backfill
+  const csvUrl = env('INDEXER_CSV_URL') || env('VORTEX_INSTRUMENTS_CSV_URL');
+  if (!csvUrl) {
+    // eslint-disable-next-line no-console
+    console.log('[indexer] No Postgres data and no CSV URL provided. Skipping backfill.');
+    return;
+  }
+  usedSource = 'csv';
   // eslint-disable-next-line no-console
-  console.log('[indexer] backfill complete');
+  console.log(`[indexer] Falling back to CSV source: ${csvUrl}`);
+  const resp = await axios.get(csvUrl, { responseType: 'arraybuffer' });
+  const csv = resp.data instanceof Buffer ? resp.data.toString('utf8') : String(resp.data);
+  const records: any[] = csvParse(csv, { columns: true, skip_empty_lines: true });
+
+  const toDocFromAny = (r: any) => {
+    const pick = (keys: string[], def: any = undefined) => {
+      for (const k of keys) {
+        if (r[k] !== undefined && r[k] !== '') return r[k];
+      }
+      return def;
+    };
+    const toNum = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const token = toNum(pick(['instrument_token', 'instrumentToken', 'token']));
+    if (!token) return null;
+    return {
+      instrumentToken: token,
+      symbol: String(pick(['symbol', 'tradingsymbol', 'tradingSymbol'], '')),
+      tradingSymbol: String(pick(['tradingsymbol', 'tradingSymbol', 'symbol'], '')),
+      companyName: pick(['name', 'companyName'], ''),
+      exchange: pick(['exchange'], ''),
+      segment: pick(['segment'], ''),
+      instrumentType: pick(['instrument_type', 'instrumentType'], ''),
+      expiryDate: pick(['expiry', 'expiryDate'], undefined),
+      strike: toNum(pick(['strike'])),
+      lotSize: toNum(pick(['lot_size', 'lotSize'])),
+      isTradable: true,
+      searchKeywords: [
+        pick(['tradingsymbol', 'tradingSymbol', 'symbol'], ''),
+        pick(['name', 'companyName'], ''),
+      ].filter(Boolean),
+    };
+  };
+
+  const docs: any[] = [];
+  for (const r of records) {
+    const d = toDocFromAny(r);
+    if (d) docs.push(d);
+  }
+  // chunked upserts
+  const chunkSize = 2000;
+  for (let i = 0; i < docs.length; i += chunkSize) {
+    const chunk = docs.slice(i, i + chunkSize);
+    await axios.post(
+      `${meiliBase}/indexes/${index}/documents?primaryKey=instrumentToken`,
+      chunk,
+      { headers },
+    );
+    // eslint-disable-next-line no-console
+    console.log(`[indexer] csv upserted ${Math.min(i + chunk.length, docs.length)}/${docs.length}`);
+  }
+  // eslint-disable-next-line no-console
+  console.log('[indexer] backfill complete (csv)');
 }
 
 async function incremental() {
