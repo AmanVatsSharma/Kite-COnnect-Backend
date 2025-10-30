@@ -808,19 +808,77 @@ export class VortexInstrumentService {
         return {};
       }
 
-      // Convert token numbers to strings for VortexProviderService
-      const tokenStrings = tokens.map((t) => t.toString());
-
-      // Call VortexProviderService.getLTP()
-      const ltpData = await this.vortexProvider.getLTP(tokenStrings);
-
-      // Convert back to number-keyed format
-      const result: Record<number, { last_price: number }> = {};
-      for (const [tokenStr, priceData] of Object.entries(ltpData)) {
-        const tokenNum = parseInt(tokenStr);
-        if (Number.isFinite(tokenNum) && priceData?.last_price) {
-          result[tokenNum] = { last_price: priceData.last_price };
+      // 1) Build authoritative exchange-token pairs from vortex_instruments
+      const rows = await this.vortexInstrumentRepo.find({
+        where: { token: In(tokens) },
+        select: ['token', 'exchange'],
+      });
+      const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
+      const pairKeyToToken = new Map<string, number>();
+      const pairs: Array<{ exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string }>
+        = [];
+      const found = new Set<number>();
+      for (const r of rows) {
+        const ex = String(r.exchange || '').toUpperCase();
+        const tok = String(r.token);
+        if (allowed.has(ex) && /^\d+$/.test(tok)) {
+          pairs.push({ exchange: ex as any, token: tok });
+          pairKeyToToken.set(`${ex}-${tok}`, r.token);
+          found.add(r.token);
         }
+      }
+
+      // 2) Fallback to instrument_mappings (provider=vortex) for missing tokens
+      const missing = tokens.filter((t) => !found.has(t));
+      if (missing.length) {
+        try {
+          const maps = await this.mappingRepo.find({
+            where: { provider: 'vortex', instrument_token: In(missing) } as any,
+            select: ['provider_token', 'instrument_token'] as any,
+          });
+          for (const m of maps) {
+            const key = String(m.provider_token || '').toUpperCase();
+            const [ex, tok] = key.split('-');
+            if (allowed.has(ex) && /^\d+$/.test(tok)) {
+              pairs.push({ exchange: ex as any, token: tok });
+              pairKeyToToken.set(`${ex}-${tok}`, m.instrument_token);
+              found.add(m.instrument_token);
+            }
+          }
+        } catch (e) {
+          this.logger.warn(
+            '[VortexInstrumentService] Mapping fallback failed; some tokens will use NSE_EQ',
+            e,
+          );
+        }
+      }
+
+      // 3) Last-resort fallback to NSE_EQ for any still-missing tokens (to avoid drops)
+      const stillMissing = tokens.filter((t) => !found.has(t));
+      for (const t of stillMissing) {
+        const tok = String(t);
+        if (/^\d+$/.test(tok)) {
+          pairs.push({ exchange: 'NSE_EQ', token: tok });
+          pairKeyToToken.set(`NSE_EQ-${tok}`, t);
+        }
+      }
+
+      // 4) Fetch LTP using explicit pairs (single or chunked calls handled by provider)
+      const ltpByPairKey = await this.vortexProvider.getLTPByPairs(pairs);
+
+      // 5) Convert back to number-keyed map
+      const result: Record<number, { last_price: number }> = {};
+      for (const [exToken, priceData] of Object.entries(ltpByPairKey || {})) {
+        const tokenNum = pairKeyToToken.get(exToken);
+        const lp = priceData?.last_price;
+        if (tokenNum !== undefined && Number.isFinite(lp) && (lp as any) > 0) {
+          result[tokenNum] = { last_price: lp as any };
+        }
+      }
+
+      // Ensure coverage for all input tokens
+      for (const t of tokens) {
+        if (!(t in result)) result[t] = { last_price: null as any };
       }
 
       return result;

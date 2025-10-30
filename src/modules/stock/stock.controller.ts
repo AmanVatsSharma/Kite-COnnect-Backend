@@ -1453,7 +1453,7 @@ export class StockController {
       const collected: Array<{ token: number; symbol: string; exchange: string; last_price: number | null }> = [];
       let currentOffset = startOffset;
       let hasMore = true;
-      const pageSize = Math.min(Math.max(requestedLimit, 50), 500);
+      const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
 
       while (collected.length < requestedLimit && hasMore) {
         const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
@@ -1570,7 +1570,7 @@ export class StockController {
       const collected: Array<{ token: number; symbol: string; exchange: string; expiry_date: any; last_price: number | null }> = [];
       let currentOffset = startOffset;
       let hasMore = true;
-      const pageSize = Math.min(Math.max(requestedLimit, 50), 500);
+      const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
 
       while (collected.length < requestedLimit && hasMore) {
         const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
@@ -1700,7 +1700,7 @@ export class StockController {
       const collected: Array<{ token: number; symbol: string; exchange: string; expiry_date: any; option_type?: string; strike_price?: number; last_price: number | null }> = [];
       let currentOffset = startOffset;
       let hasMore = true;
-      const pageSize = Math.min(Math.max(requestedLimit, 50), 500);
+      const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
 
       while (collected.length < requestedLimit && hasMore) {
         const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
@@ -1816,7 +1816,7 @@ export class StockController {
       const collected: Array<{ token: number; symbol: string; exchange: string; instrument_name: string; expiry_date: any; last_price: number | null }> = [];
       let currentOffset = startOffset;
       let hasMore = true;
-      const pageSize = Math.min(Math.max(requestedLimit, 50), 500);
+      const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
 
       while (collected.length < requestedLimit && hasMore) {
         const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
