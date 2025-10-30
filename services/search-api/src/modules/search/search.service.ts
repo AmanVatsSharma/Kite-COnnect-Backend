@@ -38,6 +38,7 @@ export class SearchService {
 
     const defaultHydratorHeaders: Record<string, string> = {};
     if (hydrateApiKey) defaultHydratorHeaders['x-api-key'] = hydrateApiKey;
+    defaultHydratorHeaders['x-provider'] = 'vayu';
     this.hydrator = axios.create({
       baseURL: hydrateBase,
       timeout: Number(process.env.HYDRATE_TIMEOUT_MS || 1500),
@@ -149,7 +150,9 @@ export class SearchService {
 
     if (toFetch.length) {
       try {
-        const url = `/api/stock/quotes?mode=${mode}&ltp_only=true`;
+        const url = mode === 'ltp'
+          ? '/api/stock/vayu/ltp'
+          : `/api/stock/quotes?mode=${mode}&ltp_only=true`;
         const resp = await this.hydrator.post(url, { instruments: toFetch });
         const data = resp.data?.data || {};
         Object.assign(result, data);
