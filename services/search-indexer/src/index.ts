@@ -161,7 +161,7 @@ async function backfill() {
   }
 
   // Fallback: CSV-based backfill
-  const csvUrl = env('INDEXER_CSV_URL') || env('VORTEX_INSTRUMENTS_CSV_URL');
+  const csvUrl = env('INDEXER_CSV_URL') || env('VORTEX_INSTRUMENTS_CSV_URL') || 'https://static.rupeezy.in/master.csv';
   if (!csvUrl) {
     // eslint-disable-next-line no-console
     console.log('[indexer] No Postgres data and no CSV URL provided. Skipping backfill.');
