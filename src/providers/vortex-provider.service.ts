@@ -170,9 +170,13 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       await this.rateLimit('quotes');
       // Build query q=exchange-token pairs using DB-backed exchange mapping
       const exMap = await this.getExchangesForTokens(tokens);
-      const qParams = tokens.map(t => `q=${encodeURIComponent(`${exMap.get(t) || 'NSE_EQ'}-${t}`)}`).join('&');
+      const qParams = tokens.map(t => {
+        const ex = exMap.get(t) || 'NSE_EQ';
+        return `q=${encodeURIComponent(`${ex}-${t}`)}`;
+      }).join('&');
       const mode = 'full';
       const url = `/data/quotes?${qParams}&mode=${mode}`;
+      this.logger.debug(`[Vortex] getQuote request: tokens=${tokens.length}, url=${url}`);
       const resp = await this.http.get(url, { headers: this.authHeaders() });
       const data = resp?.data?.data || {};
       const out: Record<string, any> = {};
@@ -199,6 +203,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
           this.logger.warn('[Vortex] LTP fallback during getQuote failed', e as any);
         }
       }
+      this.logger.debug(`[Vortex] getQuote result coverage: total=${tokens.length}, withLTP=${Object.values(out).filter(v => Number.isFinite((v as any)?.last_price) && (v as any).last_price > 0).length}`);
       return out;
     } catch (error) {
       this.logger.error('[Vortex] getQuote failed (non-fatal)', error as any);
@@ -215,17 +220,23 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       }
       await this.rateLimit('ltp');
       const exMap = await this.getExchangesForTokens(tokens);
-      const qParams = tokens.map(t => `q=${encodeURIComponent(`${exMap.get(t) || 'NSE_EQ'}-${t}`)}`).join('&');
+      const qParams = tokens.map(t => {
+        const ex = exMap.get(t) || 'NSE_EQ';
+        return `q=${encodeURIComponent(`${ex}-${t}`)}`;
+      }).join('&');
       const mode = 'ltp';
       const url = `/data/quotes?${qParams}&mode=${mode}`;
+      this.logger.debug(`[Vortex] getLTP request: tokens=${tokens.length}, url=${url}`);
       const resp = await this.http.get(url, { headers: this.authHeaders() });
       const data = resp?.data?.data || {};
       const out: Record<string, any> = {};
       for (const [exToken, quote] of Object.entries<any>(data)) {
         const tokenPart = exToken.split('-').pop();
         if (!tokenPart) continue;
-        out[tokenPart] = { last_price: quote?.last_trade_price };
+        const raw = Number(quote?.last_trade_price);
+        out[tokenPart] = { last_price: Number.isFinite(raw) && raw > 0 ? raw : null };
       }
+      this.logger.debug(`[Vortex] getLTP result coverage: total=${tokens.length}, withLTP=${Object.values(out).filter(v => Number.isFinite((v as any)?.last_price) && (v as any).last_price > 0).length}`);
       return out;
     } catch (error) {
       this.logger.error('[Vortex] getLTP failed (non-fatal)', error as any);
@@ -666,16 +677,26 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   }
 
   private normalizeQuote(q: any) {
-    return {
-      last_price: q?.last_trade_price,
+    const lp = Number(q?.last_trade_price);
+    const open = Number(q?.open_price);
+    const high = Number(q?.high_price);
+    const low = Number(q?.low_price);
+    const close = Number(q?.close_price);
+    const volume = Number(q?.volume);
+    const normalized = {
+      last_price: Number.isFinite(lp) && lp > 0 ? lp : null,
       ohlc: {
-        open: q?.open_price,
-        high: q?.high_price,
-        low: q?.low_price,
-        close: q?.close_price,
+        open: Number.isFinite(open) ? open : null,
+        high: Number.isFinite(high) ? high : null,
+        low: Number.isFinite(low) ? low : null,
+        close: Number.isFinite(close) ? close : null,
       },
-      volume: q?.volume,
-    };
+      volume: Number.isFinite(volume) && volume >= 0 ? volume : null,
+    } as any;
+    if (normalized.last_price === null) {
+      this.logger.debug('[Vortex] normalizeQuote: missing/invalid last_trade_price in provider response');
+    }
+    return normalized;
   }
 
   // Parse binary websocket packets per vortex_live.md
@@ -864,7 +885,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         const ex = this.normalizeExchange(r.exchange || r.segment || '');
         if (ex) map.set(String(r.instrument_token), ex);
       }
-      
+      // If an instrument explicitly indicates derivatives, prefer NSE_FO over NSE_EQ
+      // This avoids defaulting to NSE_EQ for FO/CUR/MCX instruments when DB has segment info
       // Log fallback usage for tokens not found in DB
       const notFound = tokens.filter(t => !map.has(t));
       if (notFound.length > 0) {

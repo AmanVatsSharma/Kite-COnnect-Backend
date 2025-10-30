@@ -276,6 +276,58 @@ export class StockService {
         instrumentTokens.map(token => token.toString()),
         provider,
       );
+      // Ensure all requested tokens exist in the result, even if provider missed them
+      for (const t of instrumentTokens) {
+        const key = t.toString();
+        if (!(key in quotes)) {
+          quotes[key] = { last_price: null };
+        } else if (!('last_price' in quotes[key])) {
+          quotes[key].last_price = null;
+        }
+      }
+
+      // Enrich missing LTPs using recent stream cache, then provider LTP as last resort
+      const missing = Object.entries(quotes)
+        .filter(([, v]: any) => !Number.isFinite(v?.last_price) || (v?.last_price ?? 0) <= 0)
+        .map(([k]) => k);
+
+      if (missing.length) {
+        this.logger.warn(`[StockService] Quotes missing LTP for ${missing.length}/${instrumentTokens.length} tokens → trying Redis last_tick cache`);
+        // Attempt to fill from Redis last_tick
+        const filledFromCache: string[] = [];
+        for (const tok of missing) {
+          try {
+            const cache = await this.redisService.get(`last_tick:${tok}`);
+            const lp = Number(cache?.last_price);
+            if (Number.isFinite(lp) && lp > 0) {
+              quotes[tok] = { ...(quotes[tok] || {}), last_price: lp };
+              filledFromCache.push(tok);
+            }
+          } catch (e) {
+            this.logger.debug(`[StockService] Redis last_tick fetch failed for ${tok}`);
+          }
+        }
+
+        // Remaining missing after cache
+        const stillMissing = missing.filter(t => !filledFromCache.includes(t));
+        if (stillMissing.length) {
+          this.logger.warn(`[StockService] Still missing LTP for ${stillMissing.length} tokens → requesting provider LTP batch`);
+          try {
+            const ltpMap = await this.requestBatchingService.getLTP(stillMissing, provider);
+            let filled = 0;
+            for (const tok of stillMissing) {
+              const lp = Number(ltpMap?.[tok]?.last_price);
+              if (Number.isFinite(lp) && lp > 0) {
+                quotes[tok] = { ...(quotes[tok] || {}), last_price: lp };
+                filled++;
+              }
+            }
+            this.logger.log(`[StockService] LTP fallback filled ${filled}/${stillMissing.length} tokens`);
+          } catch (e) {
+            this.logger.warn('[StockService] Provider LTP fallback failed', e as any);
+          }
+        }
+      }
 
       // Cache the result
       await this.redisService.cacheQuote(
