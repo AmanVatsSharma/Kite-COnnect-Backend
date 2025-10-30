@@ -1107,7 +1107,8 @@ export class StockController {
 
   @Get('vayu/options/chain/:symbol')
   @ApiOperation({ summary: 'Get options chain for a symbol' })
-  async getVortexOptionsChain(@Param('symbol') symbol: string) {
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only options with valid last_price are returned' })
+  async getVortexOptionsChain(@Param('symbol') symbol: string, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       const result =
         await this.vortexInstrumentService.getVortexOptionsChain(symbol);
@@ -1143,6 +1144,23 @@ export class StockController {
         }
       }
 
+      // Optional filter by LTP
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      if (ltpOnly) {
+        for (const [expiry, strikes] of Object.entries(optionsWithPrices)) {
+          for (const [strikeStr, optionPair] of Object.entries(strikes)) {
+            const ceOk = Number.isFinite((optionPair as any)?.CE?.last_price) && (((optionPair as any)?.CE?.last_price ?? 0) > 0);
+            const peOk = Number.isFinite((optionPair as any)?.PE?.last_price) && (((optionPair as any)?.PE?.last_price ?? 0) > 0);
+            if (!ceOk && !peOk) {
+              delete (strikes as any)[strikeStr];
+            }
+          }
+          if (Object.keys(strikes).length === 0) {
+            delete (optionsWithPrices as any)[expiry];
+          }
+        }
+      }
+
       return {
         success: true,
         data: {
@@ -1153,6 +1171,7 @@ export class StockController {
           performance: {
             queryTime: result.queryTime,
           },
+          ltp_only: ltpOnly || false,
         },
       };
     } catch (error) {
@@ -1183,7 +1202,8 @@ export class StockController {
       required: ['tokens'],
     },
   })
-  async getVortexInstrumentsBatch(@Body() body: { tokens: number[] }) {
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
+  async getVortexInstrumentsBatch(@Body() body: { tokens: number[] }, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       if (
         !body.tokens ||
@@ -1208,30 +1228,37 @@ export class StockController {
           body.tokens,
         );
 
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+
+      // Build and optionally filter entries by LTP
+      const entries = Object.entries(result.instruments).map(([token, instrument]) => [
+        token,
+        {
+          token: instrument.token,
+          symbol: instrument.symbol,
+          exchange: instrument.exchange,
+          instrument_name: instrument.instrument_name,
+          expiry_date: instrument.expiry_date,
+          option_type: instrument.option_type,
+          strike_price: instrument.strike_price,
+          tick: instrument.tick,
+          lot_size: instrument.lot_size,
+          last_price: result.ltp?.[instrument.token]?.last_price ?? null,
+        },
+      ] as const);
+      const filteredEntries = ltpOnly
+        ? entries.filter(([, v]) => Number.isFinite((v as any)?.last_price) && (((v as any)?.last_price ?? 0) > 0))
+        : entries;
+
       return {
         success: true,
         data: {
-          instruments: Object.fromEntries(
-            Object.entries(result.instruments).map(([token, instrument]) => [
-              token,
-              {
-                token: instrument.token,
-                symbol: instrument.symbol,
-                exchange: instrument.exchange,
-                instrument_name: instrument.instrument_name,
-                expiry_date: instrument.expiry_date,
-                option_type: instrument.option_type,
-                strike_price: instrument.strike_price,
-                tick: instrument.tick,
-                lot_size: instrument.lot_size,
-                last_price: result.ltp?.[instrument.token]?.last_price ?? null,
-              },
-            ]),
-          ),
+          instruments: Object.fromEntries(filteredEntries),
           ltp: result.ltp,
           performance: {
             queryTime: result.queryTime,
           },
+          ltp_only: ltpOnly || false,
         },
       };
     } catch (error) {
@@ -1259,11 +1286,13 @@ export class StockController {
   })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
   async getVortexEquities(
     @Query('q') q?: string,
     @Query('exchange') exchange?: string,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
       const filters = {
@@ -1285,19 +1314,26 @@ export class StockController {
           ? await this.vortexInstrumentService.getVortexLTP(tokens)
           : {};
 
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const list = result.instruments.map((i) => ({
+        token: i.token,
+        symbol: i.symbol,
+        exchange: i.exchange,
+        last_price: ltp?.[i.token]?.last_price ?? null,
+      }));
+      const filtered = ltpOnly
+        ? list.filter((v) => Number.isFinite((v as any)?.last_price) && (((v as any)?.last_price ?? 0) > 0))
+        : list;
+
       return {
         success: true,
         data: {
-          instruments: result.instruments.map((i) => ({
-            token: i.token,
-            symbol: i.symbol,
-            exchange: i.exchange,
-            last_price: ltp?.[i.token]?.last_price ?? null,
-          })),
+          instruments: filtered,
           pagination: {
             total: result.total,
             hasMore: result.hasMore,
           },
+          ltp_only: ltpOnly || false,
         },
       };
     } catch (error) {
@@ -1332,6 +1368,7 @@ export class StockController {
   })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
   async getVortexFutures(
     @Query('q') q?: string,
     @Query('exchange') exchange?: string,
@@ -1339,6 +1376,7 @@ export class StockController {
     @Query('expiry_to') expiry_to?: string,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
       const filters = {
@@ -1362,20 +1400,27 @@ export class StockController {
           ? await this.vortexInstrumentService.getVortexLTP(tokens)
           : {};
 
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const list = result.instruments.map((i) => ({
+        token: i.token,
+        symbol: i.symbol,
+        exchange: i.exchange,
+        expiry_date: i.expiry_date,
+        last_price: ltp?.[i.token]?.last_price ?? null,
+      }));
+      const filtered = ltpOnly
+        ? list.filter((v) => Number.isFinite((v as any)?.last_price) && (((v as any)?.last_price ?? 0) > 0))
+        : list;
+
       return {
         success: true,
         data: {
-          instruments: result.instruments.map((i) => ({
-            token: i.token,
-            symbol: i.symbol,
-            exchange: i.exchange,
-            expiry_date: i.expiry_date,
-            last_price: ltp?.[i.token]?.last_price ?? null,
-          })),
+          instruments: filtered,
           pagination: {
             total: result.total,
             hasMore: result.hasMore,
           },
+          ltp_only: ltpOnly || false,
         },
       };
     } catch (error) {
@@ -1413,6 +1458,7 @@ export class StockController {
   @ApiQuery({ name: 'strike_max', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
   async getVortexOptions(
     @Query('q') q?: string,
     @Query('exchange') exchange?: string,
@@ -1423,6 +1469,7 @@ export class StockController {
     @Query('strike_max') strike_max?: number,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
       const filters = {
@@ -1449,22 +1496,29 @@ export class StockController {
           ? await this.vortexInstrumentService.getVortexLTP(tokens)
           : {};
 
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const list = result.instruments.map((i) => ({
+        token: i.token,
+        symbol: i.symbol,
+        exchange: i.exchange,
+        expiry_date: i.expiry_date,
+        option_type: i.option_type,
+        strike_price: i.strike_price,
+        last_price: ltp?.[i.token]?.last_price ?? null,
+      }));
+      const filtered = ltpOnly
+        ? list.filter((v) => Number.isFinite((v as any)?.last_price) && (((v as any)?.last_price ?? 0) > 0))
+        : list;
+
       return {
         success: true,
         data: {
-          instruments: result.instruments.map((i) => ({
-            token: i.token,
-            symbol: i.symbol,
-            exchange: i.exchange,
-            expiry_date: i.expiry_date,
-            option_type: i.option_type,
-            strike_price: i.strike_price,
-            last_price: ltp?.[i.token]?.last_price ?? null,
-          })),
+          instruments: filtered,
           pagination: {
             total: result.total,
             hasMore: result.hasMore,
           },
+          ltp_only: ltpOnly || false,
         },
       };
     } catch (error) {
@@ -1494,12 +1548,14 @@ export class StockController {
   })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
   async getVortexCommodities(
     @Query('q') q?: string,
     @Query('expiry_from') expiry_from?: string,
     @Query('expiry_to') expiry_to?: string,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
       const filters = {
@@ -1522,21 +1578,28 @@ export class StockController {
           ? await this.vortexInstrumentService.getVortexLTP(tokens)
           : {};
 
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const list = result.instruments.map((i) => ({
+        token: i.token,
+        symbol: i.symbol,
+        exchange: i.exchange,
+        instrument_name: i.instrument_name,
+        expiry_date: i.expiry_date,
+        last_price: ltp?.[i.token]?.last_price ?? null,
+      }));
+      const filtered = ltpOnly
+        ? list.filter((v) => Number.isFinite((v as any)?.last_price) && (((v as any)?.last_price ?? 0) > 0))
+        : list;
+
       return {
         success: true,
         data: {
-          instruments: result.instruments.map((i) => ({
-            token: i.token,
-            symbol: i.symbol,
-            exchange: i.exchange,
-            instrument_name: i.instrument_name,
-            expiry_date: i.expiry_date,
-            last_price: ltp?.[i.token]?.last_price ?? null,
-          })),
+          instruments: filtered,
           pagination: {
             total: result.total,
             hasMore: result.hasMore,
           },
+          ltp_only: ltpOnly || false,
         },
       };
     } catch (error) {
@@ -1559,20 +1622,28 @@ export class StockController {
     type: Number,
     description: 'Max instruments (default 50)',
   })
-  async getVortexPopularInstruments(@Query('limit') limit?: number) {
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
+  async getVortexPopularInstruments(@Query('limit') limit?: number, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       const result =
         await this.vortexInstrumentService.getVortexPopularInstrumentsCached(
           limit || 50,
         );
 
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const list = result.instruments;
+      const filtered = ltpOnly
+        ? list.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0))
+        : list;
+
       return {
         success: true,
         data: {
-          instruments: result.instruments,
+          instruments: filtered,
           performance: {
             queryTime: result.queryTime,
           },
+          ltp_only: ltpOnly || false,
         },
       };
     } catch (error) {
@@ -1656,7 +1727,8 @@ export class StockController {
     summary: 'Search Vayu tickers and return live price + metadata',
   })
   @ApiQuery({ name: 'q', required: true, example: 'NSE_EQ_RELIANCE' })
-  async searchVortexTickers(@Query('q') q: string) {
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only tickers with a valid last_price are returned' })
+  async searchVortexTickers(@Query('q') q: string, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       if (!q) {
         throw new HttpException(
@@ -1673,18 +1745,25 @@ export class StockController {
         ? await this.vortexInstrumentService.getVortexLTP(tokens)
         : {};
 
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const list = items.map((i) => ({
+        token: i.token,
+        symbol: i.symbol,
+        exchange: i.exchange,
+        instrument_name: i.instrument_name,
+        expiry_date: i.expiry_date,
+        option_type: i.option_type,
+        strike_price: i.strike_price,
+        last_price: ltp?.[i.token]?.last_price ?? null,
+      }));
+      const filtered = ltpOnly
+        ? list.filter((v) => Number.isFinite((v as any)?.last_price) && (((v as any)?.last_price ?? 0) > 0))
+        : list;
+
       return {
         success: true,
-        data: items.map((i) => ({
-          token: i.token,
-          symbol: i.symbol,
-          exchange: i.exchange,
-          instrument_name: i.instrument_name,
-          expiry_date: i.expiry_date,
-          option_type: i.option_type,
-          strike_price: i.strike_price,
-          last_price: ltp?.[i.token]?.last_price ?? null,
-        })),
+        data: filtered,
+        ltp_only: ltpOnly || false,
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
@@ -1704,7 +1783,8 @@ export class StockController {
     summary:
       'Get live price and metadata by Vayu ticker (e.g., NSE_EQ_RELIANCE)',
   })
-  async getVortexTickerBySymbol(@Param('symbol') symbol: string) {
+  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, returns 404 when LTP is unavailable for the symbol' })
+  async getVortexTickerBySymbol(@Param('symbol') symbol: string, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       const { instrument } =
         await this.vortexInstrumentService.resolveVortexSymbol(symbol);
@@ -1718,6 +1798,14 @@ export class StockController {
       const ltp = await this.vortexInstrumentService.getVortexLTP([
         instrument.token,
       ]);
+      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const lastPrice = ltp?.[instrument.token]?.last_price ?? null;
+      if (ltpOnly && !(Number.isFinite(lastPrice) && ((lastPrice as any) > 0))) {
+        throw new HttpException(
+          { success: false, message: 'LTP not available for requested symbol (ltp_only=true)' },
+          HttpStatus.NOT_FOUND,
+        );
+      }
 
       return {
         success: true,
@@ -1729,8 +1817,9 @@ export class StockController {
           expiry_date: instrument.expiry_date,
           option_type: instrument.option_type,
           strike_price: instrument.strike_price,
-          last_price: ltp?.[instrument.token]?.last_price ?? null,
+          last_price: lastPrice,
         },
+        ltp_only: ltpOnly || false,
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
