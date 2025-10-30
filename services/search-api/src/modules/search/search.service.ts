@@ -26,6 +26,7 @@ export class SearchService {
     const meiliKey = process.env.MEILI_MASTER_KEY || '';
     const hydrateBase =
       process.env.HYDRATION_BASE_URL || 'http://trading-app:3000';
+    const hydrateApiKey = process.env.HYDRATION_API_KEY || 'milli-key-1';
     const redisHost = process.env.REDIS_HOST || 'redis';
     const redisPort = Number(process.env.REDIS_PORT || 6379);
 
@@ -35,9 +36,12 @@ export class SearchService {
       timeout: Number(process.env.MEILI_TIMEOUT_MS || 1200),
     });
 
+    const defaultHydratorHeaders: Record<string, string> = {};
+    if (hydrateApiKey) defaultHydratorHeaders['x-api-key'] = hydrateApiKey;
     this.hydrator = axios.create({
       baseURL: hydrateBase,
       timeout: Number(process.env.HYDRATE_TIMEOUT_MS || 1500),
+      headers: defaultHydratorHeaders,
     });
 
     // Console logs for runtime visibility
@@ -45,6 +49,8 @@ export class SearchService {
     console.log('SearchService meiliHost=', meiliHost);
     // eslint-disable-next-line no-console
     console.log('SearchService hydrateBase=', hydrateBase);
+    // eslint-disable-next-line no-console
+    console.log('SearchService hydration x-api-key set=', Boolean(hydrateApiKey));
 
     try {
       this.redis = new Redis({ host: redisHost, port: redisPort, lazyConnect: true });

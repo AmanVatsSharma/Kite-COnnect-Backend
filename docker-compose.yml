@@ -133,6 +133,7 @@ services:
       - MEILI_HOST=http://meilisearch:7700
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
       - HYDRATION_BASE_URL=http://trading-app:3000
+      - HYDRATION_API_KEY=${HYDRATION_API_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     ports:
