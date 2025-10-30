@@ -223,12 +223,12 @@ export class StockController {
   }
 
   @Post('quotes')
-  @ApiOperation({ summary: 'Get quotes for instruments with mode selection (ltp|ohlc|full)' })
+  @ApiOperation({ summary: 'Get quotes for instruments with mode selection (ltp|ohlc|full) and optional LTP-only filtering', description: 'Returns a map of token → quote object. The system enriches missing LTP via Vayu (Vortex) with a single fallback request before responding. If ltp_only=true, instruments without a valid last_price are omitted.' })
   @ApiHeader({ name: 'x-provider', required: false, description: 'Force provider for this request: falcon|vayu' })
   @ApiQuery({ name: 'mode', required: false, example: 'full', description: 'ltp | ohlc | full (default: full)' })
   @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
   @ApiBody({ schema: { properties: { instruments: { type: 'array', items: { type: 'number' }, example: [738561, 5633] } } } })
-  @ApiResponse({ status: 200, description: 'Quote data response' })
+  @ApiResponse({ status: 200, description: 'Quote data response. When ltp_only=true, only instruments with last_price are returned.' })
   async getQuotes(@Body() body: { instruments: number[] }, @Request() req: any, @Query('mode') mode?: 'ltp' | 'ohlc' | 'full', @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       const { instruments } = body;
