@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { Client } from 'pg';
-import { parse as csvParse } from 'csv-parse/sync';
 
 type InstrumentRow = {
   instrument_token: number;
@@ -15,6 +14,53 @@ type InstrumentRow = {
   is_active: boolean;
   updated_at: string;
 };
+
+// Lightweight CSV parser (header-based) with quoted field support and escaped quotes
+function splitCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result.map((s) => s.trim());
+}
+
+function parseCsv(text: string): Record<string, string>[] {
+  const lines = text
+    .split(/\r?\n/)
+    .filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  // Remove UTF-8 BOM if present
+  if (lines[0].charCodeAt(0) === 0xfeff) {
+    lines[0] = lines[0].slice(1);
+  }
+  const header = splitCsvLine(lines[0]);
+  const rows: Record<string, string>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const parts = splitCsvLine(lines[i]);
+    const row: Record<string, string> = {};
+    for (let j = 0; j < header.length; j++) {
+      row[header[j]] = parts[j] ?? '';
+    }
+    rows.push(row);
+  }
+  return rows;
+}
 
 function env(key: string, def?: string) {
   const v = process.env[key];
@@ -172,7 +218,7 @@ async function backfill() {
   console.log(`[indexer] Falling back to CSV source: ${csvUrl}`);
   const resp = await axios.get(csvUrl, { responseType: 'arraybuffer' });
   const csv = resp.data instanceof Buffer ? resp.data.toString('utf8') : String(resp.data);
-  const records: any[] = csvParse(csv, { columns: true, skip_empty_lines: true });
+  const records: any[] = parseCsv(csv);
 
   const toDocFromAny = (r: any) => {
     const pick = (keys: string[], def: any = undefined) => {
