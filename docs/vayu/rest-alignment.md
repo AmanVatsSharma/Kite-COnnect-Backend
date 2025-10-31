@@ -13,6 +13,14 @@
 - POST /api/stock/ohlc
 - GET /api/stock/historical/:token?from=YYYY-MM-DD&to=YYYY-MM-DD&interval=day|minute|…
 
+- POST /api/stock/vayu/ltp
+  - Body (either):
+    - { instruments: number[] } → returns token-keyed map `{ [token]: { last_price } }`
+    - { pairs: [{ exchange: 'NSE_EQ'|'NSE_FO'|'NSE_CUR'|'MCX_FO', token: string|number }] } → returns pair-keyed map `{ ['EXCHANGE-TOKEN']: { last_price } }`
+  - Notes:
+    - `instruments` path is used by milli-search hydration; exchange is resolved from DB with fallback to NSE_EQ
+    - Max 1000 tokens/pairs per request; internally batched and rate-limited (1 req/sec)
+
 ### Query Mapping to Vortex
 - Quotes: GET /data/quotes?q=EXCHANGE-TOKEN&mode=mode
 - History: GET /data/history?exchange=EXCHANGE&token=TOKEN&from=UNIX&to=UNIX&resolution=RES

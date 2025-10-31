@@ -974,6 +974,13 @@ export class StockController {
     schema: {
       type: 'object',
       properties: {
+        instruments: {
+          type: 'array',
+          items: { oneOf: [{ type: 'number' }, { type: 'string' }] },
+          description:
+            'Optional: Array of instrument tokens (numeric). If provided, will return token-keyed LTP map.',
+          example: [738561, 26000],
+        },
         pairs: {
           type: 'array',
           items: {
@@ -987,11 +994,60 @@ export class StockController {
           description: 'Array of { exchange, token } objects',
         },
       },
-      required: ['pairs'],
+      required: [],
     },
   })
   async postVayuLtp(@Body() body: { pairs: Array<{ exchange: string; token: string | number }> }) {
     try {
+      // Allow two input modes:
+      // 1) instruments: number[]  → returns token-keyed map { [token]: { last_price } }
+      // 2) pairs: { exchange, token }[] → returns pair-keyed map { ['EXCHANGE-TOKEN']: { last_price } }
+
+      const hasInstruments = Array.isArray((body as any)?.instruments) && (body as any).instruments.length > 0;
+      if (hasInstruments) {
+        const raw = (body as any).instruments as Array<string | number>;
+        // Sanitize numeric tokens and enforce soft cap (1000)
+        const tokens = raw
+          .map((t) => String(t ?? '').trim())
+          .filter((t) => /^\d+$/.test(t));
+
+        if (tokens.length === 0) {
+          throw new HttpException(
+            {
+              success: false,
+              message: 'instruments must contain at least one numeric token',
+            },
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+
+        if (tokens.length > 1000) {
+          throw new HttpException(
+            {
+              success: false,
+              message: 'Maximum 1000 instruments allowed per request',
+            },
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+
+        const startedAt = Date.now();
+        // eslint-disable-next-line no-console
+        console.log('[Vayu LTP] instruments mode:', { count: tokens.length });
+        const data = await this.vortexProvider.getLTP(tokens);
+        const elapsed = Date.now() - startedAt;
+        this.vortexProvider['logger']?.log?.(
+          `[Vayu LTP] instruments served: ${tokens.length} tokens in ${elapsed}ms`,
+        );
+        return {
+          success: true,
+          data,
+          count: Object.keys(data || {}).length,
+          timestamp: new Date().toISOString(),
+          mode: 'instruments',
+        };
+      }
+
       const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
       const pairs = Array.isArray(body?.pairs) ? body.pairs : [];
       const sanitized = pairs
@@ -1007,7 +1063,7 @@ export class StockController {
           {
             success: false,
             message:
-              'pairs is required and must contain at least one valid { exchange, token } (e.g., { exchange: "NSE_EQ", token: 22 })',
+              'Either provide instruments: number[] or non-empty pairs: [{ exchange, token }]',
           },
           HttpStatus.BAD_REQUEST,
         );
@@ -1019,6 +1075,7 @@ export class StockController {
         data,
         count: Object.keys(data || {}).length,
         timestamp: new Date().toISOString(),
+        mode: 'pairs',
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;

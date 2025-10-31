@@ -15,4 +15,10 @@
 ### ltp_only filter
 - If true, instruments with null/<=0 last_price are omitted from output.
 
+### Token vs Pair semantics
+- `/api/stock/vayu/ltp` supports:
+  - `instruments` (token array) → response keyed by token (e.g., `{ "738561": { last_price: 123.45 } }`)
+  - `pairs` (exchange-token array) → response keyed by `EXCHANGE-TOKEN` (e.g., `{ "NSE_EQ-738561": { last_price: 123.45 } }`)
+- Milli-search uses `instruments`; other tools may use explicit `pairs` when exchange context is required.
+
 
