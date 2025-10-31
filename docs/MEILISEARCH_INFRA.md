@@ -58,6 +58,7 @@ flowchart TD
 - Request timeout interceptor with configurable `HTTP_TIMEOUT_MS`
 - Hydration circuit breaker with `HYDRATE_CB_THRESHOLD`/`HYDRATE_CB_OPEN_MS`
 - Console logs at key steps for rapid debugging; Nest logger for structure
+- Suggest logs include query, ltp_only flag, enriched vs returned counts
 
 ## Operations (Local EC2)
 - No external backups; rebuild index via `search-indexer` backfill

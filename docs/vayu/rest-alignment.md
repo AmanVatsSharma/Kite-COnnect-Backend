@@ -21,6 +21,11 @@
     - `instruments` path is used by milli-search hydration; exchange is resolved from DB with fallback to NSE_EQ
     - Max 1000 tokens/pairs per request; internally batched and rate-limited (1 req/sec)
 
+### Suggest endpoint filters
+- `GET /api/search/suggest?q=&limit=&exchange=&segment=&instrumentType=&vortexExchange=&expiry_from=&expiry_to=&strike_min=&strike_max&ltp_only=`
+  - `ltp_only=true` returns only items with valid last_price
+  - Pair-based hydration is used when `vortexExchange` is present in the index documents
+
 ### Query Mapping to Vortex
 - Quotes: GET /data/quotes?q=EXCHANGE-TOKEN&mode=mode
 - History: GET /data/history?exchange=EXCHANGE&token=TOKEN&from=UNIX&to=UNIX&resolution=RES

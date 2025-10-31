@@ -291,6 +291,13 @@ export class SearchService {
     if (filters.exchange) parts.push(`exchange = ${JSON.stringify(filters.exchange)}`);
     if (filters.segment) parts.push(`segment = ${JSON.stringify(filters.segment)}`);
     if (filters.instrumentType) parts.push(`instrumentType = ${JSON.stringify(filters.instrumentType)}`);
+    if (filters.vortexExchange) parts.push(`vortexExchange = ${JSON.stringify(filters.vortexExchange)}`);
+    // Expiry date range (expects ISO-like strings)
+    if (filters.expiry_from) parts.push(`expiryDate >= ${JSON.stringify(filters.expiry_from)}`);
+    if (filters.expiry_to) parts.push(`expiryDate <= ${JSON.stringify(filters.expiry_to)}`);
+    // Strike price range
+    if (Number.isFinite(Number(filters.strike_min))) parts.push(`strike >= ${Number(filters.strike_min)}`);
+    if (Number.isFinite(Number(filters.strike_max))) parts.push(`strike <= ${Number(filters.strike_max)}`);
     return parts.length ? parts.join(' AND ') : undefined;
   }
 

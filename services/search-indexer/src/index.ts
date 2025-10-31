@@ -152,6 +152,17 @@ async function applyIndexSettings(meiliBase: string, apiKey: string, index: stri
         'attribute',
         'exactness',
       ],
+      synonyms: {
+        NIFTY: ['NIFTY50', 'NIFTY 50'],
+        BANKNIFTY: ['BANK NIFTY', 'BANK-NIFTY'],
+        RELIANCE: ['RELI'],
+        SBIN: ['STATE BANK', 'STATE BANK OF INDIA'],
+        INFY: ['INFOSYS'],
+        TCS: ['TATA CONSULTANCY', 'TATA CONSULTANCY SERVICES'],
+        HDFCBANK: ['HDFC BANK'],
+        ICICIBANK: ['ICICI BANK'],
+        LT: ['LARSEN & TOUBRO', 'LARSEN AND TOUBRO'],
+      },
       // Note: synonyms can be extended later by writing to /settings/synonyms
     },
     { headers: h },
