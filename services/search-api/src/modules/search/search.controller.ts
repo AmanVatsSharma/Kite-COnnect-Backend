@@ -13,7 +13,7 @@ export class SearchController {
   private readonly logger = new Logger('SearchController');
   constructor(private readonly searchService: SearchService) {}
 
-  // GET /api/search?q&exchange&segment&instrumentType&limit
+  // GET /api/search?q&exchange&segment&instrumentType&limit&vortexExchange&expiry_from&expiry_to&strike_min&strike_max&ltp_only
   @Get()
   async search(
     @Query('q') q: string,
@@ -21,6 +21,12 @@ export class SearchController {
     @Query('exchange') exchange?: string,
     @Query('segment') segment?: string,
     @Query('instrumentType') instrumentType?: string,
+    @Query('vortexExchange') vortexExchange?: string,
+    @Query('expiry_from') expiry_from?: string,
+    @Query('expiry_to') expiry_to?: string,
+    @Query('strike_min') strike_min?: string,
+    @Query('strike_max') strike_max?: string,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     if (!q || q.trim().length === 0) {
       throw new HttpException(
@@ -29,10 +35,21 @@ export class SearchController {
       );
     }
     const limit = Math.min(Number(limitRaw || 10), 50);
-    const filters: any = { exchange, segment, instrumentType };
+    const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+    const filters: any = {
+      exchange,
+      segment,
+      instrumentType,
+      vortexExchange,
+      expiry_from,
+      expiry_to,
+      strike_min,
+      strike_max,
+    };
     const items = await this.searchService.searchInstruments(q.trim(), limit, filters);
     // Prefer pair-based hydration when vortexExchange is present
-    const topItems = items.slice(0, Math.min(limit, 10));
+    const hydrateCount = ltpOnly ? Math.min(limit, 50) : Math.min(limit, 10);
+    const topItems = items.slice(0, hydrateCount);
     const hasVortexEx = topItems.some((i: any) => i?.vortexExchange);
     const quotes = hasVortexEx
       ? await this.searchService.hydrateLtpByPairs(topItems as any)
@@ -40,14 +57,17 @@ export class SearchController {
           topItems.map((i) => i.instrumentToken),
           'ltp',
         );
-    return {
-      success: true,
-      data: items.map((it: any) => ({
-        ...it,
-        last_price: quotes?.[String(it.instrumentToken)]?.last_price ?? null,
-      })),
-      timestamp: new Date().toISOString(),
-    };
+    const enriched = items.map((it: any) => ({
+      ...it,
+      last_price: quotes?.[String(it.instrumentToken)]?.last_price ?? null,
+    }));
+    const data = ltpOnly
+      ? enriched.filter((v: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0)
+      : enriched;
+    this.logger.log(
+      `[Search] q="${q}" limit=${limit} ltp_only=${ltpOnly} hydrated=${topItems.length} returned=${data.length}`,
+    );
+    return { success: true, data, timestamp: new Date().toISOString() };
   }
 
   // GET /api/search/suggest?q&limit
