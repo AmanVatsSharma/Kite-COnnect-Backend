@@ -913,6 +913,89 @@ export class StockController {
 
   // ===== VAYU-SPECIFIC ENDPOINTS =====
 
+  @Get('vayu/health')
+  @ApiOperation({ summary: 'Vayu provider health and debug status' })
+  async getVayuHealth() {
+    try {
+      const ping = await this.vortexProvider.ping();
+      const status = this.vortexProvider.getDebugStatus();
+      // eslint-disable-next-line no-console
+      console.log('[Vayu Health]', { ping, status });
+      return { success: true, ping, status, timestamp: new Date().toISOString() };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Vayu health check failed', error: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('vayu/debug/resolve')
+  @ApiOperation({ summary: 'Resolve exchanges for tokens with source attribution' })
+  @ApiQuery({ name: 'tokens', required: true, example: '738561,135938' })
+  async debugResolve(@Query('tokens') tokens?: string) {
+    try {
+      const ids = String(tokens || '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter((s) => /^\d+$/.test(s))
+        .slice(0, 1000);
+      if (!ids.length) {
+        throw new HttpException(
+          { success: false, message: 'tokens query param required (comma-separated numeric tokens)' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const resolution = await this.vortexProvider.debugResolveExchanges(ids);
+      // eslint-disable-next-line no-console
+      console.log('[Vayu Debug Resolve]', { count: resolution.length });
+      return { success: true, data: resolution, count: resolution.length, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Debug resolve failed', error: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('vayu/debug/build-q')
+  @ApiOperation({ summary: 'Build Vortex quotes query for tokens (debug)' })
+  @ApiQuery({ name: 'tokens', required: true, example: '738561,135938' })
+  @ApiQuery({ name: 'mode', required: false, example: 'ltp', description: 'ltp|ohlc|full' })
+  async debugBuildQ(@Query('tokens') tokens?: string, @Query('mode') mode?: 'ltp' | 'ohlc' | 'full') {
+    try {
+      const ids = String(tokens || '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter((s) => /^\d+$/.test(s))
+        .slice(0, 1000);
+      if (!ids.length) {
+        throw new HttpException(
+          { success: false, message: 'tokens query param required (comma-separated numeric tokens)' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const m = (String(mode || 'ltp').toLowerCase() as 'ltp' | 'ohlc' | 'full');
+      if (!['ltp', 'ohlc', 'full'].includes(m)) {
+        throw new HttpException(
+          { success: false, message: 'mode must be one of ltp|ohlc|full' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const result = await this.vortexProvider.debugBuildQuery(ids, m);
+      // eslint-disable-next-line no-console
+      console.log('[Vayu Debug BuildQ]', { stats: result.stats });
+      return { success: true, ...result, timestamp: new Date().toISOString() } as any;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Debug build-q failed', error: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Get('vayu/ltp')
   @ApiOperation({
     summary:

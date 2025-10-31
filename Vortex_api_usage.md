@@ -269,3 +269,88 @@ https://flow.rupeezy.in?applicationId=<YOUR_APPLICATION_ID>
 | `v`   | Array of volumes                                       |
 
 ---
+
+## Integration Debug & Verification Endpoints (Server)
+
+These are server-side helper endpoints to verify your Vayu ↔ Vortex integration in development and during ops. They do not belong to the Vortex public API; they are provided by this service.
+
+### Health
+
+- Method: GET
+- Endpoint: `/api/stock/vayu/health`
+- Returns provider reachability and runtime status (auth, http, ws flags)
+
+Example:
+```bash
+curl "$BASE/api/stock/vayu/health"
+```
+
+### Resolve Exchanges (Debug)
+
+- Method: GET
+- Endpoint: `/api/stock/vayu/debug/resolve?tokens=738561,135938`
+- Returns per-token exchange with source attribution.
+
+Example:
+```bash
+curl "$BASE/api/stock/vayu/debug/resolve?tokens=738561,135938"
+```
+
+Response shape:
+```json
+{
+  "success": true,
+  "data": [
+    { "token": "738561", "exchange": "NSE_EQ", "source": "vortex_instruments" },
+    { "token": "135938", "exchange": "NSE_FO", "source": "instrument_mappings" }
+  ]
+}
+```
+
+### Build Quotes Query (Debug)
+
+- Method: GET
+- Endpoint: `/api/stock/vayu/debug/build-q?tokens=738561,135938&mode=ltp|ohlc|full`
+- Returns `pairs`, constructed quotes URL path, and summary stats.
+
+Example:
+```bash
+curl "$BASE/api/stock/vayu/debug/build-q?tokens=738561,135938&mode=ltp"
+```
+
+Response shape:
+```json
+{
+  "success": true,
+  "pairs": ["NSE_EQ-738561", "NSE_FO-135938"],
+  "url": "/data/quotes?q=NSE_EQ-738561&q=NSE_FO-135938&mode=ltp",
+  "stats": { "requested": 2, "included": 2, "unresolved": 0 }
+}
+```
+
+### LTP by Pairs (Authoritative)
+
+- Method: GET
+- Endpoint: `/api/stock/vayu/ltp?q=EXCHANGE-TOKEN`
+
+Example:
+```bash
+curl "$BASE/api/stock/vayu/ltp?q=NSE_EQ-22&q=NSE_FO-135938"
+```
+
+### LTP by Instruments (Resolution Path)
+
+- Method: POST
+- Endpoint: `/api/stock/vayu/ltp`
+- Body: `{ "instruments": [22, 135938, 26000] }`
+- Exchange is resolved using: vortex_instruments → instrument_mappings(provider=vortex) → instruments.
+
+Example:
+```bash
+curl -X POST "$BASE/api/stock/vayu/ltp" -H 'Content-Type: application/json' \
+  -d '{ "instruments": [22, 135938, 26000] }'
+```
+
+Note:
+- Tokens without a resolvable exchange are returned as `{ last_price: null }` (they are not defaulted to `NSE_EQ`).
+

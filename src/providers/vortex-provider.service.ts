@@ -1270,6 +1270,136 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     };
   }
 
+  /**
+   * Debug-only: Resolve exchanges for tokens with source attribution.
+   * Order: vortex_instruments → instrument_mappings(provider=vortex) → instruments (legacy)
+   */
+  async debugResolveExchanges(
+    tokens: string[],
+  ): Promise<
+    Array<{
+      token: string;
+      exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' | null;
+      source: 'vortex_instruments' | 'instrument_mappings' | 'instruments' | null;
+    }>
+  > {
+    try {
+      const input = Array.from(
+        new Set(tokens.map((t) => String(t || '').trim()).filter((t) => /^\d+$/.test(t))),
+      );
+      const nums = input.map((t) => Number(t));
+      const resolved = new Map<string, { exchange: any; source: any }>();
+      let viCount = 0;
+      let imCount = 0;
+      let instCount = 0;
+
+      // 1) vortex_instruments
+      try {
+        const viRows = await this.vortexInstrumentRepo.find({
+          where: { token: In(nums) } as any,
+          select: ['token', 'exchange'] as any,
+        });
+        for (const r of viRows) {
+          const ex = this.normalizeExchange(r.exchange || '');
+          if (ex) {
+            resolved.set(String(r.token), { exchange: ex, source: 'vortex_instruments' });
+            viCount++;
+          }
+        }
+      } catch (e) {
+        this.logger.warn('[Vortex] debugResolveExchanges: vi lookup failed', e as any);
+      }
+
+      // 2) instrument_mappings (provider=vortex)
+      try {
+        const remaining = nums.filter((n) => !resolved.has(String(n)));
+        if (remaining.length) {
+          const maps = await this.instrumentMappingRepo.find({
+            where: { provider: 'vortex', instrument_token: In(remaining) } as any,
+            select: ['provider_token', 'instrument_token'] as any,
+          });
+          for (const m of maps) {
+            const key = String(m.provider_token || '').toUpperCase();
+            const [exPart] = key.split('-');
+            const ex = this.normalizeExchange(exPart || '');
+            if (ex) {
+              resolved.set(String(m.instrument_token), {
+                exchange: ex,
+                source: 'instrument_mappings',
+              });
+              imCount++;
+            }
+          }
+        }
+      } catch (e) {
+        this.logger.warn('[Vortex] debugResolveExchanges: mapping lookup failed', e as any);
+      }
+
+      // 3) legacy instruments
+      try {
+        const remaining = nums.filter((n) => !resolved.has(String(n)));
+        if (remaining.length) {
+          const rows = await this.instrumentRepo.find({
+            where: { instrument_token: In(remaining) } as any,
+            select: ['instrument_token', 'exchange', 'segment'] as any,
+          });
+          for (const r of rows) {
+            const ex = this.normalizeExchange(r.exchange || r.segment || '');
+            if (ex) {
+              resolved.set(String(r.instrument_token), {
+                exchange: ex,
+                source: 'instruments',
+              });
+              instCount++;
+            }
+          }
+        }
+      } catch (e) {
+        this.logger.warn('[Vortex] debugResolveExchanges: legacy lookup failed', e as any);
+      }
+
+      const out = input.map((t) => {
+        const r = resolved.get(t);
+        return { token: t, exchange: (r?.exchange as any) || null, source: (r?.source as any) || null };
+      });
+
+      // Console-friendly summary for quick inspection
+      // eslint-disable-next-line no-console
+      console.log('[Vortex Debug] resolve summary:', {
+        requested: input.length,
+        resolved: out.filter((x) => !!x.exchange).length,
+        via: { vortex_instruments: viCount, instrument_mappings: imCount, instruments: instCount },
+      });
+
+      return out;
+    } catch (e) {
+      this.logger.warn('[Vortex] debugResolveExchanges failed', e as any);
+      return tokens.map((t) => ({ token: String(t || ''), exchange: null, source: null }));
+    }
+  }
+
+  /**
+   * Debug-only: Build Vortex quotes query for tokens using resolved exchanges.
+   */
+  async debugBuildQuery(
+    tokens: string[],
+    mode: 'ltp' | 'ohlc' | 'full' = 'ltp',
+  ): Promise<{ pairs: string[]; url: string; stats: { requested: number; included: number; unresolved: number } }> {
+    const resolution = await this.debugResolveExchanges(tokens);
+    const pairs = resolution
+      .filter((r) => !!r.exchange)
+      .map((r) => `${r.exchange}-${r.token}`);
+    const qParams = pairs.map((k) => `q=${encodeURIComponent(k)}`).join('&');
+    const url = `/data/quotes?${qParams}&mode=${mode}`;
+    // eslint-disable-next-line no-console
+    console.log('[Vortex Debug] buildQuery:', { mode, requested: tokens.length, included: pairs.length });
+    return {
+      pairs,
+      url,
+      stats: { requested: tokens.length, included: pairs.length, unresolved: tokens.length - pairs.length },
+    };
+  }
+
   private mapInterval(interval: string): string {
     const i = (interval || '').toLowerCase();
     if (i.includes('day')) return '1D';
