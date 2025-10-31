@@ -31,11 +31,18 @@ export class SearchController {
     const limit = Math.min(Number(limitRaw || 10), 50);
     const filters: any = { exchange, segment, instrumentType };
     const items = await this.searchService.searchInstruments(q.trim(), limit, filters);
-    const tokens = items.map((i) => i.instrumentToken).slice(0, Math.min(limit, 10));
-    const quotes = await this.searchService.hydrateQuotes(tokens, 'ltp');
+    // Prefer pair-based hydration when vortexExchange is present
+    const topItems = items.slice(0, Math.min(limit, 10));
+    const hasVortexEx = topItems.some((i: any) => i?.vortexExchange);
+    const quotes = hasVortexEx
+      ? await this.searchService.hydrateLtpByPairs(topItems as any)
+      : await this.searchService.hydrateQuotes(
+          topItems.map((i) => i.instrumentToken),
+          'ltp',
+        );
     return {
       success: true,
-      data: items.map((it) => ({
+      data: items.map((it: any) => ({
         ...it,
         last_price: quotes?.[String(it.instrumentToken)]?.last_price ?? null,
       })),

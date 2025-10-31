@@ -10,6 +10,13 @@ type SearchResultItem = {
   exchange?: string;
   segment?: string;
   instrumentType?: string;
+  // Enriched from indexer
+  expiryDate?: string;
+  strike?: number;
+  tick?: number;
+  lotSize?: number;
+  vortexExchange?: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+  ticker?: string;
 };
 
 @Injectable()
@@ -81,7 +88,21 @@ export class SearchService {
   // Starts-with boosted search then contains fallback; returns deduped list
   async searchInstruments(q: string, limit = 10, filters: any = {}) {
     const index = process.env.MEILI_INDEX || 'instruments_v1';
-    const attributesToRetrieve = ['instrumentToken', 'symbol', 'tradingSymbol', 'companyName', 'exchange', 'segment', 'instrumentType'];
+    const attributesToRetrieve = [
+      'instrumentToken',
+      'symbol',
+      'tradingSymbol',
+      'companyName',
+      'exchange',
+      'segment',
+      'instrumentType',
+      'expiryDate',
+      'strike',
+      'tick',
+      'lotSize',
+      'vortexExchange',
+      'ticker',
+    ];
     const filterExpr = this.buildFilter(filters);
 
     const startsWith = await this.safeMeiliSearch(index, {
@@ -183,6 +204,84 @@ export class SearchService {
         }
       }
     }
+    return result;
+  }
+
+  // Hydrate LTP by exchange-token pairs (preferred when vortexExchange is available)
+  async hydrateLtpByPairs(items: SearchResultItem[]) {
+    const now = Date.now();
+    if (now < this.hydrationBreakerUntil) {
+      this.logger.warn('Hydration circuit breaker open, skipping external calls');
+      return {};
+    }
+    const cacheTTL = Number(process.env.HYDRATE_TTL_MS || 800);
+    const cacheKey = (t: number) => `q:ltp:${t}`;
+    const result: Record<string, any> = {};
+    const pairs: Array<{ exchange: string; token: string }> = [];
+    const toFetchTokens: number[] = [];
+
+    for (const it of items) {
+      const token = it.instrumentToken;
+      // Try cache by token
+      if (this.redis) {
+        const v = await this.redis.get(cacheKey(token));
+        if (v) {
+          result[String(token)] = JSON.parse(v);
+          continue;
+        }
+      }
+      if (it?.vortexExchange) {
+        pairs.push({ exchange: it.vortexExchange, token: String(token) });
+      } else {
+        toFetchTokens.push(token);
+      }
+    }
+
+    // Call pairs first
+    if (pairs.length) {
+      try {
+        const resp = await this.hydrator.post('/api/stock/vayu/ltp', { pairs });
+        const data = resp.data?.data || {};
+        // data is keyed by EXCHANGE-TOKEN; convert to token map
+        for (const [exTok, val] of Object.entries<any>(data)) {
+          const tokenPart = exTok.split('-').pop();
+          if (!tokenPart) continue;
+          result[tokenPart] = val;
+          if (this.redis) {
+            await this.redis.setex(
+              cacheKey(Number(tokenPart)),
+              Math.ceil(cacheTTL / 1000),
+              JSON.stringify(val),
+            );
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`hydrateLtpByPairs failed: ${err?.message}`);
+      }
+    }
+
+    // For any remaining tokens (no exchange info), fallback to instruments
+    if (toFetchTokens.length) {
+      try {
+        const resp = await this.hydrator.post('/api/stock/vayu/ltp', {
+          instruments: toFetchTokens,
+        });
+        const data = resp.data?.data || {};
+        Object.assign(result, data);
+        if (this.redis) {
+          for (const [k, v] of Object.entries(data)) {
+            await this.redis.setex(
+              cacheKey(Number(k)),
+              Math.ceil(cacheTTL / 1000),
+              JSON.stringify(v),
+            );
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`hydrateLtpByPairs fallback failed: ${err?.message}`);
+      }
+    }
+
     return result;
   }
 

@@ -1,5 +1,7 @@
 import axios from 'axios';
-import { Client } from 'pg';
+// Use require to avoid @types dependency in build image
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { Client } = require('pg');
 
 type InstrumentRow = {
   instrument_token: number;
@@ -10,6 +12,7 @@ type InstrumentRow = {
   instrument_type: string;
   expiry: string | null;
   strike: number | null;
+  tick_size: number | null;
   lot_size: number | null;
   is_active: boolean;
   updated_at: string;
@@ -68,7 +71,7 @@ function env(key: string, def?: string) {
   return v;
 }
 
-async function withPg<T>(fn: (client: Client) => Promise<T>): Promise<T> {
+async function withPg<T>(fn: (client: any) => Promise<T>): Promise<T> {
   const client = new Client({
     host: env('DB_HOST', 'postgres'),
     port: Number(env('DB_PORT', '5432')),
@@ -84,7 +87,19 @@ async function withPg<T>(fn: (client: Client) => Promise<T>): Promise<T> {
   }
 }
 
+function normalizeVortexExchange(exchange?: string, segment?: string, instrumentType?: string): 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' {
+  const ex = String(exchange || '').toUpperCase();
+  const seg = String(segment || '').toUpperCase();
+  const it = String(instrumentType || '').toUpperCase();
+  if (ex.includes('MCX') || seg.includes('MCX')) return 'MCX_FO';
+  if (seg.includes('CDS') || ex.includes('CDS') || seg.includes('CUR') || it.includes('CUR')) return 'NSE_CUR';
+  if (seg.includes('FO') || seg.includes('FNO') || it.includes('FUT') || it.includes('OPT') || it.includes('IDX') || it.includes('STK')) return 'NSE_FO';
+  return 'NSE_EQ';
+}
+
 function toDoc(r: InstrumentRow) {
+  const vortexExchange = normalizeVortexExchange(r.exchange, r.segment, r.instrument_type);
+  const ticker = `${vortexExchange}_${r.tradingsymbol}`;
   return {
     instrumentToken: r.instrument_token,
     symbol: r.tradingsymbol,
@@ -95,8 +110,11 @@ function toDoc(r: InstrumentRow) {
     instrumentType: r.instrument_type,
     expiryDate: r.expiry || undefined,
     strike: r.strike ?? undefined,
+    tick: r.tick_size ?? undefined,
     lotSize: r.lot_size ?? undefined,
     isTradable: !!r.is_active,
+    vortexExchange,
+    ticker,
     searchKeywords: [r.tradingsymbol, r.name].filter(Boolean),
   };
 }
@@ -112,6 +130,7 @@ async function applyIndexSettings(meiliBase: string, apiKey: string, index: stri
         'tradingSymbol',
         'companyName',
         'isin',
+        'ticker',
         'searchKeywords',
       ],
       filterableAttributes: [
@@ -120,8 +139,10 @@ async function applyIndexSettings(meiliBase: string, apiKey: string, index: stri
         'instrumentType',
         'expiryDate',
         'strike',
+        'tick',
         'lotSize',
         'isTradable',
+        'vortexExchange',
       ],
       sortableAttributes: ['symbol', 'companyName', 'segment', 'exchange'],
       rankingRules: [
@@ -183,12 +204,12 @@ async function backfill() {
     let offset = 0;
     while (offset < total) {
       const rows = await withPg(async (pg) => {
-        const res = await pg.query<InstrumentRow>(
-          `SELECT instrument_token, tradingsymbol, name, exchange, segment, instrument_type, expiry, strike, lot_size, is_active, updated_at
+        const res = await pg.query(
+          `SELECT instrument_token, tradingsymbol, name, exchange, segment, instrument_type, expiry, strike, tick_size, lot_size, is_active, updated_at
            FROM instruments WHERE is_active = true ORDER BY instrument_token ASC OFFSET $1 LIMIT $2`,
           [offset, batchSize],
         );
-        return res.rows;
+        return (res.rows || []) as InstrumentRow[];
       });
       if (!rows.length) break;
       const docs = rows.map(toDoc);
@@ -233,20 +254,29 @@ async function backfill() {
     };
     const token = toNum(pick(['instrument_token', 'instrumentToken', 'token']));
     if (!token) return null;
+    const exchange = String(pick(['exchange'], ''));
+    const segment = String(pick(['segment'], ''));
+    const instrumentType = String(pick(['instrument_type', 'instrumentName', 'instrumentType'], ''));
+    const vortexExchange = normalizeVortexExchange(exchange, segment, instrumentType);
+    const symbol = String(pick(['symbol', 'tradingsymbol', 'tradingSymbol'], ''));
+    const ticker = `${vortexExchange}_${symbol}`;
     return {
       instrumentToken: token,
-      symbol: String(pick(['symbol', 'tradingsymbol', 'tradingSymbol'], '')),
-      tradingSymbol: String(pick(['tradingsymbol', 'tradingSymbol', 'symbol'], '')),
+      symbol,
+      tradingSymbol: symbol,
       companyName: pick(['name', 'companyName'], ''),
-      exchange: pick(['exchange'], ''),
-      segment: pick(['segment'], ''),
-      instrumentType: pick(['instrument_type', 'instrumentType'], ''),
+      exchange,
+      segment,
+      instrumentType,
       expiryDate: pick(['expiry', 'expiryDate'], undefined),
       strike: toNum(pick(['strike'])),
+      tick: toNum(pick(['tick'])),
       lotSize: toNum(pick(['lot_size', 'lotSize'])),
       isTradable: true,
+      vortexExchange,
+      ticker,
       searchKeywords: [
-        pick(['tradingsymbol', 'tradingSymbol', 'symbol'], ''),
+        symbol,
         pick(['name', 'companyName'], ''),
       ].filter(Boolean),
     };
@@ -287,12 +317,12 @@ async function incremental() {
   for (;;) {
     const since = sinceIso || new Date(Date.now() - pollSec * 1000).toISOString();
     const rows = await withPg(async (pg) => {
-      const res = await pg.query<InstrumentRow>(
+      const res = await pg.query(
         `SELECT instrument_token, tradingsymbol, name, exchange, segment, instrument_type, expiry, strike, lot_size, is_active, updated_at
          FROM instruments WHERE updated_at >= $1 ORDER BY updated_at ASC LIMIT 5000`,
         [since],
       );
-      return res.rows;
+      return (res.rows || []) as InstrumentRow[];
     });
     if (rows.length) {
       const docs = rows.map(toDoc);
