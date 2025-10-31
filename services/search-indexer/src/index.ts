@@ -97,9 +97,18 @@ function normalizeVortexExchange(exchange?: string, segment?: string, instrument
   return 'NSE_EQ';
 }
 
+function extractUnderlyingSymbol(tradingSymbol: string): string | undefined {
+  const s = String(tradingSymbol || '').toUpperCase();
+  // Take leading letters until first digit or delimiter
+  const m = s.match(/^[A-Z]+/);
+  return m?.[0] || undefined;
+}
+
 function toDoc(r: InstrumentRow) {
   const vortexExchange = normalizeVortexExchange(r.exchange, r.segment, r.instrument_type);
   const ticker = `${vortexExchange}_${r.tradingsymbol}`;
+  const isDerivative = /FUT|OPT/i.test(String(r.instrument_type || ''));
+  const underlyingSymbol = isDerivative ? extractUnderlyingSymbol(r.tradingsymbol) : undefined;
   return {
     instrumentToken: r.instrument_token,
     symbol: r.tradingsymbol,
@@ -115,6 +124,8 @@ function toDoc(r: InstrumentRow) {
     isTradable: !!r.is_active,
     vortexExchange,
     ticker,
+    isDerivative,
+    underlyingSymbol,
     searchKeywords: [r.tradingsymbol, r.name].filter(Boolean),
   };
 }
@@ -131,6 +142,7 @@ async function applyIndexSettings(meiliBase: string, apiKey: string, index: stri
         'companyName',
         'isin',
         'ticker',
+        'underlyingSymbol',
         'searchKeywords',
       ],
       filterableAttributes: [
@@ -143,6 +155,7 @@ async function applyIndexSettings(meiliBase: string, apiKey: string, index: stri
         'lotSize',
         'isTradable',
         'vortexExchange',
+        'isDerivative',
       ],
       sortableAttributes: ['symbol', 'companyName', 'segment', 'exchange'],
       rankingRules: [
@@ -271,6 +284,8 @@ async function backfill() {
     const vortexExchange = normalizeVortexExchange(exchange, segment, instrumentType);
     const symbol = String(pick(['symbol', 'tradingsymbol', 'tradingSymbol'], ''));
     const ticker = `${vortexExchange}_${symbol}`;
+    const isDerivative = /FUT|OPT/i.test(instrumentType);
+    const underlyingSymbol = isDerivative ? extractUnderlyingSymbol(symbol) : undefined;
     return {
       instrumentToken: token,
       symbol,
@@ -286,6 +301,8 @@ async function backfill() {
       isTradable: true,
       vortexExchange,
       ticker,
+      isDerivative,
+      underlyingSymbol,
       searchKeywords: [
         symbol,
         pick(['name', 'companyName'], ''),
@@ -312,6 +329,95 @@ async function backfill() {
   }
   // eslint-disable-next-line no-console
   console.log('[indexer] backfill complete (csv)');
+}
+
+// === Synonyms compiler from Redis counters ===
+async function applySynonymsFromRedis() {
+  // eslint-disable-next-line no-console
+  console.log('[synonyms] starting apply from Redis counters');
+  // Lazy require to avoid type deps
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const IORedis = require('ioredis');
+  const redisHost = env('REDIS_HOST', 'redis');
+  const redisPort = Number(env('REDIS_PORT', '6379'));
+  const redis = new IORedis({ host: redisHost, port: redisPort, lazyConnect: false });
+  try {
+    // Scan syn:q:* keys and aggregate q→symbol counts
+    const qSymCounts: Record<string, Record<string, number>> = {};
+    let cursor = '0';
+    const pattern = 'syn:q:*';
+    do {
+      const resp = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 500);
+      cursor = resp[0];
+      const keys: string[] = resp[1] || [];
+      if (keys.length) {
+        const pipe = redis.pipeline();
+        keys.forEach((k) => pipe.get(k));
+        const results = await pipe.exec();
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          const val = Number((results?.[i]?.[1] as any) || 0);
+          if (!Number.isFinite(val) || val <= 0) continue;
+          // key format: syn:q:<q>:sym:<symbol>
+          const m = key.match(/^syn:q:(.+):sym:(.+)$/);
+          if (!m) continue;
+          const q = m[1];
+          const sym = m[2];
+          if (!qSymCounts[sym]) qSymCounts[sym] = {};
+          qSymCounts[sym][q] = (qSymCounts[sym][q] || 0) + val;
+        }
+      }
+    } while (cursor !== '0');
+
+    // Build synonyms map
+    const MIN_COUNT = Number(env('SYN_MIN_COUNT', '3'));
+    const MAX_PER_SYMBOL = Number(env('SYN_MAX_PER_SYMBOL', '10'));
+    const dynamicSyn: Record<string, string[]> = {};
+    for (const [sym, counts] of Object.entries(qSymCounts)) {
+      const pairs = Object.entries(counts)
+        .filter(([, n]) => n >= MIN_COUNT)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, MAX_PER_SYMBOL)
+        .map(([q]) => q);
+      if (pairs.length) {
+        dynamicSyn[sym] = Array.from(new Set([...(dynamicSyn[sym] || []), ...pairs]));
+        pairs.forEach((q) => {
+          dynamicSyn[q] = Array.from(new Set([...(dynamicSyn[q] || []), sym]));
+        });
+      }
+    }
+
+    const meiliBase = env('MEILI_HOST', 'http://meilisearch:7700')!;
+    const meiliKey = env('MEILI_MASTER_KEY', '')!;
+    const index = env('MEILI_INDEX', 'instruments_v1')!;
+    const headers = meiliKey ? { Authorization: `Bearer ${meiliKey}` } : {};
+
+    // Fetch current settings to merge
+    let current: any = {};
+    try {
+      const s = await axios.get(`${meiliBase}/indexes/${index}/settings`, { headers });
+      current = s?.data || {};
+    } catch (e) {
+      // ignore
+    }
+    const mergedSyn = { ...(current?.synonyms || {}), ...dynamicSyn };
+    await axios.patch(
+      `${meiliBase}/indexes/${index}/settings`,
+      { synonyms: mergedSyn },
+      { headers },
+    );
+    // eslint-disable-next-line no-console
+    console.log(
+      `[synonyms] applied: symbols=${Object.keys(qSymCounts).length}, entries=${Object.keys(dynamicSyn).length}`,
+    );
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[synonyms] apply failed', e);
+  } finally {
+    try {
+      await redis.quit();
+    } catch {}
+  }
 }
 
 async function incremental() {
@@ -359,6 +465,8 @@ async function main() {
   } else if (mode === 'backfill-and-watch') {
     await backfill();
     await incremental();
+  } else if (mode === 'synonyms-apply') {
+    await applySynonymsFromRedis();
   } else {
     // eslint-disable-next-line no-console
     console.log(`unknown INDEXER_MODE=${mode}`);

@@ -1,11 +1,16 @@
 import {
   Controller,
   Get,
+  Post,
+  Body,
   HttpException,
   HttpStatus,
   Logger,
   Query,
+  Res,
+  Req,
 } from '@nestjs/common';
+import { Response, Request } from 'express';
 import { SearchService } from './search.service';
 
 @Controller('search')
@@ -22,6 +27,7 @@ export class SearchController {
     @Query('segment') segment?: string,
     @Query('instrumentType') instrumentType?: string,
     @Query('vortexExchange') vortexExchange?: string,
+    @Query('mode') mode?: 'eq' | 'fno' | 'curr' | 'commodities',
     @Query('expiry_from') expiry_from?: string,
     @Query('expiry_to') expiry_to?: string,
     @Query('strike_min') strike_min?: string,
@@ -36,11 +42,13 @@ export class SearchController {
     }
     const limit = Math.min(Number(limitRaw || 10), 50);
     const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+    const modeMap: any = { eq: 'NSE_EQ', fno: 'NSE_FO', curr: 'NSE_CUR', commodities: 'MCX_FO' };
+    const modeVe = mode ? modeMap[String(mode).toLowerCase()] : undefined;
     const filters: any = {
       exchange,
       segment,
       instrumentType,
-      vortexExchange,
+      vortexExchange: vortexExchange || modeVe,
       expiry_from,
       expiry_to,
       strike_min,
@@ -79,6 +87,7 @@ export class SearchController {
     @Query('segment') segment?: string,
     @Query('instrumentType') instrumentType?: string,
     @Query('vortexExchange') vortexExchange?: string,
+    @Query('mode') mode?: 'eq' | 'fno' | 'curr' | 'commodities',
     @Query('expiry_from') expiry_from?: string,
     @Query('expiry_to') expiry_to?: string,
     @Query('strike_min') strike_min?: string,
@@ -89,11 +98,13 @@ export class SearchController {
     if (!q || q.trim().length === 0) {
       return { success: true, data: [], timestamp: new Date().toISOString() };
     }
+    const modeMap: any = { eq: 'NSE_EQ', fno: 'NSE_FO', curr: 'NSE_CUR', commodities: 'MCX_FO' };
+    const modeVe = mode ? modeMap[String(mode).toLowerCase()] : undefined;
     const filters: any = {
       exchange,
       segment,
       instrumentType,
-      vortexExchange,
+      vortexExchange: vortexExchange || modeVe,
       expiry_from,
       expiry_to,
       strike_min,
@@ -142,6 +153,78 @@ export class SearchController {
     this.logger.log(`popular requested, limit=${limit}`);
     // Placeholder popular tickers list can be sourced later
     return { success: true, data: [], timestamp: new Date().toISOString() };
+  }
+
+  // POST /api/search/telemetry/selection
+  @Post('telemetry/selection')
+  async selection(@Body() body: { q?: string; symbol?: string; instrumentToken?: number }) {
+    const q = String(body?.q || '').trim();
+    const symbol = String(body?.symbol || '').trim();
+    const token = Number(body?.instrumentToken);
+    if (!q || !symbol) {
+      throw new HttpException(
+        { success: false, message: 'q and symbol are required' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    // Best effort; never block UI
+    await this.searchService.logSelectionTelemetry(q, symbol, Number.isFinite(token) ? token : undefined);
+    return { success: true };
+  }
+
+  // GET /api/search/stream - SSE for LTP updates (~1s, 30s TTL)
+  @Get('stream')
+  async stream(
+    @Res() res: Response,
+    @Req() req: Request,
+    @Query('tokens') tokens?: string,
+    @Query('q') q?: string,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+  ) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+    const parseTokens = (s?: string): number[] =>
+      String(s || '')
+        .split(',')
+        .map((x) => Number(x.trim()))
+        .filter((n) => Number.isFinite(n));
+    let ids: number[] = parseTokens(tokens).slice(0, 100);
+    let lastSentAt = 0;
+    const ttlMs = Number(process.env.SSE_DEFAULT_TTL_MS || 30000);
+    const started = Date.now();
+    const send = (data: any) => {
+      res.write(`event: ltp\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      lastSentAt = Date.now();
+    };
+    const timer = setInterval(async () => {
+      try {
+        if (Date.now() - started > ttlMs) {
+          clearInterval(timer);
+          res.end();
+          return;
+        }
+        if (!ids.length && q) {
+          const items = await this.searchService.searchInstruments(q.trim(), 10, {});
+          ids = items.map((i: any) => i.instrumentToken).slice(0, 100);
+        }
+        if (!ids.length) return;
+        const quotes = await this.searchService.hydrateQuotes(ids, 'ltp');
+        const payload = ltpOnly
+          ? Object.fromEntries(
+              Object.entries(quotes).filter(([, v]: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0),
+            )
+          : quotes;
+        send({ quotes: payload, ts: new Date().toISOString() });
+      } catch {
+        // skip tick on error
+      }
+    }, 1000);
+    req.on('close', () => {
+      clearInterval(timer);
+    });
   }
 }
 

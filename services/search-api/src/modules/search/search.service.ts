@@ -285,6 +285,32 @@ export class SearchService {
     return result;
   }
 
+  // Log selection telemetry for synonym learning (best effort, non-blocking)
+  async logSelectionTelemetry(q: string, symbol: string, token?: number) {
+    try {
+      if (!this.redis) return;
+      const normQ = String(q || '').trim().toLowerCase();
+      const normSym = String(symbol || '').trim().toUpperCase();
+      if (!normQ || !normSym) return;
+      const ttlSec = Number(process.env.SYNONYMS_TTL_DAYS || 14) * 24 * 3600;
+      const pipe = this.redis.pipeline();
+      const k1 = `syn:q:${normQ}:sym:${normSym}`;
+      pipe.incrby(k1, 1);
+      if (ttlSec > 0) pipe.expire(k1, ttlSec);
+      const k2 = `syn:sym:${normSym}`;
+      pipe.incrby(k2, 1);
+      if (ttlSec > 0) pipe.expire(k2, ttlSec);
+      if (Number.isFinite(token)) {
+        const k3 = `syn:tok:${token}:q:${normQ}`;
+        pipe.incrby(k3, 1);
+        if (ttlSec > 0) pipe.expire(k3, ttlSec);
+      }
+      await pipe.exec();
+    } catch (e) {
+      this.logger.warn('logSelectionTelemetry failed (non-fatal)');
+    }
+  }
+
   private buildFilter(filters: any): string | undefined {
     const parts: string[] = [];
     if (!filters) return undefined;
