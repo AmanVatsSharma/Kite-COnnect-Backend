@@ -7,6 +7,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { VortexSession } from '../entities/vortex-session.entity';
 import { Instrument } from '../entities/instrument.entity';
+import { VortexInstrument } from '../entities/vortex-instrument.entity';
+import { InstrumentMapping } from '../entities/instrument-mapping.entity';
 
 // Minimal safe no-op ticker used when Vortex streaming is not configured
 class NoopTicker {
@@ -56,6 +58,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     private vortexSessionRepo: Repository<VortexSession>,
     @InjectRepository(Instrument)
     private instrumentRepo: Repository<Instrument>,
+    @InjectRepository(VortexInstrument)
+    private vortexInstrumentRepo: Repository<VortexInstrument>,
+    @InjectRepository(InstrumentMapping)
+    private instrumentMappingRepo: Repository<InstrumentMapping>,
   ) {}
 
   async onModuleInit() {
@@ -292,19 +298,28 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       }
       await this.rateLimit('ltp');
       const exMap = await this.getExchangesForTokens(tokens);
-      const qParams = tokens
-        .map((t) => {
-          const ex = exMap.get(t) || 'NSE_EQ';
-          return `q=${encodeURIComponent(`${ex}-${t}`)}`;
-        })
+      const toQuery = tokens.filter((t) => exMap.has(t));
+      const missing = tokens.filter((t) => !exMap.has(t));
+      if (missing.length) {
+        this.logger.warn(
+          `[Vortex] getLTP: ${missing.length}/${tokens.length} tokens lack exchange mapping; skipping in request. Examples: ${missing
+            .slice(0, 5)
+            .join(',')}`,
+        );
+      }
+      const qParams = toQuery
+        .map((t) => `q=${encodeURIComponent(`${exMap.get(t)}-${t}`)}`)
         .join('&');
       const mode = 'ltp';
       const url = `/data/quotes?${qParams}&mode=${mode}`;
       this.logger.debug(
-        `[Vortex] getLTP request: tokens=${tokens.length}, url=${url}`,
+        `[Vortex] getLTP request: requested=${tokens.length}, querying=${toQuery.length}, url=${url}`,
       );
-      const resp = await this.http.get(url, { headers: this.authHeaders() });
-      const data = resp?.data?.data || {};
+      let data: any = {};
+      if (toQuery.length > 0) {
+        const resp = await this.http.get(url, { headers: this.authHeaders() });
+        data = resp?.data?.data || {};
+      }
       const out: Record<string, any> = {};
       for (const [exToken, quote] of Object.entries<any>(data)) {
         const tokenPart = exToken.split('-').pop();
@@ -313,6 +328,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         out[tokenPart] = {
           last_price: Number.isFinite(raw) && raw > 0 ? raw : null,
         };
+      }
+      // Ensure all requested tokens present in output
+      for (const t of tokens) {
+        if (!(t in out)) out[t] = { last_price: null } as any;
       }
       this.logger.debug(
         `[Vortex] getLTP result coverage: total=${tokens.length}, withLTP=${Object.values(out).filter((v) => Number.isFinite((v as any)?.last_price) && (v as any).last_price > 0).length}`,
@@ -1260,39 +1279,92 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     return String(Math.max(1, Math.min(240, m)));
   }
 
-  // Map tokens to Vortex exchange using DB instruments; fallback to NSE_EQ
+  // Resolve Vortex exchange per token using authoritative sources first.
+  // Order of precedence:
+  // 1) vortex_instruments.exchange
+  // 2) instrument_mappings (provider=vortex → provider_token = EXCHANGE-TOKEN)
+  // 3) instruments.exchange/segment (legacy)
   private async getExchangesForTokens(
     tokens: string[],
   ): Promise<Map<string, 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'>> {
     const map = new Map<string, any>();
     try {
-      const nums = tokens
-        .map((t) => Number(t))
-        .filter((n) => Number.isFinite(n));
-      if (!nums.length) {
-        // No valid tokens, return empty map (will use NSE_EQ fallback in callers)
-        return map;
+      const nums = Array.from(
+        new Set(
+          tokens
+            .map((t) => Number(String(t)))
+            .filter((n) => Number.isFinite(n)),
+        ),
+      );
+      if (!nums.length) return map;
+
+      // 1) Use vortex_instruments (authoritative)
+      let viRows: Array<{ token: number; exchange: string }> = [];
+      try {
+        viRows = await this.vortexInstrumentRepo.find({
+          where: { token: In(nums) } as any,
+          select: ['token', 'exchange'] as any,
+        });
+        for (const r of viRows) {
+          const ex = this.normalizeExchange(r.exchange || '');
+          if (ex) map.set(String(r.token), ex);
+        }
+      } catch (e) {
+        this.logger.warn('[Vortex] Failed vortex_instruments lookup', e as any);
       }
-      const rows = await this.instrumentRepo.find({
-        where: { instrument_token: In(nums) } as any,
-        select: ['instrument_token', 'exchange', 'segment'] as any,
-      });
-      for (const r of rows) {
-        const ex = this.normalizeExchange(r.exchange || r.segment || '');
-        if (ex) map.set(String(r.instrument_token), ex);
+
+      // 2) Use instrument_mappings (provider=vortex)
+      const missingAfterVI = nums.filter((n) => !map.has(String(n)));
+      let imRows: Array<{ provider_token: string; instrument_token: number }> = [];
+      if (missingAfterVI.length) {
+        try {
+          imRows = await this.instrumentMappingRepo.find({
+            where: { provider: 'vortex', instrument_token: In(missingAfterVI) } as any,
+            select: ['provider_token', 'instrument_token'] as any,
+          });
+          for (const m of imRows) {
+            const key = String(m.provider_token || '').toUpperCase();
+            const [exPart] = key.split('-');
+            const ex = this.normalizeExchange(exPart || '');
+            if (ex) map.set(String(m.instrument_token), ex);
+          }
+        } catch (e) {
+          this.logger.warn('[Vortex] Failed instrument_mappings lookup', e as any);
+        }
       }
-      // If an instrument explicitly indicates derivatives, prefer NSE_FO over NSE_EQ
-      // This avoids defaulting to NSE_EQ for FO/CUR/MCX instruments when DB has segment info
-      // Log fallback usage for tokens not found in DB
-      const notFound = tokens.filter((t) => !map.has(t));
-      if (notFound.length > 0) {
+
+      // 3) Fall back to legacy instruments table
+      const stillMissing = nums.filter((n) => !map.has(String(n)));
+      if (stillMissing.length) {
+        try {
+          const rows = await this.instrumentRepo.find({
+            where: { instrument_token: In(stillMissing) } as any,
+            select: ['instrument_token', 'exchange', 'segment'] as any,
+          });
+          for (const r of rows) {
+            const ex = this.normalizeExchange(r.exchange || r.segment || '');
+            if (ex) map.set(String(r.instrument_token), ex);
+          }
+        } catch (e) {
+          this.logger.warn('[Vortex] Legacy instruments lookup failed', e as any);
+        }
+      }
+
+      const unresolved = nums.filter((n) => !map.has(String(n)));
+      if (unresolved.length) {
         this.logger.debug(
-          `[Vortex] Using NSE_EQ fallback for ${notFound.length} tokens not in DB: ${notFound.slice(0, 5).join(',')}`,
+          `[Vortex] Exchange unresolved for ${unresolved.length}/${nums.length} tokens (will use fallback in caller if any). Examples: ${unresolved
+            .slice(0, 5)
+            .join(',')}`,
         );
       }
+
+      this.logger.debug(
+        `[Vortex] Exchange resolution summary: requested=${nums.length}, resolved=${nums.length - unresolved.length}, via vi=${viRows.length}, map=${imRows.length}`,
+      );
     } catch (e) {
       this.logger.warn(
-        '[Vortex] getExchangesForTokens failed; all tokens will use NSE_EQ fallback',
+        '[Vortex] getExchangesForTokens failed; callers may apply fallback',
         e as any,
       );
     }

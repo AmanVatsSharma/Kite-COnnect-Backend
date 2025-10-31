@@ -54,10 +54,15 @@ export class SearchController {
       strike_min,
       strike_max,
     };
-    const items = await this.searchService.searchInstruments(q.trim(), limit, filters);
-    // Prefer pair-based hydration when vortexExchange is present
-    const hydrateCount = ltpOnly ? Math.min(limit, 50) : Math.min(limit, 10);
-    const topItems = items.slice(0, hydrateCount);
+    const probeMult = Number(process.env.LTP_ONLY_PROBE_MULTIPLIER || 5);
+    const searchCap = Number(process.env.SEARCH_LTP_ONLY_HYDRATE_CAP || 200);
+    const hardCap = 1000;
+    const probeLimit = ltpOnly
+      ? Math.min(Math.max(limit * probeMult, limit), searchCap, hardCap)
+      : limit;
+    const items = await this.searchService.searchInstruments(q.trim(), probeLimit, filters);
+    // Prefer pair-based hydration when vortexExchange is present; hydrate up to probeLimit
+    const topItems = items.slice(0, probeLimit);
     const hasVortexEx = topItems.some((i: any) => i?.vortexExchange);
     const quotes = hasVortexEx
       ? await this.searchService.hydrateLtpByPairs(topItems as any)
@@ -69,11 +74,12 @@ export class SearchController {
       ...it,
       last_price: quotes?.[String(it.instrumentToken)]?.last_price ?? null,
     }));
-    const data = ltpOnly
+    const filtered = ltpOnly
       ? enriched.filter((v: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0)
       : enriched;
+    const data = filtered.slice(0, limit);
     this.logger.log(
-      `[Search] q="${q}" limit=${limit} ltp_only=${ltpOnly} hydrated=${topItems.length} returned=${data.length}`,
+      `[Search] q="${q}" limit=${limit} probe=${probeLimit} ltp_only=${ltpOnly} hydrated=${topItems.length} returned=${data.length}`,
     );
     return { success: true, data, timestamp: new Date().toISOString() };
   }
@@ -110,8 +116,15 @@ export class SearchController {
       strike_min,
       strike_max,
     };
-    const items = await this.searchService.searchInstruments(q.trim(), limit, filters);
-    const topItems = items.slice(0, Math.min(limit, 10));
+    const probeMult = Number(process.env.LTP_ONLY_PROBE_MULTIPLIER || 5);
+    const suggestCap = Number(process.env.SUGGEST_LTP_ONLY_HYDRATE_CAP || 100);
+    const hardCap = 1000;
+    const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+    const probeLimit = ltpOnly
+      ? Math.min(Math.max(limit * probeMult, limit), suggestCap, hardCap)
+      : limit;
+    const items = await this.searchService.searchInstruments(q.trim(), probeLimit, filters);
+    const topItems = items.slice(0, probeLimit);
     const hasVortexEx = topItems.some((i: any) => i?.vortexExchange);
     const quotes = hasVortexEx
       ? await this.searchService.hydrateLtpByPairs(topItems as any)
@@ -119,8 +132,6 @@ export class SearchController {
           topItems.map((i) => i.instrumentToken),
           'ltp',
         );
-
-    const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
     const enriched = items.map((it: any) => ({
       ...it,
       last_price: quotes?.[String(it.instrumentToken)]?.last_price ?? null,
@@ -128,10 +139,11 @@ export class SearchController {
     const filtered = ltpOnly
       ? enriched.filter((v: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0)
       : enriched;
+    const data = filtered.slice(0, limit);
     this.logger.log(
-      `[Suggest] q="${q}" limit=${limit} ltp_only=${ltpOnly} enriched=${enriched.length} returned=${filtered.length}`,
+      `[Suggest] q="${q}" limit=${limit} probe=${probeLimit} ltp_only=${ltpOnly} enriched=${enriched.length} returned=${data.length}`,
     );
-    return { success: true, data: filtered, timestamp: new Date().toISOString() };
+    return { success: true, data, timestamp: new Date().toISOString() };
   }
 
   // GET /api/search/filters - placeholder returning empty facets for now
