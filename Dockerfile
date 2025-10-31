@@ -44,10 +44,13 @@ USER nestjs
 # Expose port
 EXPOSE 3000
 
-# Health check
+# Health check (copy script from source since it's plain JS)
+COPY --from=builder --chown=nestjs:nodejs /app/src/health-check.js ./dist/health-check.js
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node dist/health-check.js || exit 1
 
 # Start the application
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "dist/main"]
+# Note: TS builds emit into dist/src when multiple TS roots are compiled.
+# Run the compiled entry file accordingly.
+CMD ["node", "dist/src/main"]
