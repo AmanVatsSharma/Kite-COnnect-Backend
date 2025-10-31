@@ -219,7 +219,7 @@ export class SearchService {
     const cacheTTL = Number(process.env.HYDRATE_TTL_MS || 800);
     const cacheKey = (t: number) => `q:ltp:${t}`;
     const result: Record<string, any> = {};
-    const pairs: Array<{ exchange: string; token: string }> = [];
+    const pairsFromIndex: Array<{ exchange: string; token: string }> = [];
     const toFetchTokens: number[] = [];
 
     for (const it of items) {
@@ -233,16 +233,57 @@ export class SearchService {
         }
       }
       if (it?.vortexExchange) {
-        pairs.push({ exchange: it.vortexExchange, token: String(token) });
+        pairsFromIndex.push({ exchange: it.vortexExchange, token: String(token) });
       } else {
         toFetchTokens.push(token);
       }
     }
 
-    // Call pairs first
-    if (pairs.length) {
+    // Build authoritative pairs from DB mapping via hydrator debug endpoint
+    // Prefer DB-derived pairs when available; fall back to index-provided pairs for any gaps
+    let pairsToUse: Array<{ exchange: string; token: string }> = [];
+    if (pairsFromIndex.length) {
       try {
-        const resp = await this.hydrator.post('/api/stock/vayu/ltp', { pairs });
+        const tokensForDb = pairsFromIndex.map((p) => p.token);
+        const q = encodeURIComponent(tokensForDb.join(','));
+        const url = `/api/stock/vayu/debug/build-q?tokens=${q}&mode=ltp`;
+        const dbg = await this.hydrator.get(url);
+        const dbgPairs: string[] = Array.isArray(dbg?.data?.pairs) ? dbg.data.pairs : [];
+        // Convert to objects and also compute exchange-by-token maps for mismatch logging
+        const dbPairs: Array<{ exchange: string; token: string }> = [];
+        const dbExchangeByToken = new Map<string, string>();
+        for (const k of dbgPairs) {
+          const [ex, tok] = String(k || '').split('-');
+          if (ex && tok && /^\d+$/.test(tok)) {
+            dbPairs.push({ exchange: ex, token: tok });
+            dbExchangeByToken.set(tok, ex);
+          }
+        }
+        // Mismatch diagnostics
+        try {
+          let mismatches = 0;
+          for (const p of pairsFromIndex) {
+            const dbEx = dbExchangeByToken.get(p.token);
+            if (dbEx && String(dbEx).toUpperCase() !== String(p.exchange).toUpperCase()) {
+              mismatches++;
+            }
+          }
+          if (mismatches > 0) this.logger.warn(`[SearchService] exchange mapping mismatches (index vs DB): ${mismatches}/${pairsFromIndex.length}`);
+        } catch {}
+        // Use DB pairs primarily; include index pairs for tokens not present in DB response
+        const covered = new Set(dbPairs.map((p) => p.token));
+        const extras = pairsFromIndex.filter((p) => !covered.has(p.token));
+        pairsToUse = [...dbPairs, ...extras];
+      } catch (e: any) {
+        this.logger.warn(`[SearchService] DB pair mapping check failed; using index pairs. ${e?.message}`);
+        pairsToUse = pairsFromIndex;
+      }
+    }
+
+    // Call pairs first (using DB-validated pairs when available)
+    if (pairsToUse.length) {
+      try {
+        const resp = await this.hydrator.post('/api/stock/vayu/ltp', { pairs: pairsToUse });
         const data = resp.data?.data || {};
         // data is keyed by EXCHANGE-TOKEN; convert to token map
         for (const [exTok, val] of Object.entries<any>(data)) {
