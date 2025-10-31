@@ -39,6 +39,34 @@
 ```mermaid
 flowchart TD
   A[Client tokens] --> B{Resolve exchange}
+
+### Milli Search Hydration (pair-first + fallback)
+
+```mermaid
+sequenceDiagram
+  participant UI as UI
+  participant S as search-api
+  participant H as trading-app (hydrator)
+  participant V as Vortex REST
+
+  UI->>S: GET /api/search?q=...
+  S->>H: POST /api/stock/vayu/ltp { pairs }
+  H->>V: GET /data/quotes?mode=ltp&q=EX-TOK...
+  V-->>H: last_trade_price map
+  H-->>S: pair-keyed LTP
+  Note over S: Convert to token map and cache
+  alt Any tokens without valid LTP
+    S->>H: POST /api/stock/vayu/ltp { instruments }
+    H->>V: GET /data/quotes?mode=ltp&q=EX-TOK (resolved)
+    V-->>H: last_trade_price map
+    H-->>S: token-keyed LTP
+  end
+  S-->>UI: Results with last_price
+```
+
+Notes:
+- Hydrator sends headers `x-api-key` and `x-provider: vayu`.
+- Pair path is preferred when `vortexExchange` is known in Meili docs; otherwise instruments path resolves exchanges.
   B -->|1) vortex_instruments| C[Map token → exchange]
   B -->|2) instrument_mappings(vortex)| C
   B -->|3) instruments(exchange/segment)| C

@@ -18,6 +18,19 @@ type InstrumentRow = {
   updated_at: string;
 };
 
+type VortexRow = {
+  token: number;
+  exchange: string;
+  symbol: string;
+  instrument_name?: string | null;
+  expiry_date?: string | null;
+  option_type?: string | null;
+  strike_price?: number | null;
+  tick?: number | null;
+  lot_size?: number | null;
+  updated_at: string;
+};
+
 // Lightweight CSV parser (header-based) with quoted field support and escaped quotes
 function splitCsvLine(line: string): string[] {
   const result: string[] = [];
@@ -212,7 +225,7 @@ async function backfill() {
   let total = 0;
   try {
     total = await withPg(async (pg) => {
-      const res = await pg.query('SELECT COUNT(*)::int AS n FROM instruments WHERE is_active = true');
+      const res = await pg.query('SELECT COUNT(*)::int AS n FROM instruments');
       return res.rows[0].n as number;
     });
   } catch (e: any) {
@@ -230,7 +243,7 @@ async function backfill() {
       const rows = await withPg(async (pg) => {
         const res = await pg.query(
           `SELECT instrument_token, tradingsymbol, name, exchange, segment, instrument_type, expiry, strike, tick_size, lot_size, is_active, updated_at
-           FROM instruments WHERE is_active = true ORDER BY instrument_token ASC OFFSET $1 LIMIT $2`,
+           FROM instruments ORDER BY instrument_token ASC OFFSET $1 LIMIT $2`,
           [offset, batchSize],
         );
         return (res.rows || []) as InstrumentRow[];
@@ -247,7 +260,63 @@ async function backfill() {
       console.log(`[indexer] upserted ${offset}/${total}`);
     }
     // eslint-disable-next-line no-console
-    console.log('[indexer] backfill complete (postgres)');
+    console.log('[indexer] backfill base complete (postgres). Proceeding with vortex enrichment...');
+
+    // === Vortex enrichment pass: upsert minimal documents with authoritative vortexExchange and optional fields ===
+    try {
+      const resCount = await withPg(async (pg) => {
+        const c = await pg.query('SELECT COUNT(*)::int AS n FROM vortex_instruments');
+        return (c.rows?.[0]?.n as number) || 0;
+      });
+      // eslint-disable-next-line no-console
+      console.log(`[indexer] vortex_instruments total=${resCount}`);
+      let voffset = 0;
+      const vbatch = batchSize;
+
+      const toVortexDocMinimal = (r: VortexRow) => {
+        const vex = normalizeVortexExchange(r.exchange, undefined, r.instrument_name || undefined);
+        const isDerivative = /FUT|OPT/i.test(String(r.instrument_name || ''));
+        const underlyingSymbol = isDerivative ? extractUnderlyingSymbol(r.symbol) : undefined;
+        return {
+          instrumentToken: r.token,
+          // Only authoritative or additive fields here to avoid clobbering symbol/name
+          vortexExchange: vex,
+          isDerivative,
+          underlyingSymbol,
+          // include optional numeric details when present
+          expiryDate: r.expiry_date || undefined,
+          strike: r.strike_price ?? undefined,
+          tick: r.tick ?? undefined,
+          lotSize: r.lot_size ?? undefined,
+        } as any;
+      };
+
+      while (voffset < resCount) {
+        const vrows = await withPg(async (pg) => {
+          const res = await pg.query(
+            `SELECT token, exchange, symbol, instrument_name, expiry_date, option_type, strike_price, tick, lot_size, updated_at
+             FROM vortex_instruments ORDER BY token ASC OFFSET $1 LIMIT $2`,
+            [voffset, vbatch],
+          );
+          return (res.rows || []) as VortexRow[];
+        });
+        if (!vrows.length) break;
+        const docs = vrows.map(toVortexDocMinimal);
+        await axios.post(
+          `${meiliBase}/indexes/${index}/documents?primaryKey=instrumentToken`,
+          docs,
+          { headers },
+        );
+        voffset += vrows.length;
+        // eslint-disable-next-line no-console
+        console.log(`[indexer] vortex enrich upserted ${voffset}/${resCount}`);
+      }
+      // eslint-disable-next-line no-console
+      console.log('[indexer] backfill enrichment complete (vortex)');
+    } catch (e: any) {
+      // eslint-disable-next-line no-console
+      console.log('[indexer] vortex enrichment skipped/failed:', e?.message || 'unknown');
+    }
     return;
   }
 
@@ -427,11 +496,13 @@ async function incremental() {
   const index = env('MEILI_INDEX', 'instruments_v1')!;
   const pollSec = Number(env('INDEXER_POLL_SEC', '300'));
   let sinceIso = env('INDEXER_SINCE');
+  let sinceVortexIso = env('INDEXER_VORTEX_SINCE');
 
   // eslint-disable-next-line no-console
   console.log(`[indexer] incremental watcher poll=${pollSec}s since=${sinceIso || 'auto'}`);
 
   for (;;) {
+    // === instruments table incremental ===
     const since = sinceIso || new Date(Date.now() - pollSec * 1000).toISOString();
     const rows = await withPg(async (pg) => {
       const res = await pg.query(
@@ -450,7 +521,44 @@ async function incremental() {
       );
       sinceIso = rows[rows.length - 1].updated_at;
       // eslint-disable-next-line no-console
-      console.log(`[indexer] incrementally upserted ${rows.length}, since=${sinceIso}`);
+      console.log(`[indexer] incremental(instruments) upserted ${rows.length}, since=${sinceIso}`);
+    }
+
+    // === vortex_instruments table incremental (authoritative vortexExchange enrichment) ===
+    const sinceV = sinceVortexIso || new Date(Date.now() - pollSec * 1000).toISOString();
+    const vrows = await withPg(async (pg) => {
+      const res = await pg.query(
+        `SELECT token, exchange, symbol, instrument_name, expiry_date, option_type, strike_price, tick, lot_size, updated_at
+         FROM vortex_instruments WHERE updated_at >= $1 ORDER BY updated_at ASC LIMIT 5000`,
+        [sinceV],
+      );
+      return (res.rows || []) as VortexRow[];
+    });
+    if (vrows.length) {
+      const toVortexDocMinimal = (r: VortexRow) => {
+        const vex = normalizeVortexExchange(r.exchange, undefined, r.instrument_name || undefined);
+        const isDerivative = /FUT|OPT/i.test(String(r.instrument_name || ''));
+        const underlyingSymbol = isDerivative ? extractUnderlyingSymbol(r.symbol) : undefined;
+        return {
+          instrumentToken: r.token,
+          vortexExchange: vex,
+          isDerivative,
+          underlyingSymbol,
+          expiryDate: r.expiry_date || undefined,
+          strike: r.strike_price ?? undefined,
+          tick: r.tick ?? undefined,
+          lotSize: r.lot_size ?? undefined,
+        } as any;
+      };
+      const vdocs = vrows.map(toVortexDocMinimal);
+      await axios.post(
+        `${meiliBase}/indexes/${index}/documents?primaryKey=instrumentToken`,
+        vdocs,
+        { headers },
+      );
+      sinceVortexIso = vrows[vrows.length - 1].updated_at;
+      // eslint-disable-next-line no-console
+      console.log(`[indexer] incremental(vortex) upserted ${vrows.length}, since=${sinceVortexIso}`);
     }
     await new Promise((r) => setTimeout(r, pollSec * 1000));
   }

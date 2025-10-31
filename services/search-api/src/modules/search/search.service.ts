@@ -59,6 +59,8 @@ export class SearchService {
     console.log('SearchService hydrateBase=', hydrateBase);
     // eslint-disable-next-line no-console
     console.log('SearchService hydration x-api-key set=', Boolean(hydrateApiKey));
+    // eslint-disable-next-line no-console
+    console.log('SearchService hydration x-provider=vayu');
 
     try {
       this.redis = new Redis({ host: redisHost, port: redisPort, lazyConnect: true });
@@ -280,6 +282,42 @@ export class SearchService {
       } catch (err: any) {
         this.logger.warn(`hydrateLtpByPairs fallback failed: ${err?.message}`);
       }
+    }
+
+    // Second pass: cover tokens that still have missing/invalid LTP after pairs/instruments calls
+    try {
+      const allTokens = items.map((i) => i.instrumentToken);
+      const missingTokens = allTokens.filter((t) => {
+        const v: any = result[String(t)];
+        return !(v && Number.isFinite(v.last_price) && v.last_price > 0);
+      });
+      if (missingTokens.length) {
+        this.logger.warn(
+          `[SearchService] hydrateLtpByPairs: instruments fallback for ${missingTokens.length}/${allTokens.length} tokens without valid LTP`,
+        );
+        try {
+          const resp = await this.hydrator.post('/api/stock/vayu/ltp', {
+            instruments: missingTokens,
+          });
+          const data = resp.data?.data || {};
+          Object.assign(result, data);
+          if (this.redis) {
+            for (const [k, v] of Object.entries(data)) {
+              await this.redis.setex(
+                cacheKey(Number(k)),
+                Math.ceil(cacheTTL / 1000),
+                JSON.stringify(v),
+              );
+            }
+          }
+        } catch (e: any) {
+          this.logger.warn(
+            `[SearchService] instruments second-pass fallback failed: ${e?.message}`,
+          );
+        }
+      }
+    } catch (e) {
+      // non-fatal guard
     }
 
     return result;

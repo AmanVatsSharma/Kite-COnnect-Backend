@@ -18,6 +18,24 @@ curl -sS "http://localhost:3002/api/search?q=SBIN&limit=5" | jq .
 curl -ksS "https://marketdata.vedpragya.com/api/search?q=SBIN&limit=5" | jq .
 ```
 
+## LTP Coverage Checks
+```bash
+# Pair-first hydration then instruments fallback (verify last_price present)
+curl -sS "http://localhost:3002/api/search?q=SBIN&limit=10&ltp_only=true" | jq .
+
+# Direct vayu LTP (pairs)
+curl -sS -H "x-api-key: $HYDRATION_API_KEY" \
+  -H "x-provider: vayu" \
+  -X POST http://localhost:3000/api/stock/vayu/ltp \
+  -d '{"pairs": [{"exchange":"NSE_EQ","token":"26000"}]}' | jq .
+
+# Direct vayu LTP (instruments fallback)
+curl -sS -H "x-api-key: $HYDRATION_API_KEY" \
+  -H "x-provider: vayu" \
+  -X POST http://localhost:3000/api/stock/vayu/ltp \
+  -d '{"instruments": [26000, 738561]}' | jq .
+```
+
 ## Latency and error spot-check (5 minutes)
 ```bash
 # 100 sample queries locally to search-api (direct)
