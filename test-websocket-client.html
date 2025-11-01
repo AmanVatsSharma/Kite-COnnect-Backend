@@ -205,6 +205,18 @@
             <input type="number" id="customToken" placeholder="e.g., 11536" />
             <button onclick="addCustomInstrument()" id="addBtn" disabled>Add Token</button>
         </div>
+        <div style="margin-top: 8px;">
+            <label>Add Exchange-Token Pair:</label>
+            <select id="pairExchange">
+                <option value="NSE_EQ">NSE_EQ</option>
+                <option value="NSE_FO">NSE_FO</option>
+                <option value="NSE_CUR">NSE_CUR</option>
+                <option value="MCX_FO">MCX_FO</option>
+            </select>
+            <input type="number" id="pairToken" placeholder="e.g., 135938" />
+            <button onclick="addCustomPair()" id="addPairBtn" disabled>Add Pair</button>
+            <div class="mode-info">Socket.IO accepts EXCHANGE-TOKEN strings; Native WS will use numeric tokens from pairs.</div>
+        </div>
         <div style="margin: 10px 0;">
             <label>Mode:</label>
             <select id="dataMode">
@@ -216,6 +228,7 @@
         </div>
         <div style="margin-top: 10px;">
             <p><strong>Subscribed Tokens:</strong> <span id="tokenList">None</span></p>
+            <p><strong>Subscribed Pairs (EXCHANGE-TOKEN):</strong> <span id="pairList">None</span></p>
         </div>
         <button onclick="subscribeToCustom()" id="customSubscribeBtn" disabled>Subscribe to All</button>
     </div>
@@ -255,6 +268,7 @@
         let selectedProtocol = 'socketio';
         let messageCount = 0;
         let selectedTokens = [];
+        let selectedPairs = []; // EXCHANGE-TOKEN strings like "NSE_FO-135938"
         let priceData = {};
         let connectionStartTime = 0;
         let lastMessageTime = 0;
@@ -327,6 +341,7 @@
                 document.getElementById('subscribeBtn').disabled = false;
                 document.getElementById('popularBtn').disabled = false;
                 document.getElementById('addBtn').disabled = false;
+                document.getElementById('addPairBtn').disabled = false;
                 document.getElementById('customSubscribeBtn').disabled = false;
                 
                 document.getElementById('connectionInfo').innerHTML = 
@@ -343,7 +358,15 @@
             
             socket.on('subscription_confirmed', (data) => {
                 log(`✅ Subscription confirmed!`);
-                log(`   Instruments: ${data.instruments.join(', ')}`);
+                if (Array.isArray(data.included)) {
+                    log(`   Included tokens: ${data.included.join(', ')}`);
+                }
+                if (Array.isArray(data.pairs)) {
+                    log(`   Pairs: ${data.pairs.join(', ')}`);
+                }
+                if (Array.isArray(data.unresolved) && data.unresolved.length) {
+                    log(`   Unresolved: ${data.unresolved.join(', ')}`);
+                }
                 log(`   Mode: ${data.mode}`);
             });
             
@@ -371,6 +394,7 @@
                     document.getElementById('subscribeBtn').disabled = false;
                     document.getElementById('popularBtn').disabled = false;
                     document.getElementById('addBtn').disabled = false;
+                    document.getElementById('addPairBtn').disabled = false;
                     document.getElementById('customSubscribeBtn').disabled = false;
                     
                     document.getElementById('connectionInfo').innerHTML = 
@@ -472,6 +496,7 @@
             document.getElementById('subscribeBtn').disabled = true;
             document.getElementById('popularBtn').disabled = true;
             document.getElementById('addBtn').disabled = true;
+            document.getElementById('addPairBtn').disabled = true;
             document.getElementById('customSubscribeBtn').disabled = true;
             
             if (pingInterval) {
@@ -554,6 +579,20 @@
             }
         }
         
+        function buildInstrumentsPayload() {
+            if (selectedProtocol === 'socketio') {
+                return [...new Set([...selectedTokens, ...selectedPairs])];
+            } else {
+                const pairTokens = selectedPairs
+                    .map(p => {
+                        const m = String(p).toUpperCase().match(/^([A-Z_]+)-(\d+)$/);
+                        return m ? Number(m[2]) : null;
+                    })
+                    .filter(n => Number.isFinite(n));
+                return [...new Set([...selectedTokens, ...pairTokens])];
+            }
+        }
+
         function subscribeToNifty() {
             if ((!socket || !socket.connected) && (!ws || ws.readyState !== WebSocket.OPEN)) {
                 alert('Not connected');
@@ -564,7 +603,7 @@
             
             // Use new event name 'subscribe' (also supports old 'subscribe_instruments' for backward compatibility)
             emit('subscribe', {
-                instruments: [26000],
+                instruments: [...new Set([26000, ...buildInstrumentsPayload()])],
                 mode: 'ltp'
             });
             
@@ -587,7 +626,7 @@
             log('📡 Subscribing to popular stocks with LTP mode...');
             
             emit('subscribe', {
-                instruments: popularInstruments,
+                instruments: [...new Set([...popularInstruments, ...buildInstrumentsPayload()])],
                 mode: 'ltp'
             });
             
@@ -620,25 +659,40 @@
             tokenInput.value = '';
         }
         
+        function addCustomPair() {
+            const exSel = document.getElementById('pairExchange');
+            const ex = exSel.value;
+            const tokInput = document.getElementById('pairToken');
+            const tok = parseInt(tokInput.value);
+            if (!tok || isNaN(tok)) {
+                alert('Please enter a valid token number for pair');
+                return;
+            }
+            const pair = `${ex}-${tok}`;
+            if (selectedPairs.includes(pair)) {
+                alert('Pair already added');
+                return;
+            }
+            selectedPairs.push(pair);
+            updatePairList();
+            tokInput.value = '';
+        }
+        
         function subscribeToCustom() {
             if ((!socket || !socket.connected) && (!ws || ws.readyState !== WebSocket.OPEN)) {
                 alert('Not connected');
                 return;
             }
             
-            if (selectedTokens.length === 0) {
-                alert('Please add instruments first');
+            if (selectedTokens.length === 0 && selectedPairs.length === 0) {
+                alert('Please add tokens or pairs first');
                 return;
             }
             
             const mode = document.getElementById('dataMode').value;
-            
-            log(`📡 Subscribing to ${selectedTokens.length} instruments with ${mode} mode...`);
-            
-            emit('subscribe', {
-                instruments: selectedTokens,
-                mode: mode
-            });
+            const instruments = buildInstrumentsPayload();
+            log(`📡 Subscribing to ${instruments.length} items (tokens+pairs) with ${mode} mode...`);
+            emit('subscribe', { instruments, mode });
             
             log('Custom subscription request sent');
         }
@@ -646,6 +700,11 @@
         function updateTokenList() {
             document.getElementById('tokenList').textContent = 
                 selectedTokens.length > 0 ? selectedTokens.join(', ') : 'None';
+        }
+        
+        function updatePairList() {
+            document.getElementById('pairList').textContent = 
+                selectedPairs.length > 0 ? selectedPairs.join(', ') : 'None';
         }
         
         function updatePriceDisplay(token, price) {
