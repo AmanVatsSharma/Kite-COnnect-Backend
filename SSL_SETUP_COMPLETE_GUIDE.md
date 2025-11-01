@@ -126,7 +126,8 @@ sudo ./scripts/setup-ssl.sh marketdata.vedpragya.com admin@vedpragya.com
 
 - **API**: https://marketdata.vedpragya.com/api
 - **Health**: https://marketdata.vedpragya.com/api/health
-- **Swagger**: https://marketdata.vedpragya.com/api/docs
+- **Swagger**: https://marketdata.vedpragya.com/api/docs (requires HTTP Basic Auth)
+  - Username: `support@vedpragya.com`, Password: `aman1sharma`
 - **Dashboard**: https://marketdata.vedpragya.com/dashboard
 
 ---

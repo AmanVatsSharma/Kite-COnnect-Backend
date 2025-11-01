@@ -133,6 +133,11 @@ Access the full API documentation at:
 https://marketdata.vedpragya.com/api/docs
 ```
 
+You will be prompted for HTTP Basic Auth:
+
+- Username: `support@vedpragya.com`
+- Password: `aman1sharma`
+
 Navigate to the **admin** section to see all endpoints with examples.
 
 ## Troubleshooting

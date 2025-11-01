@@ -7,7 +7,8 @@ Your account manager will provide:
 - API base URL: https://marketdata.vedpragya.com
 - API Key: <your_api_key>
 - WebSocket namespace: https://marketdata.vedpragya.com/market-data (uses WSS over HTTPS)
-- Swagger docs: https://marketdata.vedpragya.com/api/docs
+- Swagger docs: https://marketdata.vedpragya.com/api/docs (HTTP Basic Auth required)
+  - Username: `support@vedpragya.com`, Password: `aman1sharma`
 
 **Important**: All endpoints use the Vayu (Rupeezy Vortex) data provider. Keep your API key secret and rotate if compromised.
 
@@ -23,7 +24,7 @@ Your account manager will provide:
 
 ## 4) Quick Tests
 - Health: `GET https://marketdata.vedpragya.com/api/health`
-- Swagger: `GET https://marketdata.vedpragya.com/api/docs`
+- Swagger: `GET https://marketdata.vedpragya.com/api/docs` (prompts for Basic Auth)
 - Stats: `GET https://marketdata.vedpragya.com/api/stock/stats` (requires `x-api-key`)
 
 ## 5) REST Endpoints

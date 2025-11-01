@@ -9,6 +9,37 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 import { NativeWsService } from './services/native-ws.service';
 
+// Basic Auth for Swagger (hardcoded per request)
+const SWAGGER_USERNAME = 'support@vedpragya.com';
+const SWAGGER_PASSWORD = 'aman1sharma';
+
+function swaggerBasicAuth(req: any, res: any, next: any) {
+  const authLogger = new Logger('SwaggerBasicAuth');
+  const realm = 'Swagger Docs';
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', `Basic realm="${realm}"`);
+    authLogger.warn(`[401] Missing/invalid Authorization for ${req.method} ${req.originalUrl}`);
+    return res.status(401).send('Authentication required.');
+  }
+  try {
+    const base64Credentials = authHeader.slice(6).trim();
+    const decoded = Buffer.from(base64Credentials, 'base64').toString('utf8');
+    const sepIndex = decoded.indexOf(':');
+    const username = sepIndex >= 0 ? decoded.slice(0, sepIndex) : decoded;
+    const password = sepIndex >= 0 ? decoded.slice(sepIndex + 1) : '';
+    if (username === SWAGGER_USERNAME && password === SWAGGER_PASSWORD) {
+      return next();
+    }
+    res.setHeader('WWW-Authenticate', `Basic realm="${realm}"`);
+    authLogger.warn(`[401] Invalid credentials user="${username}" for ${req.method} ${req.originalUrl}`);
+    return res.status(401).send('Invalid credentials.');
+  } catch (e) {
+    authLogger.error(`[500] Error decoding Authorization for ${req.method} ${req.originalUrl}`, e);
+    return res.status(500).send('Auth error.');
+  }
+}
+
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
@@ -68,6 +99,10 @@ async function bootstrap() {
       index: ['dashboard.html'],
     });
 
+    // Protect Swagger endpoints with Basic Auth
+    // Note: cover both UI and potential JSON endpoints
+    app.use(['/api/docs', '/api/docs/json', '/api-json', '/api/docs-json'], swaggerBasicAuth);
+
     // Swagger setup
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Trading Data Provider API')
@@ -83,7 +118,18 @@ async function bootstrap() {
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, { jsonDocumentUrl: 'json' });
+
+    // Explicitly expose JSON under /api/docs/json as well (fallback for UI link alignment)
+    try {
+      const httpAdapter: any = app.getHttpAdapter();
+      const expressInstance = httpAdapter.getInstance?.() ?? httpAdapter;
+      if (expressInstance && typeof expressInstance.get === 'function') {
+        expressInstance.get('/api/docs/json', (req: any, res: any) => res.json(document));
+      }
+    } catch (e) {
+      logger.warn('Failed to bind /api/docs/json route for Swagger JSON; default /api-json may be used instead.', e);
+    }
 
     const port = configService.get('PORT', 3000);
     await app.listen(port);
