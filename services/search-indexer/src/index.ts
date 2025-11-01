@@ -117,6 +117,12 @@ function extractUnderlyingSymbol(tradingSymbol: string): string | undefined {
   return m?.[0] || undefined;
 }
 
+function normalizeOptionalString(value?: string | null): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const trimmed = String(value).trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function toDoc(r: InstrumentRow) {
   const vortexExchange = normalizeVortexExchange(r.exchange, r.segment, r.instrument_type);
   const ticker = `${vortexExchange}_${r.tradingsymbol}`;
@@ -126,10 +132,10 @@ function toDoc(r: InstrumentRow) {
     instrumentToken: r.instrument_token,
     symbol: r.tradingsymbol,
     tradingSymbol: r.tradingsymbol,
-    companyName: r.name,
-    exchange: r.exchange,
-    segment: r.segment,
-    instrumentType: r.instrument_type,
+    companyName: normalizeOptionalString(r.name),
+    exchange: normalizeOptionalString(r.exchange),
+    segment: normalizeOptionalString(r.segment),
+    instrumentType: normalizeOptionalString(r.instrument_type),
     expiryDate: r.expiry || undefined,
     strike: r.strike ?? undefined,
     tick: r.tick_size ?? undefined,
@@ -347,9 +353,11 @@ async function backfill() {
     };
     const token = toNum(pick(['instrument_token', 'instrumentToken', 'token']));
     if (!token) return null;
-    const exchange = String(pick(['exchange'], ''));
-    const segment = String(pick(['segment'], ''));
-    const instrumentType = String(pick(['instrument_type', 'instrumentName', 'instrumentType'], ''));
+    const exchange = normalizeOptionalString(String(pick(['exchange'], '')));
+    const segment = normalizeOptionalString(String(pick(['segment'], '')));
+    const instrumentType = normalizeOptionalString(
+      String(pick(['instrument_type', 'instrumentName', 'instrumentType'], '')),
+    );
     const vortexExchange = normalizeVortexExchange(exchange, segment, instrumentType);
     const symbol = String(pick(['symbol', 'tradingsymbol', 'tradingSymbol'], ''));
     const ticker = `${vortexExchange}_${symbol}`;
@@ -359,7 +367,7 @@ async function backfill() {
       instrumentToken: token,
       symbol,
       tradingSymbol: symbol,
-      companyName: pick(['name', 'companyName'], ''),
+      companyName: normalizeOptionalString(pick(['name', 'companyName'], '')),
       exchange,
       segment,
       instrumentType,
@@ -384,6 +392,8 @@ async function backfill() {
     const d = toDocFromAny(r);
     if (d) docs.push(d);
   }
+  // eslint-disable-next-line no-console
+  console.log(`[indexer] csv parsed records=${records.length}, constructed docs=${docs.length}`);
   // chunked upserts
   const chunkSize = 2000;
   for (let i = 0; i < docs.length; i += chunkSize) {
@@ -394,7 +404,12 @@ async function backfill() {
       { headers },
     );
     // eslint-disable-next-line no-console
-    console.log(`[indexer] csv upserted ${Math.min(i + chunk.length, docs.length)}/${docs.length}`);
+    const missingInstrType = chunk.filter((d: any) => !d.instrumentType).length;
+    const missingSegment = chunk.filter((d: any) => !d.segment).length;
+    const missingVortex = chunk.filter((d: any) => !d.vortexExchange).length;
+    console.log(
+      `[indexer] csv upserted ${Math.min(i + chunk.length, docs.length)}/${docs.length} (missing: instrumentType=${missingInstrType}, segment=${missingSegment}, vortexExchange=${missingVortex})`,
+    );
   }
   // eslint-disable-next-line no-console
   console.log('[indexer] backfill complete (csv)');
@@ -506,7 +521,7 @@ async function incremental() {
     const since = sinceIso || new Date(Date.now() - pollSec * 1000).toISOString();
     const rows = await withPg(async (pg) => {
       const res = await pg.query(
-        `SELECT instrument_token, tradingsymbol, name, exchange, segment, instrument_type, expiry, strike, lot_size, is_active, updated_at
+        `SELECT instrument_token, tradingsymbol, name, exchange, segment, instrument_type, expiry, strike, tick_size, lot_size, is_active, updated_at
          FROM instruments WHERE updated_at >= $1 ORDER BY updated_at ASC LIMIT 5000`,
         [since],
       );
@@ -521,7 +536,12 @@ async function incremental() {
       );
       sinceIso = rows[rows.length - 1].updated_at;
       // eslint-disable-next-line no-console
-      console.log(`[indexer] incremental(instruments) upserted ${rows.length}, since=${sinceIso}`);
+      const missingInstrType = docs.filter((d: any) => !d.instrumentType).length;
+      const missingSegment = docs.filter((d: any) => !d.segment).length;
+      const missingVortex = docs.filter((d: any) => !d.vortexExchange).length;
+      console.log(
+        `[indexer] incremental(instruments) upserted ${rows.length}, since=${sinceIso} (missing: instrumentType=${missingInstrType}, segment=${missingSegment}, vortexExchange=${missingVortex})`,
+      );
     }
 
     // === vortex_instruments table incremental (authoritative vortexExchange enrichment) ===
