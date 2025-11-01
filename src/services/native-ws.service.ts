@@ -29,7 +29,7 @@ interface HeartbeatWebSocket extends WebSocket {
 export class NativeWsService implements OnModuleDestroy {
   private readonly logger = new Logger(NativeWsService.name);
   private server: WSServer | null = null;
-  private heartbeatInterval: NodeJS.Timer | null = null;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
   private clientSubscriptions = new Map<string, ClientSubscription>();
 
   constructor(
