@@ -567,6 +567,22 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         number,
         'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'
       > = new Map();
+      // Prime exchange mapping for tokens where the exchange is already known (from REST resolution or client-specified pairs)
+      // This allows the subscribe flow to avoid any defaults and prevents incorrect NSE_EQ fallbacks.
+      primeExchangeMapping(pairs: Array<{ token: number; exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' }>) {
+        try {
+          for (const p of pairs || []) {
+            if (Number.isFinite(p?.token as any) && p?.exchange) {
+              this.exchangeByToken.set(Number(p.token), p.exchange);
+            }
+          }
+          self.logger.debug(
+            `[Vortex] Primed exchange mapping for ${pairs?.length || 0} tokens`,
+          );
+        } catch (e) {
+          self.logger.warn('[Vortex] primeExchangeMapping failed', e as any);
+        }
+      }
       private pingTimer: NodeJS.Timeout | null = null;
       private lastPongAt: number = 0;
 
@@ -772,11 +788,27 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
 
               try {
                 const tokenMode = this.modeByToken.get(t) || mode;
-                const ex = (exMapRaw.get(String(t)) || 'NSE_EQ') as
-                  | 'NSE_EQ'
-                  | 'NSE_FO'
-                  | 'NSE_CUR'
-                  | 'MCX_FO';
+                // Prefer pre-primed mapping if present; otherwise use resolved exchange map
+                let ex =
+                  (this.exchangeByToken.get(t) as
+                    | 'NSE_EQ'
+                    | 'NSE_FO'
+                    | 'NSE_CUR'
+                    | 'MCX_FO'
+                    | undefined) ||
+                  (exMapRaw.get(String(t)) as
+                    | 'NSE_EQ'
+                    | 'NSE_FO'
+                    | 'NSE_CUR'
+                    | 'MCX_FO'
+                    | undefined);
+                if (!ex) {
+                  // Do not default to NSE_EQ; skip unresolved tokens and inform logs
+                  self.logger.warn(
+                    `[Vortex] Skipping subscription for token ${t}: exchange could not be resolved`,
+                  );
+                  continue;
+                }
                 this.exchangeByToken.set(t, ex);
 
                 // Send subscription message
@@ -814,47 +846,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
               );
             }
           } catch (e) {
+            // Do not fallback to NSE_EQ; log and skip
             self.logger.error(
-              '[Vortex] subscribe exchange resolution failed, using NSE_EQ fallback',
+              '[Vortex] subscribe exchange resolution failed; skipping unresolved tokens (no NSE_EQ fallback)',
               e as any,
             );
-            // Fallback: send with NSE_EQ to avoid silent failure
-            const fallbackSubscribed: number[] = [];
-            for (const t of toAdd) {
-              // Double-check WebSocket state
-              if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-                self.logger.warn(
-                  `[Vortex] WebSocket disconnected during fallback subscription, skipping token ${t}`,
-                );
-                break;
-              }
-
-              try {
-                const tokenMode = this.modeByToken.get(t) || mode;
-                this.exchangeByToken.set(t, 'NSE_EQ');
-                this.send({
-                  exchange: 'NSE_EQ',
-                  token: t,
-                  mode: tokenMode,
-                  message_type: 'subscribe',
-                });
-                this.subscribed.add(t);
-                fallbackSubscribed.push(t);
-                self.logger.debug(
-                  `[Vortex] Sent fallback subscription for token ${t} with NSE_EQ`,
-                );
-              } catch (tokenError) {
-                self.logger.error(
-                  `[Vortex] Failed fallback subscription for token ${t}`,
-                  tokenError as any,
-                );
-              }
-            }
-            if (fallbackSubscribed.length > 0) {
-              self.logger.log(
-                `[Vortex] Fallback subscribed ${fallbackSubscribed.length} tokens with NSE_EQ`,
-              );
-            }
           }
         })();
 
@@ -874,22 +870,29 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
                 missing.map((t) => String(t)),
               );
               missing.forEach((t) => {
-                const ex = (exMapRaw.get(String(t)) || 'NSE_EQ') as
+                const ex = exMapRaw.get(String(t)) as
                   | 'NSE_EQ'
                   | 'NSE_FO'
                   | 'NSE_CUR'
-                  | 'MCX_FO';
-                this.exchangeByToken.set(t, ex);
+                  | 'MCX_FO'
+                  | undefined;
+                if (ex) this.exchangeByToken.set(t, ex);
               });
             }
           } catch (e) {
             self.logger.warn(
-              '[Vortex] unsubscribe exchange resolution failed; using NSE_EQ fallback',
+              '[Vortex] unsubscribe exchange resolution failed; some tokens may be skipped',
               e as any,
             );
           }
           tokens.forEach((t) => {
-            const ex = this.exchangeByToken.get(t) || 'NSE_EQ';
+            const ex = this.exchangeByToken.get(t);
+            if (!ex) {
+              self.logger.warn(
+                `[Vortex] Skipping unsubscribe for token ${t}: exchange unknown`,
+              );
+              return;
+            }
             const mode = this.modeByToken.get(t) || 'ltp';
             this.send({
               exchange: ex,
@@ -918,22 +921,29 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
                 missing.map((t) => String(t)),
               );
               missing.forEach((t) => {
-                const ex = (exMapRaw.get(String(t)) || 'NSE_EQ') as
+                const ex = exMapRaw.get(String(t)) as
                   | 'NSE_EQ'
                   | 'NSE_FO'
                   | 'NSE_CUR'
-                  | 'MCX_FO';
-                this.exchangeByToken.set(t, ex);
+                  | 'MCX_FO'
+                  | undefined;
+                if (ex) this.exchangeByToken.set(t, ex);
               });
             }
           } catch (e) {
             self.logger.warn(
-              '[Vortex] setMode exchange resolution failed; using NSE_EQ fallback',
+              '[Vortex] setMode exchange resolution failed; some tokens may be skipped',
               e as any,
             );
           }
           target.forEach((t) => {
-            const ex = this.exchangeByToken.get(t) || 'NSE_EQ';
+            const ex = this.exchangeByToken.get(t);
+            if (!ex) {
+              self.logger.warn(
+                `[Vortex] Skipping setMode for token ${t}: exchange unknown`,
+              );
+              return;
+            }
             this.send({
               exchange: ex,
               token: t,
@@ -1032,6 +1042,32 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
 
   getTicker(): TickerLike {
     return this.ticker;
+  }
+
+  // Public: expose WS per-socket subscription limit for gateway acks
+  getSubscriptionLimit(): number {
+    return this.maxSubscriptionsPerSocket;
+  }
+
+  // Public: reusable exchange resolution for gateways/services (same precedence as REST)
+  async resolveExchanges(
+    tokens: string[],
+  ): Promise<Map<string, 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'>> {
+    return this.getExchangesForTokens(tokens);
+  }
+
+  // Public: prime the ticker's exchange mapping so subscribe() can avoid defaults
+  primeExchangeMapping(
+    pairs: Array<{ token: number; exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' }>,
+  ) {
+    try {
+      const t = this.getTicker() as any;
+      if (t && typeof t.primeExchangeMapping === 'function') {
+        t.primeExchangeMapping(pairs);
+      }
+    } catch (e) {
+      this.logger.warn('[Vortex] primeExchangeMapping failed', e as any);
+    }
   }
 
   async updateAccessToken(token: string) {

@@ -224,6 +224,40 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Subscribe using explicit exchange-token pairs. This primes the provider's
+   * internal exchange mapping to ensure the upstream subscribe frames are
+   * constructed with the correct exchange for each token, avoiding any default
+   * fallbacks (e.g., NSE_EQ).
+   */
+  async subscribePairs(
+    pairs: Array<{
+      token: number;
+      exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+    }>,
+    mode: 'ltp' | 'ohlcv' | 'full' = 'ltp',
+    clientId?: string,
+  ) {
+    try {
+      if (!Array.isArray(pairs) || pairs.length === 0) {
+        return;
+      }
+      const provider = await this.providerResolver.resolveForWebsocket();
+      // Prime mapping so ticker.subscribe() can send correct exchange without defaulting
+      try {
+        (provider as any)?.primeExchangeMapping?.(pairs);
+      } catch (e) {
+        this.logger.warn('[Stream] primeExchangeMapping not available', e as any);
+      }
+      const tokens = Array.from(new Set(pairs.map((p) => Number(p.token))));
+      await this.subscribeToInstruments(tokens, mode, clientId);
+    } catch (error) {
+      console.error('[MarketDataStreamService] Error in subscribePairs:', error);
+      this.logger.error('Error in subscribePairs', error);
+      throw error;
+    }
+  }
+
   async unsubscribeFromInstruments(
     instrumentTokens: number[],
     clientId?: string,

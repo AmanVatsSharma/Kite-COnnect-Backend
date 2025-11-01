@@ -108,13 +108,13 @@ export class MarketDataGateway
       const queryKey = (client.handshake.query['api_key'] as string) || '';
       const apiKey = headerKey || queryKey;
       if (!apiKey) {
-        client.emit('error', { message: 'Missing x-api-key' });
+        client.emit('error', { code: 'missing_api_key', message: 'Missing x-api-key' });
         client.disconnect(true);
         return;
       }
       const record = await this.apiKeyService.validateApiKey(apiKey);
       if (!record) {
-        client.emit('error', { message: 'Invalid API key' });
+        client.emit('error', { code: 'invalid_api_key', message: 'Invalid API key' });
         client.disconnect(true);
         return;
       }
@@ -123,6 +123,7 @@ export class MarketDataGateway
         record.connection_limit,
       );
       (client.data as any).apiKey = apiKey;
+      (client.data as any).apiKeyRecord = record;
     } catch (err) {
       this.logger.warn(
         `Connection rejected for ${client.id}: ${err?.message || err}`,
@@ -146,6 +147,53 @@ export class MarketDataGateway
       clientId: client.id,
       timestamp: new Date().toISOString(),
     });
+
+    // Emit a branded welcome + onboarding payload for client UX
+    try {
+      const apiKey: string = (client.data as any)?.apiKey;
+      const record: any = (client.data as any)?.apiKeyRecord;
+      const limits = {
+        connection: record?.connection_limit || 3,
+        maxSubscriptionsPerSocket: 1000,
+      } as any;
+      try {
+        const provider = await this.providerResolver.resolveForWebsocket();
+        const lim = (provider as any)?.getSubscriptionLimit?.();
+        if (Number.isFinite(lim) && lim > 0) {
+          limits.maxSubscriptionsPerSocket = lim;
+        }
+      } catch {}
+      const exchanges =
+        (Array.isArray(record?.metadata?.exchanges) &&
+          record?.metadata?.exchanges) || [
+          'NSE_EQ',
+          'NSE_FO',
+          'NSE_CUR',
+          'MCX_FO',
+        ];
+      const usage = await this.apiKeyService.getUsageReport(apiKey);
+      const instructions = {
+        subscribe:
+          "socket.emit('subscribe', { instruments: [26000, 'NSE_FO-135938'], mode: 'ltp' })",
+      };
+      client.emit('welcome', {
+        message: 'Welcome to Vedpragya MarketData Solutions',
+        provider: 'Vayu',
+        exchanges,
+        limits,
+        instructions,
+        apiKey: {
+          tenant: (client.data as any)?.apiKeyRecord?.tenant_id || 'unknown',
+          currentWsConnections: usage?.currentWsConnections || 0,
+          httpRequestsThisMinute: usage?.httpRequestsThisMinute || 0,
+          note:
+            'Your API key is enabled for Vayu provider. Exchanges reflect entitlements.',
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.warn('Failed to emit welcome payload', e as any);
+    }
   }
 
   async handleDisconnect(client: Socket) {
@@ -242,6 +290,7 @@ export class MarketDataGateway
       // Validate mode parameter
       if (!['ltp', 'ohlcv', 'full'].includes(mode)) {
         client.emit('error', {
+          code: 'invalid_mode',
           message: 'Invalid mode. Must be ltp, ohlcv, or full',
         });
         return;
@@ -258,6 +307,7 @@ export class MarketDataGateway
         const status = await this.streamService.getStreamingStatus();
         if (!status?.isStreaming) {
           client.emit('error', {
+            code: 'stream_inactive',
             message:
               'Streaming is not active. Ask admin to set provider and start stream: POST /api/admin/provider/global, then /api/admin/provider/stream/start',
           });
@@ -267,48 +317,120 @@ export class MarketDataGateway
         this.logger.warn('Failed to read streaming status', e as any);
       }
 
-      // Update subscription with mode tracking per instrument
+      // Parse instruments allowing both numeric tokens and EXCHANGE-TOKEN strings
+      const requestedRaw = Array.from(new Set(instruments as any));
+      const explicitPairs: Array<{ token: number; exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' }> = [];
+      const numericTokens: number[] = [];
+
+      for (const item of requestedRaw as any[]) {
+        if (typeof item === 'string') {
+          const s = String(item).trim().toUpperCase();
+          const m = s.match(/^([A-Z_]+)-(\d+)$/);
+          if (m) {
+            const ex = m[1] as any;
+            const tok = Number(m[2]);
+            if (['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'].includes(ex) && Number.isFinite(tok)) {
+              explicitPairs.push({ token: tok, exchange: ex });
+              continue;
+            }
+          }
+        }
+        const n = Number(item);
+        if (Number.isFinite(n)) numericTokens.push(n);
+      }
+
+      // Resolve exchanges for numeric tokens using provider (same precedence as Vayu REST)
+      const provider = await this.providerResolver.resolveForWebsocket();
+      let resolvedPairs: Array<{ token: number; exchange: any }> = [];
+      try {
+        const exMap: Map<string, any> = (provider as any)?.resolveExchanges
+          ? await (provider as any).resolveExchanges(
+              numericTokens.map((t) => String(t)),
+            )
+          : new Map();
+        resolvedPairs = numericTokens
+          .filter((t) => exMap.has(String(t)))
+          .map((t) => ({ token: t, exchange: exMap.get(String(t)) }));
+      } catch (e) {
+        this.logger.warn('Exchange resolution failed for tokens; proceeding with explicit pairs only', e as any);
+      }
+
+      // Merge explicit pairs and resolved pairs; explicit wins on conflicts
+      const pairByToken = new Map<number, any>();
+      for (const p of resolvedPairs) pairByToken.set(p.token, p.exchange);
+      for (const p of explicitPairs) pairByToken.set(p.token, p.exchange);
+
+      const finalPairs: Array<{ token: number; exchange: any }> = Array.from(
+        pairByToken.entries(),
+      ).map(([token, exchange]) => ({ token, exchange }));
+
+      const unresolved = numericTokens.filter((t) => !pairByToken.has(t));
+
+      // Update subscription tracking only with included tokens
+      const includedTokens = finalPairs.map((p) => p.token);
       subscription.instruments = [
-        ...new Set([...subscription.instruments, ...instruments]),
+        ...new Set([...subscription.instruments, ...includedTokens]),
       ];
       subscription.subscriptionType = type;
-
-      // Store mode for each instrument
-      instruments.forEach((token) => {
+      includedTokens.forEach((token) => {
         subscription.modeByInstrument.set(token, mode);
       });
 
-      // Delegate subscription to streaming service with mode support and client tracking
-      console.log(
-        `[MarketDataGateway] Subscribing client ${client.id} to ${instruments.length} instruments: ${JSON.stringify(instruments)} with mode=${mode}`,
-      );
-      await this.subscribeToInstruments(instruments, mode, client.id);
+      // Delegate to stream service via pairs to prime mapping first
+      if (finalPairs.length > 0) {
+        console.log(
+          `[MarketDataGateway] Subscribing client ${client.id} with ${finalPairs.length} pairs (mode=${mode})`,
+        );
+        await (this.streamService as any).subscribePairs?.(
+          finalPairs,
+          mode,
+          client.id,
+        );
+      }
 
-      // Join instrument rooms for targeted broadcast
-      instruments.forEach((token) => {
+      // Join rooms only for included tokens
+      includedTokens.forEach((token) => {
         client.join(`instrument:${token}`);
         console.log(
           `[MarketDataGateway] Client ${client.id} joined room for instrument:${token}`,
         );
       });
 
-      // Send confirmation with mode information
+      // Ack with details
+      let maxSubs = 1000;
+      try {
+        const lim = (provider as any)?.getSubscriptionLimit?.();
+        if (Number.isFinite(lim) && lim > 0) maxSubs = lim;
+      } catch {}
       client.emit('subscription_confirmed', {
-        instruments: subscription.instruments,
-        type: subscription.subscriptionType,
+        requested: requestedRaw,
+        pairs: finalPairs.map((p) => `${p.exchange}-${p.token}`),
+        included: includedTokens,
+        unresolved,
         mode,
+        limits: { maxSubscriptionsPerSocket: maxSubs },
         timestamp: new Date().toISOString(),
       });
 
+      // For unresolved, emit guidance errors per token
+      for (const t of unresolved) {
+        client.emit('error', {
+          code: 'exchange_unresolved',
+          token: t,
+          message:
+            'Cannot auto-resolve exchange; please subscribe using EXCHANGE-TOKEN (e.g., NSE_FO-<token>)',
+        });
+      }
+
       this.logger.log(
-        `Client ${client.id} subscribed to ${instruments.length} instruments with mode=${mode}`,
+        `Client ${client.id} subscribed to ${includedTokens.length}/${requestedRaw.length} instruments with mode=${mode}`,
       );
       console.log(
-        `[MarketDataGateway] Subscription confirmed sent to client ${client.id} for ${instruments.length} instruments`,
+        `[MarketDataGateway] Subscription confirmed sent to client ${client.id} (included=${includedTokens.length}, unresolved=${unresolved.length})`,
       );
     } catch (error) {
       this.logger.error('Error handling instrument subscription', error);
-      client.emit('error', { message: 'Failed to subscribe to instruments' });
+      client.emit('error', { code: 'subscribe_failed', message: 'Failed to subscribe to instruments' });
     }
   }
 
@@ -387,6 +509,7 @@ export class MarketDataGateway
     } catch (error) {
       this.logger.error('Error handling instrument unsubscription', error);
       client.emit('error', {
+        code: 'unsubscribe_failed',
         message: 'Failed to unsubscribe from instruments',
       });
     }
@@ -470,7 +593,7 @@ export class MarketDataGateway
       });
     } catch (error) {
       this.logger.error('Error fetching quotes', error);
-      client.emit('error', { message: 'Failed to fetch quotes' });
+      client.emit('error', { code: 'quote_failed', message: 'Failed to fetch quotes' });
     }
   }
 
@@ -523,7 +646,7 @@ export class MarketDataGateway
       });
     } catch (error) {
       this.logger.error('Error fetching historical data', error);
-      client.emit('error', { message: 'Failed to fetch historical data' });
+      client.emit('error', { code: 'historical_failed', message: 'Failed to fetch historical data' });
     }
   }
 

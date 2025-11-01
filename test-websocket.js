@@ -45,8 +45,9 @@ socket.on('connect', () => {
   
   // Test 1: Subscribe to some instruments
   console.log('📡 Subscribing to instruments...');
-  socket.emit('subscribe_instruments', {
-    instruments: [26000, 11536, 2881], // Nifty, Bank Nifty, Reliance
+  socket.emit('subscribe', {
+    // Mix tokens and EXCHANGE-TOKEN pairs; server will auto-resolve tokens
+    instruments: [26000, 'NSE_FO-135938', 2881],
     mode: 'ltp'
   });
   
@@ -64,10 +65,28 @@ socket.on('connected', (data) => {
   console.log('');
 });
 
+// Welcome onboarding
+socket.on('welcome', (data) => {
+  console.log('👋 Welcome:', data.message);
+  console.log(`   Provider: ${data.provider}`);
+  console.log(`   Exchanges: ${Array.isArray(data.exchanges) ? data.exchanges.join(', ') : 'n/a'}`);
+  if (data?.limits) {
+    console.log(`   Limits: connection=${data.limits.connection}, maxSubscriptionsPerSocket=${data.limits.maxSubscriptionsPerSocket}`);
+  }
+  console.log('   Quick start:', data?.instructions?.subscribe || 'n/a');
+  console.log('');
+});
+
 // Subscription confirmation
 socket.on('subscription_confirmed', (data) => {
   console.log('✅ Subscription confirmed!');
-  console.log(`   Instruments: ${data.instruments.join(', ')}`);
+  console.log(`   Included: ${Array.isArray(data.included) ? data.included.join(', ') : 'n/a'}`);
+  if (Array.isArray(data.unresolved) && data.unresolved.length) {
+    console.log(`   Unresolved: ${data.unresolved.join(', ')}`);
+  }
+  if (Array.isArray(data.pairs)) {
+    console.log(`   Pairs: ${data.pairs.join(', ')}`);
+  }
   console.log(`   Mode: ${data.mode}`);
   console.log('');
 });
@@ -83,7 +102,7 @@ socket.on('market_data', (data) => {
 
 // Handle errors
 socket.on('error', (error) => {
-  console.error('❌ Error:', error.message);
+  console.error('❌ Error:', error.code ? `${error.code}: ${error.message}` : error.message);
 });
 
 socket.on('disconnect', (reason) => {
