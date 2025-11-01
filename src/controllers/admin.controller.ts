@@ -19,7 +19,7 @@ import { RedisService } from '../services/redis.service';
 import { MarketDataGateway } from '../gateways/market-data.gateway';
 
 @Controller('admin')
-@ApiTags('admin')
+@ApiTags('admin', 'admin-ws')
 @ApiSecurity('admin')
 @UseGuards(AdminGuard)
 export class AdminController {
@@ -184,7 +184,6 @@ export class AdminController {
 
   // ===== WS Admin: Status =====
   @Get('ws/status')
-  @ApiTags('admin-ws')
   @ApiOperation({ summary: 'Get WebSocket namespace status' })
   async wsStatus() {
     const stats = (this.gateway as any)?.getConnectionStats?.();
@@ -201,7 +200,6 @@ export class AdminController {
 
   // ===== WS Admin: Config =====
   @Get('ws/config')
-  @ApiTags('admin-ws')
   @ApiOperation({ summary: 'Get WebSocket configuration' })
   async wsConfig() {
     const subscribeRps = Number(process.env.WS_SUBSCRIBE_RPS || 10);
@@ -222,7 +220,6 @@ export class AdminController {
 
   // ===== WS Admin: Rate limits =====
   @Post('ws/rate-limits')
-  @ApiTags('admin-ws')
   @ApiOperation({ summary: 'Update WebSocket event rate limits (process env scoped)' })
   @ApiBody({ schema: { properties: { subscribe_rps: { type: 'number' }, unsubscribe_rps: { type: 'number' }, mode_rps: { type: 'number' } } } })
   async setWsRateLimits(@Body() body: { subscribe_rps?: number; unsubscribe_rps?: number; mode_rps?: number }) {
@@ -234,7 +231,6 @@ export class AdminController {
 
   // ===== WS Admin: Entitlements =====
   @Post('ws/entitlements')
-  @ApiTags('admin-ws')
   @ApiOperation({ summary: 'Update API key exchange entitlements for WebSocket' })
   @ApiBody({ schema: { properties: { apiKey: { type: 'string' }, exchanges: { type: 'array', items: { type: 'string' } } }, required: ['apiKey', 'exchanges'] } })
   async setWsEntitlements(@Body() body: { apiKey: string; exchanges: string[] }) {
@@ -244,7 +240,6 @@ export class AdminController {
 
   // ===== WS Admin: Blocklist =====
   @Post('ws/blocklist')
-  @ApiTags('admin-ws')
   @ApiOperation({ summary: 'Add tokens/exchanges/apiKey/tenant to WS blocklist (Redis)' })
   @ApiBody({ schema: { properties: { tokens: { type: 'array', items: { type: 'number' } }, exchanges: { type: 'array', items: { type: 'string' } }, apiKey: { type: 'string' }, tenant_id: { type: 'string' }, reason: { type: 'string' } } } })
   async addBlock(@Body() body: { tokens?: number[]; exchanges?: string[]; apiKey?: string; tenant_id?: string; reason?: string }) {
@@ -256,7 +251,6 @@ export class AdminController {
   }
 
   @Post('ws/flush')
-  @ApiTags('admin-ws')
   @ApiOperation({ summary: 'Flush WS-related caches' })
   @ApiBody({ schema: { properties: { caches: { type: 'array', items: { type: 'string' }, example: ['last_tick', 'exchange_map', 'ws_counters'] } }, required: ['caches'] } })
   async flushCaches(@Body() body: { caches: string[] }) {
@@ -271,7 +265,6 @@ export class AdminController {
   }
 
   @Post('ws/namespace/broadcast')
-  @ApiTags('admin-ws')
   @ApiOperation({ summary: 'Broadcast an event to WS namespace or room' })
   @ApiBody({ schema: { properties: { event: { type: 'string' }, room: { type: 'string' }, payload: { type: 'object' } }, required: ['event', 'payload'] } })
   async broadcast(@Body() body: { event: string; room?: string; payload: any }) {

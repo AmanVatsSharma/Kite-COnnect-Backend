@@ -36,7 +36,7 @@ import { MarketDataProviderResolverService } from '../services/market-data-provi
 import { ApiKeyService } from '../services/api-key.service';
 import { MarketDataStreamService } from '../services/market-data-stream.service';
 import { Inject, forwardRef } from '@nestjs/common';
-import { validateSubscribePayload, validateUnsubscribePayload } from '../utils/ws-validation';
+import { validateSubscribePayload, validateUnsubscribePayload, validateSetModePayload } from '../utils/ws-validation';
 
 const PROTOCOL_VERSION = '2.0';
 
@@ -866,8 +866,7 @@ export class MarketDataGateway
       } catch {}
 
       // Validate
-      const v = (await import('../utils/ws-validation')) as any;
-      const val = v.validateSetModePayload({ instruments, mode });
+      const val = validateSetModePayload({ instruments, mode });
       if (!val.ok) {
         client.emit('error', {
           code: 'invalid_payload',
