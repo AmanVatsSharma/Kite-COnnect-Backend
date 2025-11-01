@@ -454,16 +454,6 @@ export class MarketDataGateway
         }
       } catch {}
 
-      // Initial snapshot for included tokens
-      let snapshot: Record<string, { last_price: number | null }> = {};
-      try {
-        if (includedTokens.length > 0) {
-          snapshot = await this.streamService.getRecentLTP(
-            includedTokens.map((t) => String(t)),
-          );
-        }
-      } catch {}
-
       client.emit('subscription_confirmed', {
         requested: requestedRaw,
         pairs: finalPairs.map((p) => `${p.exchange}-${p.token}`),
