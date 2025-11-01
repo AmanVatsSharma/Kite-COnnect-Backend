@@ -8,6 +8,7 @@ Minimal reference for search and suggest in the trading app.
 - GET `/api/search/filters`
 - GET `/api/search/stream` (SSE ~1s for LTP; auto-closes ~30s)
 - POST `/api/search/telemetry/selection` (best-effort query→symbol learning)
+- GET `/api/search/popular` (experimental/placeholder)
 
 ## Query params (search & suggest)
 - q: string (required)
@@ -24,12 +25,14 @@ Minimal reference for search and suggest in the trading app.
 - exchange, segment, instrumentType
 - expiryDate, strike, tick, lotSize
 - vortexExchange, ticker (e.g., NSE_FO_RELIANCE)
-- isDerivative (bool), underlyingSymbol (derivatives)
+- isDerivative? (bool, optional), underlyingSymbol? (optional; derivatives)
 - last_price (hydrated), timestamp (envelope)
 
 ## Behavior
 - Hydration: TTL ~0.8–1.0s cache; pair-based LTP when `vortexExchange` present.
-- Hydrate top-10 by default; when `ltp_only=true`, hydrate up to top-50 for better coverage.
+- Hydration probe scales with env tuning:
+  - `LTP_ONLY_PROBE_MULTIPLIER` (default 5)
+  - Caps: `SEARCH_LTP_ONLY_HYDRATE_CAP` (default 200), `SUGGEST_LTP_ONLY_HYDRATE_CAP` (default 100)
 - Filters apply to Meili query; `ltp_only` filters results after hydration.
 - SSE: emits every ~1s, auto-closes ~30s, max 100 tokens per session.
 
@@ -49,6 +52,9 @@ curl -N "$BASE/api/search/stream?tokens=738561,26000&ltp_only=true"
 
 # SSE stream for LTP by query (top hits hydrated)
 curl -N "$BASE/api/search/stream?q=RELIANCE&ltp_only=true"
+
+# Popular placeholder
+curl "$BASE/api/search/popular?limit=10"
 
 # Log a user selection for synonym learning (best effort)
 curl -X POST "$BASE/api/search/telemetry/selection" \
@@ -81,9 +87,9 @@ sequenceDiagram
 - Use `ltp_only=true` for user-facing suggestions to show live instruments.
 - `ticker` is handy for display or quick lookups.
 - Telemetry: POST `/api/search/telemetry/selection` with `{ q, symbol, instrumentToken }` after user picks a result.
+- Popular endpoint is experimental/placeholder; payload may be empty until wired to counters.
 
 ## Suggested enhancements
-- SSE stream for periodic re-hydrate (e.g., 1s) on active result set.
 - Popular/trending endpoint with cached LTP.
 - Synonym expansion service (auto-learn from user queries).
 - Underlying/derivative linking (e.g., show options for selected equity).
