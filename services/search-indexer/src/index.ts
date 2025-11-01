@@ -361,7 +361,7 @@ async function backfill() {
     const vortexExchange = normalizeVortexExchange(exchange, segment, instrumentType);
     const symbol = String(pick(['symbol', 'tradingsymbol', 'tradingSymbol'], ''));
     const ticker = `${vortexExchange}_${symbol}`;
-    const isDerivative = /FUT|OPT/i.test(instrumentType);
+    const isDerivative = /FUT|OPT/i.test(String(instrumentType || ''));
     const underlyingSymbol = isDerivative ? extractUnderlyingSymbol(symbol) : undefined;
     return {
       instrumentToken: token,
