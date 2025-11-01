@@ -50,7 +50,32 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
-    this.server = new WSServer({ server: httpServer, path });
+    // Use noServer mode and manually handle upgrades to avoid interfering with Socket.IO
+    this.server = new WSServer({ noServer: true });
+
+    // Attach upgrade handler to the underlying HTTP server
+    try {
+      httpServer.on('upgrade', (request: any, socket: any, head: any) => {
+        try {
+          const { pathname } = new URL(request.url, 'http://dummy');
+          if (pathname !== path) {
+            // Not our endpoint; let other handlers (e.g., Socket.IO) process it
+            return;
+          }
+          // Handle only /ws upgrades
+          this.server!.handleUpgrade(request, socket, head, (ws) => {
+            (this.server as WSServer).emit('connection', ws, request);
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[NativeWsService] upgrade handler error', e);
+          this.logger.error('Upgrade handler error', e as any);
+        }
+      });
+    } catch (e) {
+      this.logger.error('Failed to attach HTTP upgrade listener', e as any);
+    }
+
     this.server.on('connection', (client: HeartbeatWebSocket, request) => {
       try {
         client.isAlive = true;

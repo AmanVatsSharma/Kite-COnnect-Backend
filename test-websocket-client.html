@@ -390,9 +390,10 @@
                                 showConnectionQuality();
                             } else if (data.event === 'subscription_confirmed') {
                                 log(`✅ Subscription confirmed!`);
-                                log(`   Instruments: ${data.data?.instruments?.join(', ') || 'N/A'}`);
+                                log(`   Instruments: ${Array.isArray(data.instruments) ? data.instruments.join(', ') : 'N/A'}`);
+                                if (data.mode) log(`   Mode: ${data.mode}`);
                             } else if (data.event === 'market_data') {
-                                handleMarketData(data.data);
+                                handleMarketData(data);
                             } else if (data.event === 'error') {
                                 log(`❌ Error: ${data.message || 'Unknown error'}`);
                                 showError(data.message);
