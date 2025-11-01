@@ -7,6 +7,7 @@ import * as helmet from 'helmet';
 import * as compression from 'compression';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { MetricsInterceptor } from './interceptors/metrics.interceptor';
+import { NativeWsService } from './services/native-ws.service';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -86,6 +87,17 @@ async function bootstrap() {
 
     const port = configService.get('PORT', 3000);
     await app.listen(port);
+
+    // Initialize native WebSocket server on /ws path (behind Nginx SSL)
+    try {
+      const httpServer = app.getHttpServer();
+      const nativeWs = app.get(NativeWsService);
+      await nativeWs.init(httpServer, '/ws');
+    } catch (e) {
+      // Console for easy later debugging
+      // eslint-disable-next-line no-console
+      console.error('[Bootstrap] Failed to init NativeWsService', e);
+    }
 
     logger.log(`🚀 Trading App Backend is running on port ${port}`);
     logger.log(

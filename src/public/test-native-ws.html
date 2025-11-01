@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Native WS Test (/ws)</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding: 16px; }
+      label { display: block; margin: 8px 0 4px; }
+      input { width: 100%; padding: 8px; }
+      #log { border: 1px solid #ddd; padding: 8px; margin-top: 12px; height: 280px; overflow: auto; background: #fafafa; }
+      button { padding: 8px 12px; margin-right: 8px; }
+      .row { display: flex; gap: 8px; margin-top: 8px; }
+      .row > * { flex: 1; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    </style>
+  </head>
+  <body>
+    <h2>Native WebSocket Test (/ws)</h2>
+    <label>Domain</label>
+    <input id="domain" value="marketdata.vedpragya.com" />
+    <label>API Key</label>
+    <input id="apiKey" placeholder="YOUR_API_KEY" />
+    <div class="row">
+      <button id="connect">Connect</button>
+      <button id="disconnect">Disconnect</button>
+      <button id="ping">Ping</button>
+    </div>
+    <div class="row">
+      <input id="tokens" class="mono" placeholder="Comma-separated tokens e.g. 256265,260105" />
+      <select id="mode">
+        <option value="ltp" selected>ltp</option>
+        <option value="ohlcv">ohlcv</option>
+        <option value="full">full</option>
+      </select>
+      <button id="subscribe">Subscribe</button>
+      <button id="unsubscribe">Unsubscribe</button>
+    </div>
+    <pre id="log"></pre>
+    <script>
+      const logEl = document.getElementById('log');
+      let ws;
+
+      function log(...args) {
+        const line = args.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ');
+        logEl.textContent += line + '\n';
+        logEl.scrollTop = logEl.scrollHeight;
+        console.log('[test-native-ws]', ...args);
+      }
+
+      function buildUrl() {
+        const domain = document.getElementById('domain').value.trim();
+        const apiKey = document.getElementById('apiKey').value.trim();
+        return `wss://${domain}/ws?api_key=${encodeURIComponent(apiKey)}`;
+      }
+
+      document.getElementById('connect').onclick = () => {
+        try {
+          const url = buildUrl();
+          log('Connecting to', url);
+          ws = new WebSocket(url);
+          ws.onopen = () => log('✓ open');
+          ws.onclose = (e) => log('close', e.code, e.reason || '');
+          ws.onerror = (e) => log('error', e.message || e);
+          ws.onmessage = (e) => {
+            try { log('message', JSON.parse(e.data)); } catch { log('message', e.data); }
+          };
+        } catch (e) {
+          log('connect error', e);
+        }
+      };
+
+      document.getElementById('disconnect').onclick = () => {
+        try { ws && ws.close(1000, 'bye'); } catch {}
+      };
+
+      document.getElementById('ping').onclick = () => {
+        try { ws && ws.send(JSON.stringify({ event: 'ping' })); } catch {}
+      };
+
+      function parseTokens() {
+        const raw = document.getElementById('tokens').value.trim();
+        if (!raw) return [];
+        return raw.split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
+      }
+
+      document.getElementById('subscribe').onclick = () => {
+        const instruments = parseTokens();
+        const mode = document.getElementById('mode').value;
+        if (!instruments.length) return log('no tokens');
+        try { ws && ws.send(JSON.stringify({ event: 'subscribe', data: { instruments, mode } })); } catch {}
+      };
+
+      document.getElementById('unsubscribe').onclick = () => {
+        const instruments = parseTokens();
+        if (!instruments.length) return log('no tokens');
+        try { ws && ws.send(JSON.stringify({ event: 'unsubscribe', data: { instruments } })); } catch {}
+      };
+    </script>
+  </body>
+  </html>
+
+

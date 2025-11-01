@@ -10,7 +10,7 @@ import { MarketDataProvider } from '../../providers/market-data.provider';
 import { RedisService } from '../../services/redis.service';
 import { RequestBatchingService } from '../../services/request-batching.service';
 import { MarketDataGateway } from '../../gateways/market-data.gateway';
-import { NativeWebSocketGateway } from '../../gateways/native-websocket.gateway';
+import { NativeWsService } from '../../services/native-ws.service';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
 import { Inject, forwardRef } from '@nestjs/common';
 import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
@@ -35,8 +35,8 @@ export class StockService {
     private vortexInstrumentService: VortexInstrumentService,
     @Inject(forwardRef(() => MarketDataGateway))
     private marketDataGateway: MarketDataGateway,
-    @Inject(forwardRef(() => NativeWebSocketGateway))
-    private nativeWebSocketGateway: NativeWebSocketGateway,
+    @Inject(forwardRef(() => NativeWsService))
+    private nativeWsService: NativeWsService,
     private ltpCache: LtpMemoryCacheService,
     private metrics: MetricsService,
   ) {}
@@ -585,7 +585,7 @@ export class StockService {
       }
 
       try {
-        await this.nativeWebSocketGateway.broadcastMarketData(
+        await this.nativeWsService.broadcastMarketData(
           instrumentToken,
           data,
         );

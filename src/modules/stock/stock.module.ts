@@ -30,7 +30,7 @@ import { InstrumentMapping } from '../../entities/instrument-mapping.entity';
 import { VortexSession } from '../../entities/vortex-session.entity';
 import { VortexInstrument } from '../../entities/vortex-instrument.entity';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
-import { NativeWebSocketGateway } from '../../gateways/native-websocket.gateway';
+import { NativeWsService } from '../../services/native-ws.service';
 import { ProviderQueueService } from '../../services/provider-queue.service';
 import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
 
@@ -67,7 +67,7 @@ import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
     ProviderQueueService,
     LtpMemoryCacheService,
     MarketDataGateway,
-    NativeWebSocketGateway,
+    NativeWsService,
     MarketDataStreamService,
     ApiKeyGuard,
     MetricsService,
