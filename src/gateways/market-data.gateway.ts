@@ -36,6 +36,9 @@ import { MarketDataProviderResolverService } from '../services/market-data-provi
 import { ApiKeyService } from '../services/api-key.service';
 import { MarketDataStreamService } from '../services/market-data-stream.service';
 import { Inject, forwardRef } from '@nestjs/common';
+import { validateSubscribePayload, validateUnsubscribePayload } from '../utils/ws-validation';
+
+const PROTOCOL_VERSION = '2.0';
 
 /**
  * Client subscription tracking
@@ -177,6 +180,7 @@ export class MarketDataGateway
           "socket.emit('subscribe', { instruments: [26000, 'NSE_FO-135938'], mode: 'ltp' })",
       };
       client.emit('welcome', {
+        protocol_version: PROTOCOL_VERSION,
         message: 'Welcome to Vedpragya MarketData Solutions',
         provider: 'Vayu',
         exchanges,
@@ -278,6 +282,31 @@ export class MarketDataGateway
     try {
       const { instruments, type = 'live', mode = 'ltp' } = data;
 
+      // Validate payload shape
+      const v = validateSubscribePayload({ instruments, mode });
+      if (!v.ok) {
+        client.emit('error', {
+          code: 'invalid_payload',
+          message: 'Invalid subscribe payload',
+          errors: v.errors,
+        });
+        return;
+      }
+
+      // Rate limit per event
+      try {
+        const limit = Number(process.env.WS_SUBSCRIBE_RPS || 10);
+        const rl = await this.apiKeyService.checkWsRateLimit(
+          client.id,
+          'subscribe',
+          limit,
+        );
+        if (rl) {
+          client.emit('error', { code: 'rate_limited', message: 'Subscribe rate limit exceeded', ...rl });
+          return;
+        }
+      } catch {}
+
       if (
         !instruments ||
         !Array.isArray(instruments) ||
@@ -360,11 +389,24 @@ export class MarketDataGateway
       for (const p of resolvedPairs) pairByToken.set(p.token, p.exchange);
       for (const p of explicitPairs) pairByToken.set(p.token, p.exchange);
 
-      const finalPairs: Array<{ token: number; exchange: any }> = Array.from(
+      let finalPairs: Array<{ token: number; exchange: any }> = Array.from(
         pairByToken.entries(),
       ).map(([token, exchange]) => ({ token, exchange }));
 
       const unresolved = numericTokens.filter((t) => !pairByToken.has(t));
+
+      // Entitlement enforcement: filter pairs by allowed exchanges from API key metadata
+      const record: any = (client.data as any)?.apiKeyRecord;
+      const allowed = new Set(
+        (Array.isArray(record?.metadata?.exchanges) && record?.metadata?.exchanges) || [
+          'NSE_EQ',
+          'NSE_FO',
+          'NSE_CUR',
+          'MCX_FO',
+        ],
+      );
+      const forbiddenPairs = finalPairs.filter((p) => !allowed.has(String(p.exchange)));
+      finalPairs = finalPairs.filter((p) => allowed.has(String(p.exchange)));
 
       // Update subscription tracking only with included tokens
       const includedTokens = finalPairs.map((p) => p.token);
@@ -402,11 +444,33 @@ export class MarketDataGateway
         const lim = (provider as any)?.getSubscriptionLimit?.();
         if (Number.isFinite(lim) && lim > 0) maxSubs = lim;
       } catch {}
+      // Initial snapshot for included tokens
+      let snapshot: Record<string, { last_price: number | null }> = {};
+      try {
+        if (includedTokens.length > 0) {
+          snapshot = await this.streamService.getRecentLTP(
+            includedTokens.map((t) => String(t)),
+          );
+        }
+      } catch {}
+
+      // Initial snapshot for included tokens
+      let snapshot: Record<string, { last_price: number | null }> = {};
+      try {
+        if (includedTokens.length > 0) {
+          snapshot = await this.streamService.getRecentLTP(
+            includedTokens.map((t) => String(t)),
+          );
+        }
+      } catch {}
+
       client.emit('subscription_confirmed', {
         requested: requestedRaw,
         pairs: finalPairs.map((p) => `${p.exchange}-${p.token}`),
         included: includedTokens,
         unresolved,
+        forbidden: forbiddenPairs.map((p) => ({ token: p.token, exchange: p.exchange })),
+        snapshot,
         mode,
         limits: { maxSubscriptionsPerSocket: maxSubs },
         timestamp: new Date().toISOString(),
@@ -419,6 +483,16 @@ export class MarketDataGateway
           token: t,
           message:
             'Cannot auto-resolve exchange; please subscribe using EXCHANGE-TOKEN (e.g., NSE_FO-<token>)',
+        });
+      }
+
+      // Forbidden pairs feedback
+      for (const p of forbiddenPairs) {
+        client.emit('error', {
+          code: 'forbidden_exchange',
+          token: p.token,
+          exchange: p.exchange,
+          message: 'Your API key is not entitled for this exchange',
         });
       }
 
@@ -471,7 +545,32 @@ export class MarketDataGateway
   // Internal handler
   private async doUnsubscribe(data: { instruments: number[] }, client: Socket) {
     try {
-      const { instruments } = data;
+      const { instruments } = data as any;
+
+      // Validate payload shape
+      const v = validateUnsubscribePayload({ instruments });
+      if (!v.ok) {
+        client.emit('error', {
+          code: 'invalid_payload',
+          message: 'Invalid unsubscribe payload',
+          errors: v.errors,
+        });
+        return;
+      }
+
+      // Rate limit per event
+      try {
+        const limit = Number(process.env.WS_UNSUBSCRIBE_RPS || 10);
+        const rl = await this.apiKeyService.checkWsRateLimit(
+          client.id,
+          'unsubscribe',
+          limit,
+        );
+        if (rl) {
+          client.emit('error', { code: 'rate_limited', message: 'Unsubscribe rate limit exceeded', ...rl });
+          return;
+        }
+      } catch {}
 
       const subscription = this.clientSubscriptions.get(client.id);
       if (!subscription) {
@@ -479,27 +578,46 @@ export class MarketDataGateway
         return;
       }
 
+      // Support numeric or EXCHANGE-TOKEN inputs
+      const requestedRaw = Array.from(new Set(instruments as any));
+      const requestedTokens: number[] = [];
+      for (const item of requestedRaw as any[]) {
+        if (typeof item === 'string' && /-\d+$/.test(item)) {
+          const tok = Number(String(item).split('-').pop());
+          if (Number.isFinite(tok)) requestedTokens.push(tok);
+        } else {
+          const n = Number(item);
+          if (Number.isFinite(n)) requestedTokens.push(n);
+        }
+      }
+
       // Remove instruments from subscription
+      const before = new Set(subscription.instruments);
       subscription.instruments = subscription.instruments.filter(
-        (token) => !instruments.includes(token),
+        (token) => !requestedTokens.includes(token),
       );
 
       // Check if any other clients are subscribed to these instruments
       const stillSubscribed = Array.from(
         this.clientSubscriptions.values(),
       ).some((sub) =>
-        sub.instruments.some((token) => instruments.includes(token)),
+        sub.instruments.some((token) => requestedTokens.includes(token)),
       );
 
       if (!stillSubscribed) {
-        await this.unsubscribeFromInstruments(instruments, client.id);
+        await this.unsubscribeFromInstruments(requestedTokens, client.id);
       }
 
       // Leave rooms
-      instruments.forEach((token) => client.leave(`instrument:${token}`));
+      requestedTokens.forEach((token) => client.leave(`instrument:${token}`));
 
+      const removed = Array.from(before).filter((t) => !subscription.instruments.includes(t));
+      const not_found = requestedTokens.filter((t) => !before.has(t));
       client.emit('unsubscription_confirmed', {
-        instruments: subscription.instruments,
+        requested: requestedTokens,
+        removed,
+        not_found,
+        remaining: subscription.instruments,
         timestamp: new Date().toISOString(),
       });
 
@@ -598,6 +716,70 @@ export class MarketDataGateway
   }
 
   /**
+   * Identity and protocol details for the connected client
+   * Event: 'whoami'
+   */
+  @SubscribeMessage('whoami')
+  async handleWhoAmI(@ConnectedSocket() client: Socket) {
+    try {
+      const record: any = (client.data as any)?.apiKeyRecord;
+      const apiKey: string = (client.data as any)?.apiKey;
+      const usage = await this.apiKeyService.getUsageReport(apiKey);
+      const exchanges =
+        (Array.isArray(record?.metadata?.exchanges) &&
+          record?.metadata?.exchanges) || [
+          'NSE_EQ',
+          'NSE_FO',
+          'NSE_CUR',
+          'MCX_FO',
+        ];
+      const limits = {
+        connection: record?.connection_limit || 3,
+        maxSubscriptionsPerSocket: 1000,
+      } as any;
+      try {
+        const provider = await this.providerResolver.resolveForWebsocket();
+        const lim = (provider as any)?.getSubscriptionLimit?.();
+        if (Number.isFinite(lim) && lim > 0) limits.maxSubscriptionsPerSocket = lim;
+      } catch {}
+
+      const sub = this.clientSubscriptions.get(client.id);
+      const tokens = sub?.instruments || [];
+      const modes: Record<number, string> = {};
+      sub?.modeByInstrument?.forEach((m, t) => (modes[t] = m));
+
+      // Resolve pairs for better diagnostics
+      let pairs: string[] = [];
+      try {
+        const provider = await this.providerResolver.resolveForWebsocket();
+        const exMap: Map<string, any> = (provider as any)?.resolveExchanges
+          ? await (provider as any).resolveExchanges(tokens.map((t) => String(t)))
+          : new Map();
+        pairs = tokens
+          .filter((t) => exMap.has(String(t)))
+          .map((t) => `${exMap.get(String(t))}-${t}`);
+      } catch {}
+
+      client.emit('whoami', {
+        protocol_version: PROTOCOL_VERSION,
+        provider: 'Vayu',
+        apiKey: {
+          tenant: record?.tenant_id || 'unknown',
+          httpRequestsThisMinute: usage?.httpRequestsThisMinute || 0,
+          currentWsConnections: usage?.currentWsConnections || 0,
+        },
+        entitlements: { exchanges },
+        limits,
+        subscriptions: { tokens, pairs, modes, count: tokens.length },
+        server_time: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.warn('whoami failed', e as any);
+      client.emit('error', { code: 'whoami_failed', message: 'Failed to retrieve identity' });
+    }
+  }
+
+  /**
    * Get historical market data for an instrument
    *
    * @param data.instrumentToken - Instrument token
@@ -647,6 +829,190 @@ export class MarketDataGateway
     } catch (error) {
       this.logger.error('Error fetching historical data', error);
       client.emit('error', { code: 'historical_failed', message: 'Failed to fetch historical data' });
+    }
+  }
+
+  /**
+   * Set mode for subscribed instruments
+   * Event: 'set_mode'
+   * Body: { instruments: (number|string)[], mode: 'ltp'|'ohlcv'|'full' }
+   */
+  @SubscribeMessage('set_mode')
+  async handleSetMode(
+    @MessageBody()
+    body: { instruments: Array<number | string>; mode: 'ltp' | 'ohlcv' | 'full' },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { instruments, mode } = body as any;
+      const subscription = this.clientSubscriptions.get(client.id);
+      if (!subscription) {
+        client.emit('error', { code: 'not_connected', message: 'No active subscription context' });
+        return;
+      }
+
+      // Rate limit per event
+      try {
+        const limit = Number(process.env.WS_MODE_RPS || 20);
+        const rl = await this.apiKeyService.checkWsRateLimit(
+          client.id,
+          'set_mode',
+          limit,
+        );
+        if (rl) {
+          client.emit('error', { code: 'rate_limited', message: 'Set mode rate limit exceeded', ...rl });
+          return;
+        }
+      } catch {}
+
+      // Validate
+      const v = (await import('../utils/ws-validation')) as any;
+      const val = v.validateSetModePayload({ instruments, mode });
+      if (!val.ok) {
+        client.emit('error', {
+          code: 'invalid_payload',
+          message: 'Invalid set_mode payload',
+          errors: val.errors,
+        });
+        return;
+      }
+
+      // Parse targets
+      const requestedRaw = Array.from(new Set(instruments as any));
+      const tokens: number[] = [];
+      for (const item of requestedRaw as any[]) {
+        if (typeof item === 'string' && /-\d+$/.test(item)) {
+          const tok = Number(String(item).split('-').pop());
+          if (Number.isFinite(tok)) tokens.push(tok);
+        } else {
+          const n = Number(item);
+          if (Number.isFinite(n)) tokens.push(n);
+        }
+      }
+
+      const subscribedSet = new Set(subscription.instruments);
+      const target = tokens.filter((t) => subscribedSet.has(t));
+      const not_subscribed = tokens.filter((t) => !subscribedSet.has(t));
+
+      if (target.length > 0) {
+        await this.streamService.setMode(mode, target);
+        target.forEach((t) => subscription.modeByInstrument.set(t, mode));
+      }
+
+      // Compute unresolved by attempting resolution (diagnostic only)
+      let unresolved: number[] = [];
+      try {
+        const provider = await this.providerResolver.resolveForWebsocket();
+        const exMap: Map<string, any> = (provider as any)?.resolveExchanges
+          ? await (provider as any).resolveExchanges(target.map((t) => String(t)))
+          : new Map();
+        unresolved = target.filter((t) => !exMap.has(String(t)));
+      } catch {}
+
+      client.emit('mode_set', {
+        requested: tokens,
+        updated: target,
+        not_subscribed,
+        unresolved,
+        mode,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.error('Error handling set_mode', e);
+      client.emit('error', { code: 'set_mode_failed', message: 'Failed to set mode' });
+    }
+  }
+
+  /**
+   * List current subscriptions for this client
+   * Event: 'list_subscriptions'
+   */
+  @SubscribeMessage('list_subscriptions')
+  async handleListSubscriptions(@ConnectedSocket() client: Socket) {
+    try {
+      const sub = this.clientSubscriptions.get(client.id);
+      const tokens = sub?.instruments || [];
+      const modes: Record<number, string> = {};
+      sub?.modeByInstrument?.forEach((m, t) => (modes[t] = m));
+      let pairs: string[] = [];
+      try {
+        const provider = await this.providerResolver.resolveForWebsocket();
+        const exMap: Map<string, any> = (provider as any)?.resolveExchanges
+          ? await (provider as any).resolveExchanges(tokens.map((t) => String(t)))
+          : new Map();
+        pairs = tokens
+          .filter((t) => exMap.has(String(t)))
+          .map((t) => `${exMap.get(String(t))}-${t}`);
+      } catch {}
+      client.emit('subscriptions', {
+        tokens,
+        modes,
+        pairs,
+        count: tokens.length,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.warn('list_subscriptions failed', e as any);
+      client.emit('error', { code: 'list_failed', message: 'Failed to list subscriptions' });
+    }
+  }
+
+  /**
+   * Unsubscribe all tokens for this client
+   * Event: 'unsubscribe_all'
+   */
+  @SubscribeMessage('unsubscribe_all')
+  async handleUnsubscribeAll(@ConnectedSocket() client: Socket) {
+    try {
+      const sub = this.clientSubscriptions.get(client.id);
+      const tokens = sub?.instruments || [];
+      if (tokens.length > 0) {
+        await this.unsubscribeFromInstruments(tokens, client.id);
+        tokens.forEach((t) => client.leave(`instrument:${t}`));
+      }
+      if (sub) {
+        sub.instruments = [];
+        sub.modeByInstrument.clear();
+      }
+      client.emit('unsubscribed_all', {
+        removed_count: tokens.length,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.warn('unsubscribe_all failed', e as any);
+      client.emit('error', { code: 'unsubscribe_all_failed', message: 'Failed to unsubscribe all' });
+    }
+  }
+
+  /**
+   * Ping: client can compute RTT; server returns server time
+   */
+  @SubscribeMessage('ping')
+  async handlePing(@ConnectedSocket() client: Socket) {
+    client.emit('pong', { t: Date.now(), protocol_version: PROTOCOL_VERSION });
+  }
+
+  /**
+   * Status: return gateway stats and provider streaming status
+   */
+  @SubscribeMessage('status')
+  async handleStatus(@ConnectedSocket() client: Socket) {
+    try {
+      const stream = await this.streamService.getStreamingStatus();
+      const sub = this.clientSubscriptions.get(client.id);
+      const stats = this.getConnectionStats();
+      client.emit('status', {
+        protocol_version: PROTOCOL_VERSION,
+        streaming: stream,
+        gateway: {
+          totalConnections: stats.totalConnections,
+          yourSubscriptions: sub?.instruments?.length || 0,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.warn('status failed', e as any);
+      client.emit('error', { code: 'status_failed', message: 'Failed to get status' });
     }
   }
 

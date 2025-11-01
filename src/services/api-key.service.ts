@@ -57,6 +57,27 @@ export class ApiKeyService {
     };
   }
 
+  // Simple per-event rate limiter (RPS) using 1-second buckets in Redis
+  // Returns null if allowed; otherwise returns { retry_after_ms }
+  async checkWsRateLimit(
+    socketId: string,
+    event: string,
+    rpsLimit: number,
+  ): Promise<{ retry_after_ms: number } | null> {
+    if (!rpsLimit || rpsLimit <= 0) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const bucketKey = `ws:rate:${socketId}:${event}:${now}`;
+    const count = await this.redisService.incr(bucketKey);
+    if (count === 1) {
+      await this.redisService.expire(bucketKey, 2);
+    }
+    if (count > rpsLimit) {
+      const retry_after_ms = 1000 - (Date.now() % 1000);
+      return { retry_after_ms };
+    }
+    return null;
+  }
+
   private buildMinuteBucketKey(prefix: string, key: string): string {
     const now = new Date();
     const minute = `${now.getUTCFullYear()}${now.getUTCMonth()}${now.getUTCDate()}${now.getUTCHours()}${now.getUTCMinutes()}`;
