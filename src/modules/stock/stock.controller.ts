@@ -1173,6 +1173,124 @@ export class StockController {
     }
   }
 
+  @Post('vayu/validate-instruments')
+  @ApiOperation({
+    summary: 'Validate and cleanup invalid Vortex instruments',
+    description:
+      'Tests LTP fetch capability for instruments in batches, identifies invalid instruments, and optionally deactivates them. Useful for cleaning up instruments that no longer return valid LTP data.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        exchange: {
+          type: 'string',
+          example: 'MCX_FO',
+          description: 'Filter by exchange (NSE_EQ, NSE_FO, NSE_CUR, MCX_FO)',
+        },
+        instrument_name: {
+          type: 'string',
+          example: 'FUTCOM',
+          description: 'Filter by instrument type',
+        },
+        symbol: {
+          type: 'string',
+          example: 'GOLD',
+          description: 'Filter by symbol (partial match)',
+        },
+        option_type: {
+          type: 'string',
+          example: 'CE',
+          description: 'Filter by option type (CE/PE/null)',
+        },
+        batch_size: {
+          type: 'number',
+          example: 1000,
+          default: 1000,
+          description: 'Number of instruments to test per batch',
+        },
+        auto_cleanup: {
+          type: 'boolean',
+          example: false,
+          default: false,
+          description: 'If true, deactivates invalid instruments',
+        },
+        dry_run: {
+          type: 'boolean',
+          example: true,
+          default: true,
+          description: 'If true, only reports without making changes',
+        },
+      },
+    },
+  })
+  async validateVortexInstruments(
+    @Body()
+    body: {
+      exchange?: string;
+      instrument_name?: string;
+      symbol?: string;
+      option_type?: string;
+      batch_size?: number;
+      auto_cleanup?: boolean;
+      dry_run?: boolean;
+    },
+  ) {
+    try {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log('[Validate Instruments] Request received:', {
+        exchange: body.exchange,
+        instrument_name: body.instrument_name,
+        symbol: body.symbol,
+        batch_size: body.batch_size || 1000,
+        auto_cleanup: body.auto_cleanup || false,
+        dry_run: body.dry_run !== false, // Default to true
+      });
+
+      const result = await this.vortexInstrumentService.validateAndCleanupInstruments(
+        {
+          exchange: body.exchange,
+          instrument_name: body.instrument_name,
+          symbol: body.symbol,
+          option_type: body.option_type,
+          batch_size: body.batch_size || 1000,
+          auto_cleanup: body.auto_cleanup || false,
+          dry_run: body.dry_run !== false,
+        },
+        this.vortexProvider,
+      );
+
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log('[Validate Instruments] Validation completed:', {
+        total: result.summary.total_instruments,
+        valid: result.summary.valid_ltp,
+        invalid: result.summary.invalid_ltp,
+        deactivated: result.cleanup?.deactivated || 0,
+      });
+
+      return {
+        success: true,
+        ...result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.error('[Validate Instruments] Error:', error);
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to validate instruments',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Get('vayu/instruments')
   @ApiOperation({ summary: 'Get Vayu instruments with optional filters' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })

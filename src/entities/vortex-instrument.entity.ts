@@ -58,6 +58,9 @@ export class VortexInstrument {
   @Column({ type: 'int', default: 1 })
   lot_size: number; // Lot size
 
+  @Column({ type: 'text', nullable: true })
+  description: string; // Computed description: e.g., "NSE_EQ RELIANCE EQ" or "NSE_FO NIFTY 25JAN2024 22000 CE"
+
   @Column({ default: true })
   is_active: boolean;
 

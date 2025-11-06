@@ -68,6 +68,9 @@ export class VortexInstrumentService {
             where: { token: vortexInstrument.token },
           });
 
+          // Generate description for better documentation
+          const description = this.generateDescription(vortexInstrument);
+
           if (existingInstrument) {
             // Update existing instrument
             await this.vortexInstrumentRepo.update(
@@ -81,6 +84,7 @@ export class VortexInstrumentService {
                 strike_price: vortexInstrument.strike_price,
                 tick: vortexInstrument.tick,
                 lot_size: vortexInstrument.lot_size,
+                description,
               },
             );
             updated++;
@@ -99,6 +103,7 @@ export class VortexInstrumentService {
               strike_price: vortexInstrument.strike_price,
               tick: vortexInstrument.tick,
               lot_size: vortexInstrument.lot_size,
+              description,
             });
             await this.vortexInstrumentRepo.save(newInstrument);
             synced++;
@@ -1169,6 +1174,423 @@ export class VortexInstrumentService {
         '[VortexInstrumentService] Failed to clear cache',
         error,
       );
+    }
+  }
+
+  /**
+   * Generate human-readable description for an instrument
+   * Format: "EXCHANGE SYMBOL INSTRUMENT_NAME [EXPIRY] [STRIKE] [OPTION_TYPE]"
+   * Examples:
+   * - "NSE_EQ RELIANCE EQ"
+   * - "NSE_FO NIFTY 25JAN2024 22000 CE"
+   * - "MCX_FO GOLD FUTCOM"
+   */
+  private generateDescription(instrument: any): string {
+    const parts: string[] = [instrument.exchange || '', instrument.symbol || ''];
+    
+    if (instrument.instrument_name) {
+      parts.push(instrument.instrument_name);
+    }
+    
+    // Add expiry date if present (format: YYYYMMDD -> DDMMMYYYY)
+    if (instrument.expiry_date && instrument.expiry_date.length === 8) {
+      try {
+        const year = instrument.expiry_date.substring(0, 4);
+        const month = instrument.expiry_date.substring(4, 6);
+        const day = instrument.expiry_date.substring(6, 8);
+        const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const monthName = monthNames[parseInt(month) - 1] || month;
+        parts.push(`${day}${monthName}${year}`);
+      } catch (e) {
+        // If parsing fails, use raw expiry_date
+        parts.push(instrument.expiry_date);
+      }
+    }
+    
+    // Add strike price if present
+    if (instrument.strike_price && Number.isFinite(instrument.strike_price) && instrument.strike_price > 0) {
+      parts.push(String(instrument.strike_price));
+    }
+    
+    // Add option type if present
+    if (instrument.option_type) {
+      parts.push(instrument.option_type);
+    }
+    
+    return parts.filter(p => p).join(' ');
+  }
+
+  /**
+   * Validate and cleanup invalid Vortex instruments
+   * 
+   * Tests LTP fetch capability for instruments in batches, identifies invalid instruments,
+   * and optionally deactivates them.
+   * 
+   * Flow:
+   * 1. Query instruments from DB with filters
+   * 2. Group into batches of specified size (default 1000)
+   * 3. For each batch:
+   *    - Build exchange-token pairs using authoritative exchange from DB
+   *    - Call vortexProvider.getLTPByPairs() with pairs
+   *    - Identify tokens with null/invalid LTP
+   *    - Log reasons (no_data, wrong_exchange, invalid_token, etc.)
+   * 4. Generate statistics and report
+   * 5. If auto_cleanup=true and dry_run=false:
+   *    - Set is_active=false for invalid instruments
+   *    - Log cleanup actions
+   * 
+   * @param filters - Filter criteria for instruments
+   * @param vortexProvider - Vortex provider service instance
+   * @returns Validation results with statistics and invalid instruments list
+   */
+  async validateAndCleanupInstruments(
+    filters: {
+      exchange?: string;
+      instrument_name?: string;
+      symbol?: string;
+      option_type?: string;
+      batch_size?: number;
+      auto_cleanup?: boolean;
+      dry_run?: boolean;
+    },
+    vortexProvider: any,
+  ): Promise<{
+    summary: {
+      total_instruments: number;
+      tested: number;
+      valid_ltp: number;
+      invalid_ltp: number;
+      errors: number;
+    };
+    invalid_instruments: Array<{
+      token: number;
+      exchange: string;
+      symbol: string;
+      instrument_name: string;
+      reason: string;
+      ltp_response: any;
+    }>;
+    cleanup: {
+      deactivated: number;
+      removed: number;
+    };
+    batches_processed: number;
+  }> {
+    try {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log('[VortexInstrumentService] Starting validation with filters:', filters);
+
+      const batchSize = filters.batch_size || 1000;
+      const autoCleanup = filters.auto_cleanup || false;
+      const dryRun = filters.dry_run !== false; // Default to true
+
+      // Step 1: Query instruments from DB with filters
+      const queryBuilder = this.vortexInstrumentRepo.createQueryBuilder('instrument');
+
+      if (filters.exchange) {
+        queryBuilder.andWhere('instrument.exchange = :exchange', {
+          exchange: filters.exchange,
+        });
+      }
+
+      if (filters.instrument_name) {
+        queryBuilder.andWhere('instrument.instrument_name = :instrument_name', {
+          instrument_name: filters.instrument_name,
+        });
+      }
+
+      if (filters.symbol) {
+        queryBuilder.andWhere('instrument.symbol ILIKE :symbol', {
+          symbol: `%${filters.symbol}%`,
+        });
+      }
+
+      if (filters.option_type !== undefined) {
+        if (filters.option_type === null) {
+          queryBuilder.andWhere('instrument.option_type IS NULL');
+        } else {
+          queryBuilder.andWhere('instrument.option_type = :option_type', {
+            option_type: filters.option_type,
+          });
+        }
+      }
+
+      // Only validate active instruments
+      queryBuilder.andWhere('instrument.is_active = :is_active', { is_active: true });
+
+      const allInstruments = await queryBuilder.getMany();
+      const totalInstruments = allInstruments.length;
+
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log(
+        `[VortexInstrumentService] Found ${totalInstruments} instruments to validate`,
+      );
+
+      if (totalInstruments === 0) {
+        return {
+          summary: {
+            total_instruments: 0,
+            tested: 0,
+            valid_ltp: 0,
+            invalid_ltp: 0,
+            errors: 0,
+          },
+          invalid_instruments: [],
+          cleanup: { deactivated: 0, removed: 0 },
+          batches_processed: 0,
+        };
+      }
+
+      // Step 2: Group into batches
+      const batches: VortexInstrument[][] = [];
+      for (let i = 0; i < allInstruments.length; i += batchSize) {
+        batches.push(allInstruments.slice(i, i + batchSize));
+      }
+
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log(
+        `[VortexInstrumentService] Processing ${batches.length} batches of up to ${batchSize} instruments each`,
+      );
+
+      // Step 3: Process each batch
+      const invalidInstruments: Array<{
+        token: number;
+        exchange: string;
+        symbol: string;
+        instrument_name: string;
+        reason: string;
+        ltp_response: any;
+      }> = [];
+      let validLtpCount = 0;
+      let invalidLtpCount = 0;
+      let errorCount = 0;
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(
+          `[VortexInstrumentService] Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} instruments`,
+        );
+
+        try {
+          // Build exchange-token pairs using authoritative exchange from DB
+          const pairs: Array<{
+            exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+            token: string | number;
+          }> = [];
+
+          const allowedExchanges = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
+
+          for (const instrument of batch) {
+            const ex = String(instrument.exchange || '').toUpperCase();
+            if (allowedExchanges.has(ex)) {
+              pairs.push({
+                exchange: ex as any,
+                token: instrument.token,
+              });
+            } else {
+              // Instrument with invalid/unresolved exchange
+              invalidInstruments.push({
+                token: instrument.token,
+                exchange: instrument.exchange || 'UNKNOWN',
+                symbol: instrument.symbol || '',
+                instrument_name: instrument.instrument_name || '',
+                reason: 'invalid_exchange',
+                ltp_response: null,
+              });
+              invalidLtpCount++;
+              // Console for easy debugging
+              // eslint-disable-next-line no-console
+              console.log(
+                `[VortexInstrumentService] Instrument ${instrument.token} has invalid exchange: ${instrument.exchange}`,
+              );
+            }
+          }
+
+          if (pairs.length === 0) {
+            // Console for easy debugging
+            // eslint-disable-next-line no-console
+            console.log(
+              `[VortexInstrumentService] Batch ${batchIndex + 1} has no valid pairs, skipping`,
+            );
+            continue;
+          }
+
+          // Call vortexProvider.getLTPByPairs() with pairs
+          // Console for easy debugging
+          // eslint-disable-next-line no-console
+          console.log(
+            `[VortexInstrumentService] Fetching LTP for ${pairs.length} pairs in batch ${batchIndex + 1}`,
+          );
+          const ltpResults = await vortexProvider.getLTPByPairs(pairs);
+
+          // Identify tokens with null/invalid LTP
+          const pairKeyToInstrument = new Map<string, VortexInstrument>();
+          for (const instrument of batch) {
+            const ex = String(instrument.exchange || '').toUpperCase();
+            if (allowedExchanges.has(ex)) {
+              const pairKey = `${ex}-${instrument.token}`;
+              pairKeyToInstrument.set(pairKey, instrument);
+            }
+          }
+
+          for (const [pairKey, ltpData] of Object.entries(ltpResults)) {
+            const instrument = pairKeyToInstrument.get(pairKey);
+            if (!instrument) continue;
+
+            const lastPrice = (ltpData as any)?.last_price;
+            const hasValidLtp =
+              Number.isFinite(lastPrice) && lastPrice !== null && lastPrice > 0;
+
+            if (hasValidLtp) {
+              validLtpCount++;
+              // Console for easy debugging
+              // eslint-disable-next-line no-console
+              console.log(
+                `[VortexInstrumentService] Instrument ${instrument.token} (${instrument.symbol}) has valid LTP: ${lastPrice}`,
+              );
+            } else {
+              invalidLtpCount++;
+              const reason = lastPrice === null ? 'no_ltp_data' : 'invalid_ltp_value';
+              invalidInstruments.push({
+                token: instrument.token,
+                exchange: instrument.exchange || 'UNKNOWN',
+                symbol: instrument.symbol || '',
+                instrument_name: instrument.instrument_name || '',
+                reason,
+                ltp_response: ltpData,
+              });
+              // Console for easy debugging
+              // eslint-disable-next-line no-console
+              console.log(
+                `[VortexInstrumentService] Instrument ${instrument.token} (${instrument.symbol}) has invalid LTP: reason=${reason}, response=${JSON.stringify(ltpData)}`,
+              );
+            }
+          }
+
+          // Check for instruments in batch that weren't in LTP results
+          for (const instrument of batch) {
+            const ex = String(instrument.exchange || '').toUpperCase();
+            if (!allowedExchanges.has(ex)) continue;
+
+            const pairKey = `${ex}-${instrument.token}`;
+            if (!(pairKey in ltpResults)) {
+              invalidLtpCount++;
+              invalidInstruments.push({
+                token: instrument.token,
+                exchange: instrument.exchange || 'UNKNOWN',
+                symbol: instrument.symbol || '',
+                instrument_name: instrument.instrument_name || '',
+                reason: 'missing_from_response',
+                ltp_response: null,
+              });
+              // Console for easy debugging
+              // eslint-disable-next-line no-console
+              console.log(
+                `[VortexInstrumentService] Instrument ${instrument.token} (${instrument.symbol}) missing from LTP response`,
+              );
+            }
+          }
+        } catch (batchError) {
+          errorCount++;
+          // Console for easy debugging
+          // eslint-disable-next-line no-console
+          console.error(
+            `[VortexInstrumentService] Error processing batch ${batchIndex + 1}:`,
+            batchError,
+          );
+          this.logger.error(
+            `[VortexInstrumentService] Error processing batch ${batchIndex + 1}`,
+            batchError,
+          );
+          // Mark all instruments in this batch as having errors
+          for (const instrument of batch) {
+            invalidInstruments.push({
+              token: instrument.token,
+              exchange: instrument.exchange || 'UNKNOWN',
+              symbol: instrument.symbol || '',
+              instrument_name: instrument.instrument_name || '',
+              reason: 'batch_error',
+              ltp_response: { error: batchError.message },
+            });
+            invalidLtpCount++;
+          }
+        }
+
+        // Rate limiting: wait 1 second between batches to respect Vortex rate limits
+        if (batchIndex < batches.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+
+      // Step 4: Generate statistics
+      const summary = {
+        total_instruments: totalInstruments,
+        tested: totalInstruments,
+        valid_ltp: validLtpCount,
+        invalid_ltp: invalidLtpCount,
+        errors: errorCount,
+      };
+
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log('[VortexInstrumentService] Validation summary:', summary);
+
+      // Step 5: Cleanup if requested
+      let deactivatedCount = 0;
+      let removedCount = 0;
+
+      if (autoCleanup && !dryRun && invalidInstruments.length > 0) {
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(
+          `[VortexInstrumentService] Starting cleanup: deactivating ${invalidInstruments.length} invalid instruments`,
+        );
+
+        const invalidTokens = invalidInstruments.map((inv) => inv.token);
+
+        // Deactivate invalid instruments
+        const updateResult = await this.vortexInstrumentRepo.update(
+          { token: In(invalidTokens) },
+          { is_active: false },
+        );
+        deactivatedCount = updateResult.affected || 0;
+
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(
+          `[VortexInstrumentService] Cleanup completed: ${deactivatedCount} instruments deactivated`,
+        );
+        this.logger.log(
+          `[VortexInstrumentService] Deactivated ${deactivatedCount} invalid instruments`,
+        );
+      } else if (autoCleanup && dryRun) {
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(
+          `[VortexInstrumentService] Dry run mode: would deactivate ${invalidInstruments.length} instruments`,
+        );
+      }
+
+      return {
+        summary,
+        invalid_instruments: invalidInstruments,
+        cleanup: {
+          deactivated: deactivatedCount,
+          removed: removedCount,
+        },
+        batches_processed: batches.length,
+      };
+    } catch (error) {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.error('[VortexInstrumentService] Validation error:', error);
+      this.logger.error('[VortexInstrumentService] Validation failed', error);
+      throw error;
     }
   }
 }
