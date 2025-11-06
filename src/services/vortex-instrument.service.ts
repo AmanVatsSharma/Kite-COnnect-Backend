@@ -238,6 +238,23 @@ export class VortexInstrumentService {
 
       queryBuilder.orderBy('instrument.symbol', 'ASC');
 
+      // Select all fields including description
+      queryBuilder.select([
+        'instrument.token',
+        'instrument.exchange',
+        'instrument.symbol',
+        'instrument.instrument_name',
+        'instrument.expiry_date',
+        'instrument.option_type',
+        'instrument.strike_price',
+        'instrument.tick',
+        'instrument.lot_size',
+        'instrument.description',
+        'instrument.is_active',
+        'instrument.created_at',
+        'instrument.updated_at',
+      ]);
+
       const instruments = await queryBuilder.getMany();
 
       return { instruments, total };
@@ -704,10 +721,10 @@ export class VortexInstrumentService {
 
       // Structure the data
       const expiries = [
-        ...new Set(options.map((o) => o.expiry_date).filter(Boolean)),
+        ...new Set(options.map((o) => o.expiry_date).filter(Boolean) as string[]),
       ].sort();
       const strikes = [
-        ...new Set(options.map((o) => o.strike_price).filter((p) => p > 0)),
+        ...new Set(options.map((o) => o.strike_price).filter((p) => p && p > 0) as number[]),
       ].sort((a, b) => a - b);
 
       const optionsChain: Record<
@@ -767,18 +784,38 @@ export class VortexInstrumentService {
         return { instruments: {}, ltp: {}, queryTime: Date.now() - startTime };
       }
 
-      // Limit to 100 tokens for performance
-      const limitedTokens = tokens.slice(0, 100);
+      // Get instruments (handle up to 1000 tokens in batches)
+      const batchSize = 1000;
+      const allInstruments: VortexInstrument[] = [];
+      
+      for (let i = 0; i < tokens.length; i += batchSize) {
+        const batch = tokens.slice(i, i + batchSize);
+        const instruments = await this.vortexInstrumentRepo
+          .createQueryBuilder('v')
+          .where('v.token IN (:...tokens)', { tokens: batch })
+          .andWhere('v.is_active = :active', { active: true })
+          .select([
+            'v.token',
+            'v.exchange',
+            'v.symbol',
+            'v.instrument_name',
+            'v.expiry_date',
+            'v.option_type',
+            'v.strike_price',
+            'v.tick',
+            'v.lot_size',
+            'v.description',
+            'v.is_active',
+          ])
+          .getMany();
+        allInstruments.push(...instruments);
+      }
+      
+      const instruments = allInstruments;
 
-      // Get instruments
-      const instruments = await this.vortexInstrumentRepo
-        .createQueryBuilder('v')
-        .where('v.token IN (:...tokens)', { tokens: limitedTokens })
-        .andWhere('v.is_active = :active', { active: true })
-        .getMany();
-
-      // Get live prices
-      const ltp = await this.getVortexLTP(limitedTokens);
+      // Get live prices (limit to 100 for LTP to avoid rate limits)
+      const ltpTokens = tokens.slice(0, 100);
+      const ltp = await this.getVortexLTP(ltpTokens);
 
       // Convert to keyed objects
       const instrumentsMap: Record<number, VortexInstrument> = {};
@@ -1590,6 +1627,69 @@ export class VortexInstrumentService {
       // eslint-disable-next-line no-console
       console.error('[VortexInstrumentService] Validation error:', error);
       this.logger.error('[VortexInstrumentService] Validation failed', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all inactive instruments from the database
+   * 
+   * Permanently removes all instruments where is_active = false.
+   * This operation cannot be undone, so use with caution.
+   * 
+   * @returns Number of deleted instruments
+   */
+  async deleteInactiveInstruments(): Promise<number> {
+    try {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log('[VortexInstrumentService] Starting deletion of inactive instruments');
+
+      // First, count how many will be deleted
+      const count = await this.vortexInstrumentRepo.count({
+        where: { is_active: false },
+      });
+
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log(
+        `[VortexInstrumentService] Found ${count} inactive instruments to delete`,
+      );
+
+      if (count === 0) {
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(
+          '[VortexInstrumentService] No inactive instruments to delete',
+        );
+        return 0;
+      }
+
+      // Delete all inactive instruments
+      const deleteResult = await this.vortexInstrumentRepo.delete({
+        is_active: false,
+      });
+
+      const deletedCount = deleteResult.affected || 0;
+
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log(
+        `[VortexInstrumentService] Successfully deleted ${deletedCount} inactive instruments`,
+      );
+      this.logger.log(
+        `[VortexInstrumentService] Deleted ${deletedCount} inactive instruments`,
+      );
+
+      return deletedCount;
+    } catch (error) {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.error('[VortexInstrumentService] Error deleting inactive instruments:', error);
+      this.logger.error(
+        '[VortexInstrumentService] Failed to delete inactive instruments',
+        error,
+      );
       throw error;
     }
   }

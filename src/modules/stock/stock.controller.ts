@@ -1118,14 +1118,36 @@ export class StockController {
         // eslint-disable-next-line no-console
         console.log('[Vayu LTP] instruments mode:', { count: tokens.length });
         const data = await this.vortexProvider.getLTP(tokens);
+        
+        // Enrich with instrument descriptions and other data
+        const enrichedData: Record<string, any> = {};
+        const instrumentTokens = tokens.map((t) => parseInt(t));
+        const instruments = await this.vortexInstrumentService.getVortexInstrumentsBatch(instrumentTokens);
+        
+        for (const [token, ltpData] of Object.entries(data)) {
+          const instrument = instruments.instruments[parseInt(token)];
+          enrichedData[token] = {
+            ...ltpData,
+            description: instrument?.description || null,
+            symbol: instrument?.symbol || null,
+            exchange: instrument?.exchange || null,
+            instrument_name: instrument?.instrument_name || null,
+            expiry_date: instrument?.expiry_date || null,
+            option_type: instrument?.option_type || null,
+            strike_price: instrument?.strike_price || null,
+            tick: instrument?.tick || null,
+            lot_size: instrument?.lot_size || null,
+          };
+        }
+        
         const elapsed = Date.now() - startedAt;
         this.vortexProvider['logger']?.log?.(
           `[Vayu LTP] instruments served: ${tokens.length} tokens in ${elapsed}ms`,
         );
         return {
           success: true,
-          data,
-          count: Object.keys(data || {}).length,
+          data: enrichedData,
+          count: Object.keys(enrichedData || {}).length,
           timestamp: new Date().toISOString(),
           mode: 'instruments',
         };
@@ -1153,10 +1175,33 @@ export class StockController {
       }
 
       const data = await this.vortexProvider.getLTPByPairs(sanitized as any);
+      
+      // Enrich with instrument descriptions and other data
+      const enrichedData: Record<string, any> = {};
+      const instrumentTokens = sanitized.map((p) => parseInt(p.token));
+      const instruments = await this.vortexInstrumentService.getVortexInstrumentsBatch(instrumentTokens);
+      
+      for (const [pairKey, ltpData] of Object.entries(data)) {
+        const token = parseInt(pairKey.split('-').pop() || '0');
+        const instrument = instruments.instruments[token];
+        enrichedData[pairKey] = {
+          ...ltpData,
+          description: instrument?.description || null,
+          symbol: instrument?.symbol || null,
+          exchange: instrument?.exchange || null,
+          instrument_name: instrument?.instrument_name || null,
+          expiry_date: instrument?.expiry_date || null,
+          option_type: instrument?.option_type || null,
+          strike_price: instrument?.strike_price || null,
+          tick: instrument?.tick || null,
+          lot_size: instrument?.lot_size || null,
+        };
+      }
+      
       return {
         success: true,
-        data,
-        count: Object.keys(data || {}).length,
+        data: enrichedData,
+        count: Object.keys(enrichedData || {}).length,
         timestamp: new Date().toISOString(),
         mode: 'pairs',
       };
@@ -2327,6 +2372,9 @@ export class StockController {
           expiry_date: instrument.expiry_date,
           option_type: instrument.option_type,
           strike_price: instrument.strike_price,
+          tick: instrument.tick,
+          lot_size: instrument.lot_size,
+          description: instrument.description,
           last_price: lastPrice,
         },
         ltp_only: ltpOnly || false,
@@ -2337,6 +2385,62 @@ export class StockController {
         {
           success: false,
           message: 'Failed to fetch Vayu ticker',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Delete('vayu/instruments/inactive')
+  @ApiOperation({
+    summary: 'Delete all inactive Vortex instruments',
+    description:
+      'Permanently deletes all instruments from vortex_instruments table where is_active = false. Use with caution as this operation cannot be undone.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Successfully deleted inactive instruments',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        deleted_count: { type: 'number' },
+        timestamp: { type: 'string' },
+      },
+    },
+  })
+  async deleteInactiveVortexInstruments() {
+    try {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log('[Delete Inactive Instruments] Request received');
+
+      const deletedCount =
+        await this.vortexInstrumentService.deleteInactiveInstruments();
+
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log(
+        `[Delete Inactive Instruments] Deleted ${deletedCount} inactive instruments`,
+      );
+
+      return {
+        success: true,
+        message: `Successfully deleted ${deletedCount} inactive instruments`,
+        deleted_count: deletedCount,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.error('[Delete Inactive Instruments] Error:', error);
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to delete inactive instruments',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
