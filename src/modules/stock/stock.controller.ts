@@ -26,6 +26,10 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { ApiKeyGuard } from '../../guards/api-key.guard';
+import { LtpRequestDto } from './dto/ltp.dto';
+import { InstrumentsRequestDto } from './dto/instruments.dto';
+import { BatchTokensDto } from './dto/batch-tokens.dto';
+import { ClearCacheDto } from './dto/clear-cache.dto';
 
 @Controller('stock')
 @UseGuards(ApiKeyGuard)
@@ -314,7 +318,7 @@ export class StockController {
       'Quote data response. When ltp_only=true, only instruments with last_price are returned.',
   })
   async getQuotes(
-    @Body() body: { instruments: number[] },
+    @Body() body: InstrumentsRequestDto,
     @Request() req: any,
     @Query('mode') mode?: 'ltp' | 'ohlc' | 'full',
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
@@ -500,7 +504,7 @@ export class StockController {
       },
     },
   })
-  async getLTP(@Body() body: { instruments: number[] }, @Request() req: any) {
+  async getLTP(@Body() body: InstrumentsRequestDto, @Request() req: any) {
     try {
       const { instruments } = body;
       if (
@@ -570,7 +574,7 @@ export class StockController {
       },
     },
   })
-  async getOHLC(@Body() body: { instruments: number[] }, @Request() req: any) {
+  async getOHLC(@Body() body: InstrumentsRequestDto, @Request() req: any) {
     try {
       const { instruments } = body;
       if (
@@ -1166,34 +1170,8 @@ export class StockController {
       },
     },
   })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        instruments: {
-          type: 'array',
-          items: { oneOf: [{ type: 'number' }, { type: 'string' }] },
-          description:
-            'Optional: Array of instrument tokens (numeric). If provided, will return token-keyed LTP map.',
-          example: [738561, 26000],
-        },
-        pairs: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              exchange: { type: 'string', example: 'NSE_EQ' },
-              token: { oneOf: [{ type: 'string' }, { type: 'number' }], example: 22 },
-            },
-            required: ['exchange', 'token'],
-          },
-          description: 'Array of { exchange, token } objects',
-        },
-      },
-      required: [],
-    },
-  })
-  async postVayuLtp(@Body() body: { pairs: Array<{ exchange: string; token: string | number }> }) {
+  @ApiBody({ type: LtpRequestDto })
+  async postVayuLtp(@Body() body: LtpRequestDto) {
     try {
       // Allow two input modes:
       // 1) instruments: number[]  → returns token-keyed map { [token]: { last_price } }
@@ -1921,7 +1899,7 @@ export class StockController {
     },
   })
   @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
-  async getVortexInstrumentsBatch(@Body() body: { tokens: number[] }, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
+  async getVortexInstrumentsBatch(@Body() body: BatchTokensDto, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       if (
         !body.tokens ||
@@ -2550,7 +2528,7 @@ export class StockController {
       },
     },
   })
-  async clearVortexCache(@Body() body: { pattern?: string }) {
+  async clearVortexCache(@Body() body: ClearCacheDto) {
     try {
       await this.vortexInstrumentService.clearVortexCache(body.pattern);
 

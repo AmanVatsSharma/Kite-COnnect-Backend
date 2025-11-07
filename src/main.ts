@@ -8,6 +8,7 @@ import * as compression from 'compression';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { RequestIdInterceptor } from './interceptors/request-id.interceptor';
 import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 import { NativeWsService } from './services/native-ws.service';
 
@@ -84,6 +85,7 @@ async function bootstrap() {
     // Global filters & interceptors
     app.useGlobalFilters(new HttpExceptionFilter());
     app.useGlobalInterceptors(app.get(MetricsInterceptor));
+    app.useGlobalInterceptors(new RequestIdInterceptor());
     app.useGlobalInterceptors(new ResponseInterceptor());
 
     // CORS configuration

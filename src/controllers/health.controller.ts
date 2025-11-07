@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { StockService } from '../modules/stock/stock.service';
 import { MarketDataProviderResolverService } from '../services/market-data-provider-resolver.service';
@@ -145,8 +145,10 @@ export class HealthController {
 
   @Get('metrics')
   @ApiOperation({ summary: 'Prometheus metrics' })
-  async getMetrics() {
+  async getMetrics(@Res() res: any) {
     const reg = this.metricsService.getMetricsRegister();
-    return reg.metrics();
+    const metrics = await reg.metrics();
+    res.setHeader('Content-Type', reg.contentType);
+    return res.send(metrics);
   }
 }
