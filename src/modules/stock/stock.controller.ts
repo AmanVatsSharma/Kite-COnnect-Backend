@@ -1515,16 +1515,7 @@ export class StockController {
   })
   async validateVortexInstruments(
     @Body()
-    body: {
-      exchange?: string;
-      instrument_name?: string;
-      symbol?: string;
-      option_type?: string;
-      batch_size?: number;
-      auto_cleanup?: boolean;
-      dry_run?: boolean;
-      include_invalid_list?: boolean;
-    },
+    body: import('./dto/validate-instruments.dto').ValidateInstrumentsDto,
   ) {
     try {
       // Console for easy debugging

@@ -6,6 +6,8 @@ import { AppModule } from './app.module';
 import * as helmet from 'helmet';
 import * as compression from 'compression';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 import { NativeWsService } from './services/native-ws.service';
 
@@ -79,8 +81,10 @@ async function bootstrap() {
       }),
     );
 
-    // Metrics interceptor
+    // Global filters & interceptors
+    app.useGlobalFilters(new HttpExceptionFilter());
     app.useGlobalInterceptors(app.get(MetricsInterceptor));
+    app.useGlobalInterceptors(new ResponseInterceptor());
 
     // CORS configuration
     app.enableCors({
