@@ -1381,8 +1381,6 @@ export class StockController {
           },
         },
         batches_processed: { type: 'number', example: 5 },
-        invalid_instruments_count: { type: 'number', example: 500 },
-        note: { type: 'string', example: 'Invalid instruments list not included to avoid large responses. Set include_invalid_list=true to include the full list.' },
         timestamp: { type: 'string', example: '2025-01-01T10:00:00.000Z' },
       },
     },
