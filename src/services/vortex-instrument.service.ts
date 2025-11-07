@@ -1646,25 +1646,64 @@ export class VortexInstrumentService {
         const invalidTokens = invalidInstruments.map((inv) => inv.token);
 
         // Deactivate invalid instruments using query builder for better reliability
+        // Batch processing to avoid SQL parameter limits (PostgreSQL has ~65535 parameter limit)
+        // Process in chunks of 10000 tokens at a time
+        const BATCH_SIZE = 10000;
+        const tokenBatches: number[][] = [];
+        for (let i = 0; i < invalidTokens.length; i += BATCH_SIZE) {
+          tokenBatches.push(invalidTokens.slice(i, i + BATCH_SIZE));
+        }
+
         // Console for easy debugging
         // eslint-disable-next-line no-console
         console.log(
-          `[VortexInstrumentService] Deactivating ${invalidTokens.length} invalid instruments`,
+          `[VortexInstrumentService] Deactivating ${invalidTokens.length} invalid instruments in ${tokenBatches.length} batches`,
         );
         
-        const updateResult = await this.vortexInstrumentRepo
-          .createQueryBuilder()
-          .update(VortexInstrument)
-          .set({ is_active: false })
-          .where('token IN (:...tokens)', { tokens: invalidTokens })
-          .execute();
-        
-        deactivatedCount = updateResult.affected || 0;
+        // Process each batch
+        for (let batchIdx = 0; batchIdx < tokenBatches.length; batchIdx++) {
+          const tokenBatch = tokenBatches[batchIdx];
+          // Console for easy debugging
+          // eslint-disable-next-line no-console
+          console.log(
+            `[VortexInstrumentService] Processing deactivation batch ${batchIdx + 1}/${tokenBatches.length} with ${tokenBatch.length} tokens`,
+          );
+          
+          try {
+            const updateResult = await this.vortexInstrumentRepo
+              .createQueryBuilder()
+              .update(VortexInstrument)
+              .set({ is_active: false })
+              .where('token IN (:...tokens)', { tokens: tokenBatch })
+              .execute();
+            
+            const batchAffected = updateResult.affected || 0;
+            deactivatedCount += batchAffected;
+            
+            // Console for easy debugging
+            // eslint-disable-next-line no-console
+            console.log(
+              `[VortexInstrumentService] Batch ${batchIdx + 1} deactivated: ${batchAffected} instruments`,
+            );
+          } catch (batchError) {
+            // Console for easy debugging
+            // eslint-disable-next-line no-console
+            console.error(
+              `[VortexInstrumentService] Error deactivating batch ${batchIdx + 1}:`,
+              batchError,
+            );
+            this.logger.error(
+              `[VortexInstrumentService] Failed to deactivate batch ${batchIdx + 1}`,
+              batchError,
+            );
+            // Continue with next batch instead of failing completely
+          }
+        }
         
         // Console for easy debugging
         // eslint-disable-next-line no-console
         console.log(
-          `[VortexInstrumentService] Deactivation query executed: affected=${deactivatedCount}, expected=${invalidTokens.length}`,
+          `[VortexInstrumentService] Deactivation completed: ${deactivatedCount} instruments deactivated out of ${invalidTokens.length} expected`,
         );
         
         // Console for easy debugging

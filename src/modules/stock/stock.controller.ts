@@ -1519,6 +1519,23 @@ export class StockController {
         timestamp: new Date().toISOString(),
       };
 
+      // Add helpful messages based on cleanup status
+      const autoCleanup = body.auto_cleanup || false;
+      const dryRun = body.dry_run !== false;
+      
+      if (!autoCleanup && result.invalid_instruments.length > 0) {
+        response.action_required = `Found ${result.invalid_instruments.length} invalid instruments. To deactivate them, run this endpoint again with: { "auto_cleanup": true, "dry_run": false }`;
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(`[Validate Instruments] Action required: Set auto_cleanup=true and dry_run=false to deactivate ${result.invalid_instruments.length} invalid instruments`);
+      } else if (autoCleanup && dryRun) {
+        response.action_required = `Dry run mode: Would deactivate ${result.invalid_instruments.length} instruments. Set "dry_run": false to actually deactivate them.`;
+      } else if (autoCleanup && !dryRun && result.cleanup?.deactivated === 0) {
+        response.action_required = 'No instruments were deactivated. Check logs for errors.';
+      } else if (autoCleanup && !dryRun && result.cleanup?.deactivated > 0) {
+        response.action_required = `Successfully deactivated ${result.cleanup.deactivated} instruments. Use DELETE /vayu/instruments/inactive to permanently delete them.`;
+      }
+
       // Only include invalid_instruments list if explicitly requested
       if (includeInvalidList) {
         response.invalid_instruments = result.invalid_instruments;
