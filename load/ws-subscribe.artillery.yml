@@ -1,0 +1,35 @@
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 60
+      arrivalRate: 5
+  engines:
+    socketio-v3: {}
+  plugins:
+    socketio: {}
+  variables:
+    api_key: "{{ $processEnvironment.API_KEY || 'dev-key' }}"
+
+scenarios:
+  - name: "Socket.IO subscribe flow"
+    engine: socketio-v3
+    flow:
+      - get:
+          url: "/api/health"
+      - emit:
+          channel: "subscribe"
+          data:
+            instruments: [26000, 738561]
+            mode: "ltp"
+        think: 1
+      - emit:
+          channel: "ping"
+          data: {}
+        think: 1
+      - emit:
+          channel: "unsubscribe"
+          data:
+            instruments: [26000]
+      - think: 1
+
+

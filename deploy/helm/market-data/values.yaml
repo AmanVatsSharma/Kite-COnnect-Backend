@@ -1,0 +1,43 @@
+image:
+  repository: your-registry/market-data
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: false
+  className: ""
+  hosts:
+    - host: example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+env:
+  DB_MIGRATIONS_RUN: "true"
+  DB_SYNCHRONIZE: "false"
+  CORS_ORIGIN: "*"
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
