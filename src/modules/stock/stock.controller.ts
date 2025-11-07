@@ -1032,11 +1032,65 @@ export class StockController {
       }
 
       const data = await this.vortexProvider.getLTPByPairs(pairs as any);
+
+      // Enrich response with instrument metadata (description, tick, lot_size, etc.)
+      const tokens: number[] = Array.from(
+        new Set(
+          pairs
+            .map((p: any) => Number(String(p.token)))
+            .filter((n) => Number.isFinite(n)),
+        ),
+      );
+
+      // Build map from pairKey to token for enrichment
+      const pairKeyToToken = new Map<string, number>();
+      for (const p of pairs as any[]) {
+        const ex = String(p.exchange).toUpperCase();
+        const tok = Number(String(p.token));
+        if (Number.isFinite(tok)) pairKeyToToken.set(`${ex}-${tok}`, tok);
+      }
+
+      let enrichedData: Record<string, any> = {};
+      try {
+        const instruments = await this.vortexInstrumentService.getVortexInstrumentDetails(tokens);
+        enrichedData = {};
+        for (const [pairKey, ltpData] of Object.entries<any>(data || {})) {
+          const tok = pairKeyToToken.get(pairKey);
+          if (!tok) {
+            enrichedData[pairKey] = ltpData;
+            continue;
+          }
+          const instrument = instruments[tok];
+          if (!instrument) {
+            enrichedData[pairKey] = ltpData;
+            continue;
+          }
+          enrichedData[pairKey] = {
+            ...ltpData,
+            description: instrument?.description || null,
+            symbol: instrument?.symbol || null,
+            exchange: instrument?.exchange || null,
+            instrument_name: instrument?.instrument_name || null,
+            expiry_date: instrument?.expiry_date || null,
+            option_type: instrument?.option_type || null,
+            strike_price: instrument?.strike_price || null,
+            tick: instrument?.tick || null,
+            lot_size: instrument?.lot_size || null,
+          };
+        }
+      } catch (enrichError) {
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.warn('[Vayu LTP GET] Failed to enrich instruments, returning LTP only:', enrichError);
+        enrichedData = data as any;
+      }
+
       return {
         success: true,
-        data,
-        count: Object.keys(data || {}).length,
+        data: enrichedData,
+        count: Object.keys(enrichedData || {}).length,
         timestamp: new Date().toISOString(),
+        mode: 'pairs',
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;

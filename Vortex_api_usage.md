@@ -354,3 +354,26 @@ curl -X POST "$BASE/api/stock/vayu/ltp" -H 'Content-Type: application/json' \
 Note:
 - Tokens without a resolvable exchange are returned as `{ last_price: null }` (they are not defaulted to `NSE_EQ`).
 
+
+---
+
+## Backend Integration Semantics (This Service)
+
+- REST headers: All Vortex REST calls include `x-api-key` and `Authorization: Bearer <access_token>` when a session is active.
+- Rate limits: The backend enforces 1 request/second per endpoint (`quotes`, `ltp`, `ohlc`, `history`). Requests are chunked to respect Vortex limits (e.g., 1000 pairs per quotes call).
+- Exchange resolution order:
+  1. `vortex_instruments.exchange` (authoritative)
+  2. `instrument_mappings` (provider=vortex → `provider_token=EXCHANGE-TOKEN`)
+  3. `instruments.exchange`/`segment` (legacy)
+- No implicit fallback: If an instrument's exchange cannot be resolved, it is not defaulted to `NSE_EQ`.
+  - LTP (by instruments): unresolved tokens are omitted from the upstream request and returned with `{ last_price: null }`.
+  - Quotes/OHLC: unresolved tokens are omitted from the upstream request; the service returns placeholders with `{ last_price: null }`.
+  - History: unresolved tokens return `{ candles: [] }`.
+- GET `/api/stock/vayu/ltp` enrichment: When querying by `q=EXCHANGE-TOKEN`, the response is enriched with instrument metadata (description, symbol, exchange, instrument_name, expiry_date, option_type, strike_price, tick, lot_size).
+- WebSocket streaming:
+  - Connects using `?auth_token=<access_token>` per docs.
+  - Maximum subscriptions per socket: 1000.
+  - Subscribe/unsubscribe payloads follow Vortex docs: `{ exchange, token, mode, message_type }`.
+  - On reconnect, only tokens with known exchange mappings are resubscribed (no `NSE_EQ` fallback). Unresolved tokens are skipped and logged for investigation.
+
+These semantics ensure the backend remains consistent with Vortex API behavior and avoids accidental data mismatches due to exchange defaults.

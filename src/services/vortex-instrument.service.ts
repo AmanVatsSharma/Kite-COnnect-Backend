@@ -840,6 +840,50 @@ export class VortexInstrumentService {
   }
 
   /**
+   * Fetch instrument details only (no LTP) for a list of tokens.
+   * Optimized in 1000-sized batches. Returns a map keyed by token.
+   */
+  async getVortexInstrumentDetails(tokens: number[]): Promise<Record<number, VortexInstrument>> {
+    const result: Record<number, VortexInstrument> = {};
+    try {
+      if (!Array.isArray(tokens) || tokens.length === 0) return result;
+
+      const batchSize = 1000;
+      for (let i = 0; i < tokens.length; i += batchSize) {
+        const batch = tokens.slice(i, i + batchSize);
+        const rows = await this.vortexInstrumentRepo
+          .createQueryBuilder('v')
+          .where('v.token IN (:...tokens)', { tokens: batch })
+          .select([
+            'v.token',
+            'v.exchange',
+            'v.symbol',
+            'v.instrument_name',
+            'v.expiry_date',
+            'v.option_type',
+            'v.strike_price',
+            'v.tick',
+            'v.lot_size',
+            'v.description',
+            'v.is_active',
+          ])
+          .getMany();
+        for (const row of rows) {
+          result[row.token] = row;
+        }
+      }
+
+      return result;
+    } catch (error) {
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.error('[VortexInstrumentService] Error in getVortexInstrumentDetails', error);
+      this.logger.error('[VortexInstrumentService] getVortexInstrumentDetails failed', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get live prices for Vortex instruments
    */
   async getVortexLTP(

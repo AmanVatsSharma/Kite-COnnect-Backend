@@ -230,21 +230,30 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       }
       // Rate limit per Vortex docs (1 req/sec per endpoint)
       await this.rateLimit('quotes');
-      // Build query q=exchange-token pairs using DB-backed exchange mapping
+      // Build query q=exchange-token pairs using DB-backed exchange mapping (skip unresolved)
       const exMap = await this.getExchangesForTokens(tokens);
-      const qParams = tokens
-        .map((t) => {
-          const ex = exMap.get(t) || 'NSE_EQ';
-          return `q=${encodeURIComponent(`${ex}-${t}`)}`;
-        })
+      const toQuery = tokens.filter((t) => exMap.has(t));
+      const missing = tokens.filter((t) => !exMap.has(t));
+      if (missing.length) {
+        this.logger.warn(
+          `[Vortex] getQuote: ${missing.length}/${tokens.length} tokens lack exchange mapping; skipping in request. Examples: ${missing
+            .slice(0, 5)
+            .join(',')}`,
+        );
+      }
+      const qParams = toQuery
+        .map((t) => `q=${encodeURIComponent(`${exMap.get(t)}-${t}`)}`)
         .join('&');
       const mode = 'full';
       const url = `/data/quotes?${qParams}&mode=${mode}`;
       this.logger.debug(
-        `[Vortex] getQuote request: tokens=${tokens.length}, url=${url}`,
+        `[Vortex] getQuote request: requested=${tokens.length}, querying=${toQuery.length}, url=${url}`,
       );
-      const resp = await this.http.get(url, { headers: this.authHeaders() });
-      const data = resp?.data?.data || {};
+      let data: any = {};
+      if (toQuery.length > 0) {
+        const resp = await this.http.get(url, { headers: this.authHeaders() });
+        data = resp?.data?.data || {};
+      }
       const out: Record<string, any> = {};
       for (const [exToken, quote] of Object.entries<any>(data)) {
         const tokenPart = exToken.split('-').pop();
@@ -276,6 +285,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
             e as any,
           );
         }
+      }
+      // Ensure all requested tokens present in output
+      for (const t of tokens) {
+        if (!(t in out)) out[t] = { last_price: null } as any;
       }
       this.logger.debug(
         `[Vortex] getQuote result coverage: total=${tokens.length}, withLTP=${Object.values(out).filter((v) => Number.isFinite((v as any)?.last_price) && (v as any).last_price > 0).length}`,
@@ -448,15 +461,25 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       }
       await this.rateLimit('ohlc');
       const exMap = await this.getExchangesForTokens(tokens);
-      const qParams = tokens
-        .map(
-          (t) => `q=${encodeURIComponent(`${exMap.get(t) || 'NSE_EQ'}-${t}`)}`,
-        )
+      const toQuery = tokens.filter((t) => exMap.has(t));
+      const missing = tokens.filter((t) => !exMap.has(t));
+      if (missing.length) {
+        this.logger.warn(
+          `[Vortex] getOHLC: ${missing.length}/${tokens.length} tokens lack exchange mapping; skipping in request. Examples: ${missing
+            .slice(0, 5)
+            .join(',')}`,
+        );
+      }
+      const qParams = toQuery
+        .map((t) => `q=${encodeURIComponent(`${exMap.get(t)}-${t}`)}`)
         .join('&');
       const mode = 'ohlc';
       const url = `/data/quotes?${qParams}&mode=${mode}`;
-      const resp = await this.http.get(url, { headers: this.authHeaders() });
-      const data = resp?.data?.data || {};
+      let data: any = {};
+      if (toQuery.length > 0) {
+        const resp = await this.http.get(url, { headers: this.authHeaders() });
+        data = resp?.data?.data || {};
+      }
       const out: Record<string, any> = {};
       for (const [exToken, quote] of Object.entries<any>(data)) {
         const tokenPart = exToken.split('-').pop();
@@ -497,6 +520,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
           );
         }
       }
+      // Ensure all requested tokens present in output
+      for (const t of tokens) {
+        if (!(t in out)) out[t] = { last_price: null } as any;
+      }
       return out;
     } catch (error) {
       this.logger.error('[Vortex] getOHLC failed (non-fatal)', error as any);
@@ -520,7 +547,13 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       }
       await this.rateLimit('history');
       const exMap = await this.getExchangesForTokens([String(token)]);
-      const exchange = exMap.get(String(token)) || 'NSE_EQ';
+      const exchange = exMap.get(String(token));
+      if (!exchange) {
+        this.logger.warn(
+          `[Vortex] getHistoricalData: token ${token} has no exchange mapping; returning empty candles`,
+        );
+        return { candles: [] };
+      }
       const fromSec = Math.floor(new Date(from).getTime() / 1000);
       const toSec = Math.floor(new Date(to).getTime() / 1000);
       const resolution = this.mapInterval(interval);
@@ -1008,23 +1041,26 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
                 missing.map((t) => String(t)),
               );
               missing.forEach((t) => {
-                const ex = (exMapRaw.get(String(t)) || 'NSE_EQ') as
+                const ex = exMapRaw.get(String(t)) as
                   | 'NSE_EQ'
                   | 'NSE_FO'
                   | 'NSE_CUR'
-                  | 'MCX_FO';
-                this.exchangeByToken.set(t, ex);
+                  | 'MCX_FO'
+                  | undefined;
+                if (ex) this.exchangeByToken.set(t, ex);
               });
             }
           } catch (e) {
             self.logger.warn(
-              '[Vortex] resubscribeAll exchange resolution failed; using NSE_EQ fallback',
+              '[Vortex] resubscribeAll exchange resolution failed; skipping unresolved tokens',
               e as any,
             );
           }
-          for (const t of tokens) {
+          const toResub = tokens.filter((t) => this.exchangeByToken.has(t));
+          for (const t of toResub) {
             const mode = this.modeByToken.get(t) || 'ltp';
-            const ex = this.exchangeByToken.get(t) || 'NSE_EQ';
+            const ex = this.exchangeByToken.get(t);
+            if (!ex) continue;
             this.send({
               exchange: ex,
               token: t,
@@ -1032,7 +1068,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
               message_type: 'subscribe',
             });
           }
-          self.logger.log(`[Vortex] Resubscribed ${tokens.length} tokens`);
+          self.logger.log(
+            `[Vortex] Resubscribed ${toResub.length}/${tokens.length} tokens (skipped unresolved)`,
+          );
         })();
       }
     }
