@@ -1052,7 +1052,66 @@ export class StockController {
   }
 
   @Post('vayu/ltp')
-  @ApiOperation({ summary: 'Get Vayu LTP by JSON body of exchange-token pairs' })
+  @ApiOperation({
+    summary: 'Get Vayu LTP with enriched instrument data',
+    description:
+      'Fetches Last Traded Price (LTP) for instruments. Supports two modes: 1) instruments array (token-keyed response), 2) pairs array (exchange-token keyed response). Response includes enriched instrument metadata (description, symbol, exchange, etc.) along with LTP data.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Successfully fetched LTP data with enriched instrument information',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        data: {
+          type: 'object',
+          description: 'LTP data keyed by token (instruments mode) or EXCHANGE-TOKEN (pairs mode)',
+          additionalProperties: {
+            type: 'object',
+            properties: {
+              last_price: { type: 'number', nullable: true, example: 2456.75 },
+              description: { type: 'string', nullable: true, example: 'NSE_EQ RELIANCE EQ' },
+              symbol: { type: 'string', nullable: true, example: 'RELIANCE' },
+              exchange: { type: 'string', nullable: true, example: 'NSE_EQ' },
+              instrument_name: { type: 'string', nullable: true, example: 'EQ' },
+              expiry_date: { type: 'string', nullable: true, example: null },
+              option_type: { type: 'string', nullable: true, example: null },
+              strike_price: { type: 'number', nullable: true, example: null },
+              tick: { type: 'number', nullable: true, example: 0.05 },
+              lot_size: { type: 'number', nullable: true, example: 1 },
+            },
+          },
+        },
+        count: { type: 'number', example: 2 },
+        timestamp: { type: 'string', example: '2025-01-01T10:00:00.000Z' },
+        mode: { type: 'string', enum: ['instruments', 'pairs'], example: 'instruments' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid input parameters',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string' },
+        error: { type: 'string' },
+      },
+    },
+  })
   @ApiBody({
     schema: {
       type: 'object',
@@ -1115,42 +1174,67 @@ export class StockController {
         }
 
         const startedAt = Date.now();
+        // Console for easy debugging
         // eslint-disable-next-line no-console
         console.log('[Vayu LTP] instruments mode:', { count: tokens.length });
-        const data = await this.vortexProvider.getLTP(tokens);
         
-        // Enrich with instrument descriptions and other data
-        const enrichedData: Record<string, any> = {};
-        const instrumentTokens = tokens.map((t) => parseInt(t));
-        const instruments = await this.vortexInstrumentService.getVortexInstrumentsBatch(instrumentTokens);
-        
-        for (const [token, ltpData] of Object.entries(data)) {
-          const instrument = instruments.instruments[parseInt(token)];
-          enrichedData[token] = {
-            ...ltpData,
-            description: instrument?.description || null,
-            symbol: instrument?.symbol || null,
-            exchange: instrument?.exchange || null,
-            instrument_name: instrument?.instrument_name || null,
-            expiry_date: instrument?.expiry_date || null,
-            option_type: instrument?.option_type || null,
-            strike_price: instrument?.strike_price || null,
-            tick: instrument?.tick || null,
-            lot_size: instrument?.lot_size || null,
+        try {
+          const data = await this.vortexProvider.getLTP(tokens);
+          
+          // Enrich with instrument descriptions and other data
+          const enrichedData: Record<string, any> = {};
+          try {
+            const instrumentTokens = tokens.map((t) => parseInt(t));
+            const instruments = await this.vortexInstrumentService.getVortexInstrumentsBatch(instrumentTokens);
+            
+            for (const [token, ltpData] of Object.entries(data)) {
+              try {
+                const instrument = instruments.instruments[parseInt(token)];
+                enrichedData[token] = {
+                  ...ltpData,
+                  description: instrument?.description || null,
+                  symbol: instrument?.symbol || null,
+                  exchange: instrument?.exchange || null,
+                  instrument_name: instrument?.instrument_name || null,
+                  expiry_date: instrument?.expiry_date || null,
+                  option_type: instrument?.option_type || null,
+                  strike_price: instrument?.strike_price || null,
+                  tick: instrument?.tick || null,
+                  lot_size: instrument?.lot_size || null,
+                };
+              } catch (enrichError) {
+                // Console for easy debugging
+                // eslint-disable-next-line no-console
+                console.warn(`[Vayu LTP] Failed to enrich token ${token}:`, enrichError);
+                // Fallback: return LTP data without enrichment
+                enrichedData[token] = ltpData;
+              }
+            }
+          } catch (enrichError) {
+            // Console for easy debugging
+            // eslint-disable-next-line no-console
+            console.error('[Vayu LTP] Failed to enrich instruments, returning LTP only:', enrichError);
+            // Fallback: return LTP data without enrichment if enrichment fails
+            Object.assign(enrichedData, data);
+          }
+          
+          const elapsed = Date.now() - startedAt;
+          this.vortexProvider['logger']?.log?.(
+            `[Vayu LTP] instruments served: ${tokens.length} tokens in ${elapsed}ms`,
+          );
+          return {
+            success: true,
+            data: enrichedData,
+            count: Object.keys(enrichedData || {}).length,
+            timestamp: new Date().toISOString(),
+            mode: 'instruments',
           };
+        } catch (ltpError) {
+          // Console for easy debugging
+          // eslint-disable-next-line no-console
+          console.error('[Vayu LTP] Failed to fetch LTP:', ltpError);
+          throw ltpError;
         }
-        
-        const elapsed = Date.now() - startedAt;
-        this.vortexProvider['logger']?.log?.(
-          `[Vayu LTP] instruments served: ${tokens.length} tokens in ${elapsed}ms`,
-        );
-        return {
-          success: true,
-          data: enrichedData,
-          count: Object.keys(enrichedData || {}).length,
-          timestamp: new Date().toISOString(),
-          mode: 'instruments',
-        };
       }
 
       const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
@@ -1174,37 +1258,60 @@ export class StockController {
         );
       }
 
-      const data = await this.vortexProvider.getLTPByPairs(sanitized as any);
-      
-      // Enrich with instrument descriptions and other data
-      const enrichedData: Record<string, any> = {};
-      const instrumentTokens = sanitized.map((p) => parseInt(p.token));
-      const instruments = await this.vortexInstrumentService.getVortexInstrumentsBatch(instrumentTokens);
-      
-      for (const [pairKey, ltpData] of Object.entries(data)) {
-        const token = parseInt(pairKey.split('-').pop() || '0');
-        const instrument = instruments.instruments[token];
-        enrichedData[pairKey] = {
-          ...ltpData,
-          description: instrument?.description || null,
-          symbol: instrument?.symbol || null,
-          exchange: instrument?.exchange || null,
-          instrument_name: instrument?.instrument_name || null,
-          expiry_date: instrument?.expiry_date || null,
-          option_type: instrument?.option_type || null,
-          strike_price: instrument?.strike_price || null,
-          tick: instrument?.tick || null,
-          lot_size: instrument?.lot_size || null,
+      try {
+        const data = await this.vortexProvider.getLTPByPairs(sanitized as any);
+        
+        // Enrich with instrument descriptions and other data
+        const enrichedData: Record<string, any> = {};
+        try {
+          const instrumentTokens = sanitized.map((p) => parseInt(p.token));
+          const instruments = await this.vortexInstrumentService.getVortexInstrumentsBatch(instrumentTokens);
+          
+          for (const [pairKey, ltpData] of Object.entries(data)) {
+            try {
+              const token = parseInt(pairKey.split('-').pop() || '0');
+              const instrument = instruments.instruments[token];
+              enrichedData[pairKey] = {
+                ...ltpData,
+                description: instrument?.description || null,
+                symbol: instrument?.symbol || null,
+                exchange: instrument?.exchange || null,
+                instrument_name: instrument?.instrument_name || null,
+                expiry_date: instrument?.expiry_date || null,
+                option_type: instrument?.option_type || null,
+                strike_price: instrument?.strike_price || null,
+                tick: instrument?.tick || null,
+                lot_size: instrument?.lot_size || null,
+              };
+            } catch (enrichError) {
+              // Console for easy debugging
+              // eslint-disable-next-line no-console
+              console.warn(`[Vayu LTP] Failed to enrich pair ${pairKey}:`, enrichError);
+              // Fallback: return LTP data without enrichment
+              enrichedData[pairKey] = ltpData;
+            }
+          }
+        } catch (enrichError) {
+          // Console for easy debugging
+          // eslint-disable-next-line no-console
+          console.error('[Vayu LTP] Failed to enrich instruments, returning LTP only:', enrichError);
+          // Fallback: return LTP data without enrichment if enrichment fails
+          Object.assign(enrichedData, data);
+        }
+        
+        return {
+          success: true,
+          data: enrichedData,
+          count: Object.keys(enrichedData || {}).length,
+          timestamp: new Date().toISOString(),
+          mode: 'pairs',
         };
+      } catch (ltpError) {
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.error('[Vayu LTP] Failed to fetch LTP by pairs:', ltpError);
+        throw ltpError;
       }
-      
-      return {
-        success: true,
-        data: enrichedData,
-        count: Object.keys(enrichedData || {}).length,
-        timestamp: new Date().toISOString(),
-        mode: 'pairs',
-      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
@@ -1222,7 +1329,73 @@ export class StockController {
   @ApiOperation({
     summary: 'Validate and cleanup invalid Vortex instruments',
     description:
-      'Tests LTP fetch capability for instruments in batches, identifies invalid instruments, and optionally deactivates them. Useful for cleaning up instruments that no longer return valid LTP data.',
+      'Tests LTP fetch capability for instruments in batches, identifies invalid instruments, and optionally deactivates them. Useful for cleaning up instruments that no longer return valid LTP data. Recommended workflow: 1) Run with dry_run=true to see results, 2) Review invalid_instruments list, 3) Run with auto_cleanup=true and dry_run=false to deactivate invalid instruments, 4) Use DELETE /vayu/instruments/inactive to permanently remove them.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Validation completed successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        summary: {
+          type: 'object',
+          properties: {
+            total_instruments: { type: 'number', example: 5000 },
+            tested: { type: 'number', example: 5000 },
+            valid_ltp: { type: 'number', example: 4500 },
+            invalid_ltp: { type: 'number', example: 500 },
+            errors: { type: 'number', example: 0 },
+          },
+        },
+        invalid_instruments: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              token: { type: 'number', example: 12345 },
+              exchange: { type: 'string', example: 'MCX_FO' },
+              symbol: { type: 'string', example: 'INVALID' },
+              instrument_name: { type: 'string', example: 'FUTCOM' },
+              reason: { type: 'string', example: 'no_ltp_data' },
+              ltp_response: { type: 'object', nullable: true },
+            },
+          },
+        },
+        cleanup: {
+          type: 'object',
+          properties: {
+            deactivated: { type: 'number', example: 0 },
+            removed: { type: 'number', example: 0 },
+          },
+        },
+        batches_processed: { type: 'number', example: 5 },
+        timestamp: { type: 'string', example: '2025-01-01T10:00:00.000Z' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid input parameters',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error during validation',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string' },
+        error: { type: 'string' },
+      },
+    },
   })
   @ApiBody({
     schema: {
@@ -1367,6 +1540,15 @@ export class StockController {
 
       const result =
         await this.vortexInstrumentService.getVortexInstruments(filters);
+      
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log('[Get Vayu Instruments] Returning', {
+        total: result.total,
+        count: result.instruments.length,
+        hasDescriptions: result.instruments.some((i) => i.description),
+      });
+      
       return {
         success: true,
         data: result,
@@ -2337,8 +2519,65 @@ export class StockController {
   @ApiOperation({
     summary:
       'Get live price and metadata by Vayu ticker (e.g., NSE_EQ_RELIANCE)',
+    description:
+      'Fetches complete instrument information including LTP, description, and all metadata for a given Vayu symbol. Supports ltp_only filter to return 404 if LTP is unavailable.',
   })
-  @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, returns 404 when LTP is unavailable for the symbol' })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: true,
+    description: 'If true, returns 404 when LTP is unavailable for the symbol',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Successfully fetched ticker data',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        data: {
+          type: 'object',
+          properties: {
+            token: { type: 'number', example: 738561 },
+            symbol: { type: 'string', example: 'RELIANCE' },
+            exchange: { type: 'string', example: 'NSE_EQ' },
+            instrument_name: { type: 'string', example: 'EQ' },
+            expiry_date: { type: 'string', nullable: true, example: null },
+            option_type: { type: 'string', nullable: true, example: null },
+            strike_price: { type: 'number', nullable: true, example: null },
+            tick: { type: 'number', example: 0.05 },
+            lot_size: { type: 'number', example: 1 },
+            description: { type: 'string', example: 'NSE_EQ RELIANCE EQ' },
+            last_price: { type: 'number', nullable: true, example: 2456.75 },
+          },
+        },
+        ltp_only: { type: 'boolean', example: false },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Symbol not found or LTP unavailable (when ltp_only=true)',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string' },
+        error: { type: 'string' },
+      },
+    },
+  })
   async getVortexTickerBySymbol(@Param('symbol') symbol: string, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
     try {
       const { instrument } =
@@ -2350,35 +2589,60 @@ export class StockController {
         );
       }
 
-      const ltp = await this.vortexInstrumentService.getVortexLTP([
-        instrument.token,
-      ]);
-      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
-      const lastPrice = ltp?.[instrument.token]?.last_price ?? null;
-      if (ltpOnly && !(Number.isFinite(lastPrice) && ((lastPrice as any) > 0))) {
+      try {
+        const ltp = await this.vortexInstrumentService.getVortexLTP([
+          instrument.token,
+        ]);
+        const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+        const lastPrice = ltp?.[instrument.token]?.last_price ?? null;
+        
+        if (ltpOnly && !(Number.isFinite(lastPrice) && ((lastPrice as any) > 0))) {
+          throw new HttpException(
+            { success: false, message: 'LTP not available for requested symbol (ltp_only=true)' },
+            HttpStatus.NOT_FOUND,
+          );
+        }
+
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log('[Get Vayu Ticker] Returning data for symbol:', {
+          symbol,
+          token: instrument.token,
+          hasDescription: !!instrument.description,
+          hasLtp: !!lastPrice,
+        });
+
+        return {
+          success: true,
+          data: {
+            token: instrument.token,
+            symbol: instrument.symbol,
+            exchange: instrument.exchange,
+            instrument_name: instrument.instrument_name,
+            expiry_date: instrument.expiry_date,
+            option_type: instrument.option_type,
+            strike_price: instrument.strike_price,
+            tick: instrument.tick,
+            lot_size: instrument.lot_size,
+            description: instrument.description,
+            last_price: lastPrice,
+          },
+          ltp_only: ltpOnly || false,
+        };
+      } catch (ltpError) {
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.error('[Get Vayu Ticker] Failed to fetch LTP:', ltpError);
+        if (ltpError instanceof HttpException) throw ltpError;
         throw new HttpException(
-          { success: false, message: 'LTP not available for requested symbol (ltp_only=true)' },
-          HttpStatus.NOT_FOUND,
+          {
+            success: false,
+            message: 'Failed to fetch LTP for symbol',
+            error: ltpError.message,
+          },
+          HttpStatus.INTERNAL_SERVER_ERROR,
         );
       }
-
-      return {
-        success: true,
-        data: {
-          token: instrument.token,
-          symbol: instrument.symbol,
-          exchange: instrument.exchange,
-          instrument_name: instrument.instrument_name,
-          expiry_date: instrument.expiry_date,
-          option_type: instrument.option_type,
-          strike_price: instrument.strike_price,
-          tick: instrument.tick,
-          lot_size: instrument.lot_size,
-          description: instrument.description,
-          last_price: lastPrice,
-        },
-        ltp_only: ltpOnly || false,
-      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
@@ -2396,7 +2660,7 @@ export class StockController {
   @ApiOperation({
     summary: 'Delete all inactive Vortex instruments',
     description:
-      'Permanently deletes all instruments from vortex_instruments table where is_active = false. Use with caution as this operation cannot be undone.',
+      'Permanently deletes all instruments from vortex_instruments table where is_active = false. Use with caution as this operation cannot be undone. Recommended workflow: 1) Use validate-instruments endpoint to identify invalid instruments, 2) Review the results, 3) Use this endpoint to clean up inactive instruments.',
   })
   @ApiResponse({
     status: 200,
@@ -2404,10 +2668,22 @@ export class StockController {
     schema: {
       type: 'object',
       properties: {
-        success: { type: 'boolean' },
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Successfully deleted 150 inactive instruments' },
+        deleted_count: { type: 'number', example: 150 },
+        timestamp: { type: 'string', example: '2025-01-01T10:00:00.000Z' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error during deletion',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
         message: { type: 'string' },
-        deleted_count: { type: 'number' },
-        timestamp: { type: 'string' },
+        error: { type: 'string' },
       },
     },
   })
