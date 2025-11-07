@@ -28,10 +28,13 @@ export const getDatabaseConfig = (
     VortexSession,
     VortexInstrument,
   ],
-  synchronize: configService.get('DB_SYNCHRONIZE', 'true') === 'true', // Auto-sync schema (creates/updates tables based on entities)
+  // In production, prefer running migrations over synchronize
+  // Override with DB_SYNCHRONIZE=true only for development
+  synchronize: configService.get('DB_SYNCHRONIZE', 'false') === 'true',
   logging: configService.get('NODE_ENV') === 'development' || configService.get('DB_LOGGING', 'false') === 'true',
   migrations: ['dist/migrations/*.js'],
-  migrationsRun: configService.get('DB_MIGRATIONS_RUN', 'false') === 'true', // Set to true to auto-run migrations on startup
+  // Enable auto-run migrations by default; disable with DB_MIGRATIONS_RUN=false if managed externally
+  migrationsRun: configService.get('DB_MIGRATIONS_RUN', 'true') === 'true',
   ssl: configService.get('DB_SSL', 'false') === 'true', // Enable SSL if needed
   // Console for easy debugging
   // eslint-disable-next-line no-console

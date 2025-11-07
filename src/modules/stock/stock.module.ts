@@ -33,6 +33,7 @@ import { VortexInstrumentService } from '../../services/vortex-instrument.servic
 import { NativeWsService } from '../../services/native-ws.service';
 import { ProviderQueueService } from '../../services/provider-queue.service';
 import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
+import { VortexValidationCronService } from '../../services/vortex-validation.cron';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
     MetricsService,
     AdminGuard,
     MetricsInterceptor,
+    VortexValidationCronService,
   ],
   exports: [
     StockService,

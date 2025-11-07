@@ -9,8 +9,12 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { RequestIdInterceptor } from './interceptors/request-id.interceptor';
+import { RateLimitInterceptor } from './interceptors/rate-limit.interceptor';
+import { RedisService } from './services/redis.service';
 import { MetricsInterceptor } from './interceptors/metrics.interceptor';
 import { NativeWsService } from './services/native-ws.service';
+import { initSentry } from './observability/sentry';
+import { initOpenTelemetry } from './observability/otel';
 
 // Basic Auth for Swagger (hardcoded per request)
 const SWAGGER_USERNAME = 'support@vedpragya.com';
@@ -49,6 +53,9 @@ async function bootstrap() {
   try {
     const app = await NestFactory.create<NestExpressApplication>(AppModule);
     const configService = app.get(ConfigService);
+    // Observability (dynamic, safe when deps are missing)
+    try { initSentry(configService); } catch {}
+    try { await initOpenTelemetry(configService); } catch {}
 
     // Guidance: if Kite credentials are not configured, keep app running and guide user to login
     const kiteApiKey = configService.get('KITE_API_KEY');
@@ -87,6 +94,13 @@ async function bootstrap() {
     app.useGlobalInterceptors(app.get(MetricsInterceptor));
     app.useGlobalInterceptors(new RequestIdInterceptor());
     app.useGlobalInterceptors(new ResponseInterceptor());
+    // Rate limiting (per API key and IP)
+    try {
+      const redis = app.get(RedisService);
+      app.useGlobalInterceptors(new RateLimitInterceptor(redis, configService));
+    } catch (e) {
+      logger.warn('Rate limiter not initialized; continuing without throttling', e as any);
+    }
 
     // CORS configuration
     app.enableCors({

@@ -30,6 +30,7 @@ import { LtpRequestDto } from './dto/ltp.dto';
 import { InstrumentsRequestDto } from './dto/instruments.dto';
 import { BatchTokensDto } from './dto/batch-tokens.dto';
 import { ClearCacheDto } from './dto/clear-cache.dto';
+import { ValidateInstrumentsDto } from './dto/validate-instruments.dto';
 
 @Controller('stock')
 @UseGuards(ApiKeyGuard)
@@ -1493,7 +1494,7 @@ export class StockController {
   })
   async validateVortexInstruments(
     @Body()
-    body: import('./dto/validate-instruments.dto').ValidateInstrumentsDto,
+    body: ValidateInstrumentsDto,
   ) {
     try {
       // Console for easy debugging
@@ -1593,6 +1594,52 @@ export class StockController {
           message: 'Failed to validate instruments',
           error: error.message,
         },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('vayu/validate-instruments/export')
+  @ApiOperation({ summary: 'Validate instruments and export invalid set as CSV' })
+  @ApiResponse({ status: 200, description: 'CSV content of invalid instruments' })
+  @ApiBody({ type: ValidateInstrumentsDto })
+  async exportInvalidInstruments(
+    @Body() body: ValidateInstrumentsDto,
+    @Request() req: any,
+  ) {
+    try {
+      const result = await this.vortexInstrumentService.validateAndCleanupInstruments(
+        {
+          exchange: body.exchange,
+          instrument_name: body.instrument_name,
+          symbol: body.symbol,
+          option_type: body.option_type,
+          batch_size: body.batch_size || 1000,
+          auto_cleanup: false,
+          dry_run: true,
+          include_invalid_list: true,
+        },
+        this.vortexProvider,
+      );
+
+      const rows = [
+        ['token', 'exchange', 'symbol', 'instrument_name', 'reason'],
+        ...result.invalid_instruments.map((x: any) => [
+          x.token,
+          x.exchange || '',
+          x.symbol || '',
+          x.instrument_name || '',
+          x.reason || 'no_ltp_data',
+        ]),
+      ];
+      const csv = rows.map((r) => r.map((v) => String(v).replace(/"/g, '""')).map((v) => /[",\n]/.test(v) ? `"${v}"` : v).join(',')).join('\n');
+      (req?.res || (req as any).res)?.setHeader?.('Content-Type', 'text/csv');
+      (req?.res || (req as any).res)?.setHeader?.('Content-Disposition', 'attachment; filename="invalid_instruments.csv"');
+      return csv;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Failed to export invalid instruments', error: error.message },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
