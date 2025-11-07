@@ -26,6 +26,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   > = new Map();
   private unsubscriptionQueue: Set<number> = new Set();
   private subscriptionBatchInterval: NodeJS.Timeout | null = null;
+  private readonly SUBSCRIBE_CHUNK_SIZE = 500; // backpressure-friendly chunking
 
   constructor(
     private providerResolver: MarketDataProviderResolverService,
@@ -58,16 +59,25 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         ticker.on('connect', () => {
           this.logger.log('Provider ticker connected');
           this.isStreaming = true;
+          try {
+            this.redisService.publish('stream:status', { event: 'connected', ts: Date.now() });
+          } catch {}
         });
 
         ticker.on('disconnect', () => {
           this.logger.log('Provider ticker disconnected');
           this.isStreaming = false;
+          try {
+            this.redisService.publish('stream:status', { event: 'disconnected', ts: Date.now() });
+          } catch {}
         });
 
         ticker.on('error', (error: any) => {
           this.logger.error('Provider ticker error', error);
           this.isStreaming = false;
+          try {
+            this.redisService.publish('stream:status', { event: 'error', error: (error?.message || 'unknown'), ts: Date.now() });
+          } catch {}
         });
 
         // Connect to ticker with safe guard
@@ -347,7 +357,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           ),
         );
 
-        // Subscribe by mode groups
+        // Subscribe by mode groups with chunking
         for (const [mode, tokens] of modeGroups) {
           console.log(
             `[MarketDataStreamService] Calling ticker.subscribe() for ${tokens.length} tokens with mode=${mode}`,
@@ -355,7 +365,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           this.logger.log(
             `[StreamBatching] Subscribing ${tokens.length} tokens with mode=${mode} to provider`,
           );
-          ticker.subscribe(tokens, mode as 'ltp' | 'ohlcv' | 'full');
+          for (let i = 0; i < tokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
+            const chunk = tokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
+            ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
+          }
           tokens.forEach((token) => {
             this.subscribedInstruments.add(token);
             console.log(
@@ -379,7 +392,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         console.log(
           `[MarketDataStreamService] Processing ${tokensToUnsubscribe.length} unsubscriptions: ${JSON.stringify(tokensToUnsubscribe)}`,
         );
-        ticker.unsubscribe(tokensToUnsubscribe);
+        for (let i = 0; i < tokensToUnsubscribe.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
+          const chunk = tokensToUnsubscribe.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
+          ticker.unsubscribe(chunk);
+        }
         tokensToUnsubscribe.forEach((token) => {
           this.subscribedInstruments.delete(token);
           console.log(
@@ -535,6 +551,22 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         this.providerResolver['config']?.get('DATA_PROVIDER') ||
         'kite',
     };
+  }
+
+  // Expose queue sizes for backpressure monitoring
+  getQueueStatus() {
+    try {
+      const subSize = this.subscriptionQueue.size;
+      const unsubSize = this.unsubscriptionQueue.size;
+      // Update metrics gauges
+      try {
+        this.metrics.providerQueueDepth.labels('ws_subscribe').set(subSize);
+        this.metrics.providerQueueDepth.labels('ws_unsubscribe').set(unsubSize);
+      } catch {}
+      return { subscribe: subSize, unsubscribe: unsubSize };
+    } catch (e) {
+      return { subscribe: 0, unsubscribe: 0 };
+    }
   }
 
   private async stopStreaming() {

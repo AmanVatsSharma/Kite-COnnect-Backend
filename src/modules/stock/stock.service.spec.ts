@@ -4,6 +4,12 @@ import { Repository } from 'typeorm';
 import { StockService } from './stock.service';
 import { Instrument } from '../../entities/instrument.entity';
 import { MarketData } from '../../entities/market-data.entity';
+import { InstrumentMapping } from '../../entities/instrument-mapping.entity';
+import { MarketDataProviderResolverService } from '../../services/market-data-provider-resolver.service';
+import { VortexInstrumentService } from '../../services/vortex-instrument.service';
+import { NativeWsService } from '../../services/native-ws.service';
+import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
+import { MetricsService } from '../../services/metrics.service';
 import { Subscription } from '../../entities/subscription.entity';
 import { KiteConnectService } from '../../services/kite-connect.service';
 import { RedisService } from '../../services/redis.service';
@@ -69,6 +75,23 @@ describe('StockService', () => {
     broadcastMarketData: jest.fn(),
   };
 
+  const mockProviderResolver = {
+    resolveForHttp: jest.fn(async () => ({})),
+    getGlobalProviderName: jest.fn(async () => 'vortex'),
+    resolveForWebsocket: jest.fn(async () => ({ getTicker: () => ({}) })),
+  };
+
+  const mockLtpCache = {
+    get: jest.fn(),
+    getMany: jest.fn(() => ({})),
+    set: jest.fn(),
+  };
+
+  const mockMetrics = {
+    ltpCacheHitTotal: { labels: () => ({ inc: () => {} }) },
+    providerQueueDepth: { labels: () => ({ set: () => {} }) },
+  } as any;
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -86,6 +109,10 @@ describe('StockService', () => {
           useValue: mockSubscriptionRepository,
         },
         {
+          provide: getRepositoryToken(InstrumentMapping),
+          useValue: { findOne: jest.fn(), save: jest.fn(), create: jest.fn((v) => v) },
+        },
+        {
           provide: KiteConnectService,
           useValue: mockKiteConnectService,
         },
@@ -101,6 +128,11 @@ describe('StockService', () => {
           provide: MarketDataGateway,
           useValue: mockMarketDataGateway,
         },
+        { provide: MarketDataProviderResolverService, useValue: mockProviderResolver },
+        { provide: VortexInstrumentService, useValue: {} },
+        { provide: NativeWsService, useValue: { broadcastMarketData: jest.fn() } },
+        { provide: LtpMemoryCacheService, useValue: mockLtpCache },
+        { provide: MetricsService, useValue: mockMetrics },
       ],
     }).compile();
 
@@ -200,7 +232,7 @@ describe('StockService', () => {
       expect(result).toEqual(mockQuotes);
       expect(mockRequestBatchingService.getQuote).toHaveBeenCalledWith([
         '738561',
-      ]);
+      ], expect.anything());
       expect(mockRedisService.cacheQuote).toHaveBeenCalledWith(
         ['738561'],
         mockQuotes,
@@ -236,7 +268,7 @@ describe('StockService', () => {
 
       expect(result).toEqual(mockInstruments);
       expect(mockQueryBuilder.where).toHaveBeenCalledWith(
-        'instrument.tradingsymbol LIKE :query',
+        'UPPER(instrument.tradingsymbol) LIKE :query',
         { query: '%RELIANCE%' },
       );
     });

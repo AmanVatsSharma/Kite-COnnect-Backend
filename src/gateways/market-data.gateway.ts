@@ -65,6 +65,7 @@ export class MarketDataGateway
 
   private readonly logger = new Logger(MarketDataGateway.name);
   private clientSubscriptions = new Map<string, ClientSubscription>();
+  private statusSubscribed = false;
 
   constructor(
     private redisService: RedisService,
@@ -150,6 +151,26 @@ export class MarketDataGateway
       clientId: client.id,
       timestamp: new Date().toISOString(),
     });
+
+    // Subscribe once to stream status events and broadcast to all clients
+    try {
+      if (!this.statusSubscribed) {
+        await this.redisService.subscribe('stream:status', (message) => {
+          try {
+            this.server.emit('stream_status', message);
+          } catch (e) {
+            this.logger.warn('Failed broadcasting stream_status', e as any);
+          }
+        });
+        this.statusSubscribed = true;
+        this.logger.log('Subscribed to stream:status channel');
+      }
+      // Emit current status snapshot to the just-connected client
+      const snapshot = await this.streamService.getStreamingStatus();
+      client.emit('stream_status', { event: snapshot.isStreaming ? 'connected' : 'disconnected', snapshot, ts: Date.now() });
+    } catch (e) {
+      this.logger.warn('Failed initializing stream status subscription', e as any);
+    }
 
     // Emit a branded welcome + onboarding payload for client UX
     try {
@@ -453,6 +474,11 @@ export class MarketDataGateway
           );
         }
       } catch {}
+      // Queue sizes for backpressure transparency
+      let queues: { subscribe: number; unsubscribe: number } | undefined;
+      try {
+        queues = this.streamService.getQueueStatus();
+      } catch {}
 
       client.emit('subscription_confirmed', {
         requested: requestedRaw,
@@ -463,6 +489,7 @@ export class MarketDataGateway
         snapshot,
         mode,
         limits: { maxSubscriptionsPerSocket: maxSubs },
+        queues,
         timestamp: new Date().toISOString(),
       });
 

@@ -4,6 +4,7 @@ import { StockController } from './stock.controller';
 import { StockService } from './stock.service';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
 import { VortexProviderService } from '../../providers/vortex-provider.service';
+import { ApiKeyGuard } from '../../guards/api-key.guard';
 
 describe('StockController vayu/ltp (unit)', () => {
   let controller: StockController;
@@ -19,14 +20,17 @@ describe('StockController vayu/ltp (unit)', () => {
       getLTPByPairs: jest.fn(async () => ({ 'NSE_EQ-26000': { last_price: 17624.05 } })),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    const builder = Test.createTestingModule({
       controllers: [StockController],
       providers: [
         { provide: StockService, useValue: {} },
         { provide: VortexInstrumentService, useValue: {} },
         { provide: VortexProviderService, useValue: vortexProvider },
       ],
-    }).compile();
+    });
+
+    builder.overrideGuard(ApiKeyGuard).useValue({ canActivate: jest.fn().mockResolvedValue(true) });
+    const module: TestingModule = await builder.compile();
 
     controller = module.get<StockController>(StockController);
   });
