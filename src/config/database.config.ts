@@ -28,9 +28,13 @@ export const getDatabaseConfig = (
     VortexSession,
     VortexInstrument,
   ],
-  synchronize: true, // Auto-sync schema for now (creates missing tables)
-  logging: configService.get('NODE_ENV') === 'development',
+  synchronize: configService.get('DB_SYNCHRONIZE', 'true') === 'true', // Auto-sync schema (creates/updates tables based on entities)
+  logging: configService.get('NODE_ENV') === 'development' || configService.get('DB_LOGGING', 'false') === 'true',
   migrations: ['dist/migrations/*.js'],
-  migrationsRun: false,
-  ssl: false, // Disable SSL for Docker internal network
+  migrationsRun: configService.get('DB_MIGRATIONS_RUN', 'false') === 'true', // Set to true to auto-run migrations on startup
+  ssl: configService.get('DB_SSL', 'false') === 'true', // Enable SSL if needed
+  // Console for easy debugging
+  // eslint-disable-next-line no-console
+  // Note: synchronize=true will auto-create/update tables based on entity definitions
+  // This ensures the description field and other changes are automatically synced
 });

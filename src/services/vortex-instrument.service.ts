@@ -1258,6 +1258,52 @@ export class VortexInstrumentService {
   }
 
   /**
+   * Normalize exchange string to standard format
+   * Uses same logic as vortex-provider.service.ts for consistency
+   * 
+   * @param ex - Exchange string from database
+   * @returns Normalized exchange or null if invalid
+   */
+  private normalizeExchange(
+    ex: string,
+  ): 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' | null {
+    const s = (ex || '').toUpperCase().trim();
+    if (!s) return null;
+    
+    // Exact matches first
+    if (s === 'NSE_EQ') return 'NSE_EQ';
+    if (s === 'NSE_FO') return 'NSE_FO';
+    if (s === 'NSE_CUR') return 'NSE_CUR';
+    if (s === 'MCX_FO') return 'MCX_FO';
+    
+    // Pattern matching (same as provider)
+    if (
+      s.includes('NSE_EQ') ||
+      (s === 'NSE' && !s.includes('FO') && !s.includes('CUR')) ||
+      s === 'EQ' ||
+      s.includes('EQUITY')
+    ) {
+      return 'NSE_EQ';
+    }
+    if (
+      s.includes('NSE_FO') ||
+      s.includes('FO') ||
+      s.includes('FUT') ||
+      s.includes('FNO')
+    ) {
+      return 'NSE_FO';
+    }
+    if (s.includes('NSE_CUR') || s.includes('CDS') || s.includes('CUR')) {
+      return 'NSE_CUR';
+    }
+    if (s.includes('MCX')) {
+      return 'MCX_FO';
+    }
+    
+    return null;
+  }
+
+  /**
    * Validate and cleanup invalid Vortex instruments
    * 
    * Tests LTP fetch capability for instruments in batches, identifies invalid instruments,
@@ -1424,12 +1470,18 @@ export class VortexInstrumentService {
           const allowedExchanges = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
 
           for (const instrument of batch) {
-            const ex = String(instrument.exchange || '').toUpperCase();
-            if (allowedExchanges.has(ex)) {
+            // Normalize exchange using same logic as provider for consistency
+            const normalizedEx = this.normalizeExchange(instrument.exchange || '');
+            if (normalizedEx && allowedExchanges.has(normalizedEx)) {
               pairs.push({
-                exchange: ex as any,
+                exchange: normalizedEx as any,
                 token: instrument.token,
               });
+              // Console for easy debugging
+              // eslint-disable-next-line no-console
+              console.log(
+                `[VortexInstrumentService] Mapped token ${instrument.token} to exchange ${normalizedEx} (original: ${instrument.exchange})`,
+              );
             } else {
               // Instrument with invalid/unresolved exchange
               invalidInstruments.push({
@@ -1444,7 +1496,7 @@ export class VortexInstrumentService {
               // Console for easy debugging
               // eslint-disable-next-line no-console
               console.log(
-                `[VortexInstrumentService] Instrument ${instrument.token} has invalid exchange: ${instrument.exchange}`,
+                `[VortexInstrumentService] Instrument ${instrument.token} has invalid/unresolved exchange: ${instrument.exchange} (normalized: ${normalizedEx || 'null'})`,
               );
             }
           }
@@ -1467,11 +1519,12 @@ export class VortexInstrumentService {
           const ltpResults = await vortexProvider.getLTPByPairs(pairs);
 
           // Identify tokens with null/invalid LTP
+          // Use normalized exchange for pair key matching
           const pairKeyToInstrument = new Map<string, VortexInstrument>();
           for (const instrument of batch) {
-            const ex = String(instrument.exchange || '').toUpperCase();
-            if (allowedExchanges.has(ex)) {
-              const pairKey = `${ex}-${instrument.token}`;
+            const normalizedEx = this.normalizeExchange(instrument.exchange || '');
+            if (normalizedEx && allowedExchanges.has(normalizedEx)) {
+              const pairKey = `${normalizedEx}-${instrument.token}`;
               pairKeyToInstrument.set(pairKey, instrument);
             }
           }
@@ -1511,11 +1564,12 @@ export class VortexInstrumentService {
           }
 
           // Check for instruments in batch that weren't in LTP results
+          // Use normalized exchange for pair key matching
           for (const instrument of batch) {
-            const ex = String(instrument.exchange || '').toUpperCase();
-            if (!allowedExchanges.has(ex)) continue;
+            const normalizedEx = this.normalizeExchange(instrument.exchange || '');
+            if (!normalizedEx || !allowedExchanges.has(normalizedEx)) continue;
 
-            const pairKey = `${ex}-${instrument.token}`;
+            const pairKey = `${normalizedEx}-${instrument.token}`;
             if (!(pairKey in ltpResults)) {
               invalidLtpCount++;
               invalidInstruments.push({
@@ -1591,13 +1645,28 @@ export class VortexInstrumentService {
 
         const invalidTokens = invalidInstruments.map((inv) => inv.token);
 
-        // Deactivate invalid instruments
-        const updateResult = await this.vortexInstrumentRepo.update(
-          { token: In(invalidTokens) },
-          { is_active: false },
+        // Deactivate invalid instruments using query builder for better reliability
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(
+          `[VortexInstrumentService] Deactivating ${invalidTokens.length} invalid instruments`,
         );
+        
+        const updateResult = await this.vortexInstrumentRepo
+          .createQueryBuilder()
+          .update(VortexInstrument)
+          .set({ is_active: false })
+          .where('token IN (:...tokens)', { tokens: invalidTokens })
+          .execute();
+        
         deactivatedCount = updateResult.affected || 0;
-
+        
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(
+          `[VortexInstrumentService] Deactivation query executed: affected=${deactivatedCount}, expected=${invalidTokens.length}`,
+        );
+        
         // Console for easy debugging
         // eslint-disable-next-line no-console
         console.log(
@@ -1666,12 +1735,27 @@ export class VortexInstrumentService {
         return 0;
       }
 
-      // Delete all inactive instruments
-      const deleteResult = await this.vortexInstrumentRepo.delete({
-        is_active: false,
-      });
+      // Delete all inactive instruments using query builder for better reliability
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log(
+        `[VortexInstrumentService] Executing delete query for ${count} inactive instruments`,
+      );
+      
+      const deleteResult = await this.vortexInstrumentRepo
+        .createQueryBuilder()
+        .delete()
+        .from(VortexInstrument)
+        .where('is_active = :isActive', { isActive: false })
+        .execute();
 
       const deletedCount = deleteResult.affected || 0;
+      
+      // Console for easy debugging
+      // eslint-disable-next-line no-console
+      console.log(
+        `[VortexInstrumentService] Delete query executed: affected=${deletedCount}, expected=${count}`,
+      );
 
       // Console for easy debugging
       // eslint-disable-next-line no-console
