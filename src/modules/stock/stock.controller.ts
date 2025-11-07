@@ -1350,6 +1350,7 @@ export class StockController {
         },
         invalid_instruments: {
           type: 'array',
+          description: 'Only included if include_invalid_list=true. Array of invalid instruments with details.',
           items: {
             type: 'object',
             properties: {
@@ -1362,6 +1363,16 @@ export class StockController {
             },
           },
         },
+        invalid_instruments_count: {
+          type: 'number',
+          description: 'Count of invalid instruments (always included, even when list is not)',
+          example: 500,
+        },
+        note: {
+          type: 'string',
+          description: 'Informational message about response format',
+          example: 'Invalid instruments list not included to avoid large responses. Set include_invalid_list=true to include the full list.',
+        },
         cleanup: {
           type: 'object',
           properties: {
@@ -1370,6 +1381,8 @@ export class StockController {
           },
         },
         batches_processed: { type: 'number', example: 5 },
+        invalid_instruments_count: { type: 'number', example: 500 },
+        note: { type: 'string', example: 'Invalid instruments list not included to avoid large responses. Set include_invalid_list=true to include the full list.' },
         timestamp: { type: 'string', example: '2025-01-01T10:00:00.000Z' },
       },
     },
@@ -1439,6 +1452,12 @@ export class StockController {
           default: true,
           description: 'If true, only reports without making changes',
         },
+        include_invalid_list: {
+          type: 'boolean',
+          example: false,
+          default: false,
+          description: 'If true, includes full list of invalid instruments in response (may be large). Default false to avoid large responses.',
+        },
       },
     },
   })
@@ -1452,6 +1471,7 @@ export class StockController {
       batch_size?: number;
       auto_cleanup?: boolean;
       dry_run?: boolean;
+      include_invalid_list?: boolean;
     },
   ) {
     try {
@@ -1466,6 +1486,8 @@ export class StockController {
         dry_run: body.dry_run !== false, // Default to true
       });
 
+      const includeInvalidList = body.include_invalid_list || false;
+
       const result = await this.vortexInstrumentService.validateAndCleanupInstruments(
         {
           exchange: body.exchange,
@@ -1475,6 +1497,7 @@ export class StockController {
           batch_size: body.batch_size || 1000,
           auto_cleanup: body.auto_cleanup || false,
           dry_run: body.dry_run !== false,
+          include_invalid_list: includeInvalidList,
         },
         this.vortexProvider,
       );
@@ -1486,13 +1509,41 @@ export class StockController {
         valid: result.summary.valid_ltp,
         invalid: result.summary.invalid_ltp,
         deactivated: result.cleanup?.deactivated || 0,
+        invalidListIncluded: includeInvalidList,
       });
 
-      return {
+      // Build response - only include invalid_instruments list if requested
+      const response: any = {
         success: true,
-        ...result,
+        summary: result.summary,
+        cleanup: result.cleanup,
+        batches_processed: result.batches_processed,
         timestamp: new Date().toISOString(),
       };
+
+      // Only include invalid_instruments list if explicitly requested
+      if (includeInvalidList) {
+        response.invalid_instruments = result.invalid_instruments;
+        // Console for easy debugging
+        // eslint-disable-next-line no-console
+        console.log(`[Validate Instruments] Including ${result.invalid_instruments.length} invalid instruments in response`);
+      } else {
+        // Still log summary of invalid instruments for debugging
+        if (result.invalid_instruments.length > 0) {
+          // Console for easy debugging
+          // eslint-disable-next-line no-console
+          console.log(`[Validate Instruments] ${result.invalid_instruments.length} invalid instruments found (not included in response, set include_invalid_list=true to include)`);
+          // Log first few examples
+          const examples = result.invalid_instruments.slice(0, 5);
+          // Console for easy debugging
+          // eslint-disable-next-line no-console
+          console.log('[Validate Instruments] Sample invalid instruments:', examples);
+        }
+        response.invalid_instruments_count = result.invalid_instruments.length;
+        response.note = 'Invalid instruments list not included to avoid large responses. Set include_invalid_list=true to include the full list.';
+      }
+
+      return response;
     } catch (error) {
       // Console for easy debugging
       // eslint-disable-next-line no-console

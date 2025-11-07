@@ -1289,6 +1289,7 @@ export class VortexInstrumentService {
       batch_size?: number;
       auto_cleanup?: boolean;
       dry_run?: boolean;
+      include_invalid_list?: boolean;
     },
     vortexProvider: any,
   ): Promise<{
