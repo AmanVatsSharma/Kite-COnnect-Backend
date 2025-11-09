@@ -50,6 +50,33 @@ export class ValidateInstrumentsDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   include_invalid_list?: boolean = false;
+
+  @ApiPropertyOptional({ description: 'Number of probe attempts per batch for consensus', example: 3, default: 3, minimum: 1 })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(1)
+  probe_attempts?: number = 3;
+
+  @ApiPropertyOptional({ description: 'Milliseconds to wait between Vortex calls (>=1000 enforced)', example: 1000, default: 1000, minimum: 1000 })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(1000)
+  probe_interval_ms?: number = 1000;
+
+  @ApiPropertyOptional({ description: 'Consensus threshold for classifying as no_ltp', example: 2, default: 2, minimum: 1 })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(1)
+  require_consensus?: number = 2;
+
+  @ApiPropertyOptional({ description: 'If true, never deactivate indeterminate tokens (recommended)', example: true, default: true })
+  @IsOptional()
+  @Transform(({ value }) => !(value === 'false' || value === false))
+  @IsBoolean()
+  safe_cleanup?: boolean = true;
 }
 
 

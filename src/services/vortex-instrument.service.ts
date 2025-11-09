@@ -1452,6 +1452,10 @@ export class VortexInstrumentService {
       auto_cleanup?: boolean;
       dry_run?: boolean;
       include_invalid_list?: boolean;
+      probe_attempts?: number;
+      probe_interval_ms?: number;
+      require_consensus?: number;
+      safe_cleanup?: boolean;
     },
     vortexProvider: any,
   ): Promise<{
@@ -1484,6 +1488,10 @@ export class VortexInstrumentService {
     diagnostics?: {
       reason_counts: Record<string, number>;
       resolution: { requested: number; included: number; invalid_exchange: number; missing_from_response: number };
+      attempts?: number;
+      require_consensus?: number;
+      probe_interval_ms?: number;
+      indeterminate?: number;
     };
   }> {
     try {
@@ -1494,6 +1502,10 @@ export class VortexInstrumentService {
       const batchSize = filters.batch_size || 1000;
       const autoCleanup = filters.auto_cleanup || false;
       const dryRun = filters.dry_run !== false; // Default to true
+      const probeAttempts = Math.max(1, Number(filters.probe_attempts ?? 3));
+      const probeIntervalMs = Math.max(1000, Number(filters.probe_interval_ms ?? 1000));
+      const requireConsensus = Math.max(1, Math.min(Number(filters.require_consensus ?? 2), probeAttempts));
+      const safeCleanup = !(filters.safe_cleanup === false);
 
       // Step 1: Query instruments from DB with filters
       const queryBuilder = this.vortexInstrumentRepo.createQueryBuilder('instrument');
@@ -1587,6 +1599,7 @@ export class VortexInstrumentService {
       let totalPairsIncluded = 0;
       let totalInvalidExchange = 0;
       let totalMissingFromResponse = 0;
+      let totalIndeterminate = 0;
 
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
         const batch = batches[batchIndex];
@@ -1654,17 +1667,8 @@ export class VortexInstrumentService {
             continue;
           }
 
-          // Call vortexProvider.getLTPByPairs() with pairs
-          // Console for easy debugging
-          // eslint-disable-next-line no-console
-          console.log(
-            `[VortexInstrumentService] Fetching LTP for ${pairs.length} pairs in batch ${batchIndex + 1}`,
-          );
-          const ltpResults = await vortexProvider.getLTPByPairs(pairs);
-          totalPairsIncluded += pairs.length;
-
-          // Identify tokens with null/invalid LTP
-          // Use normalized exchange for pair key matching
+          // Multi-probe with consensus and >=1s spacing between Vortex calls
+          // Build map for quick lookups
           const pairKeyToInstrument = new Map<string, VortexInstrument>();
           for (const instrument of batch) {
             const normalizedEx = this.normalizeExchange(instrument.exchange || '');
@@ -1673,25 +1677,48 @@ export class VortexInstrumentService {
               pairKeyToInstrument.set(pairKey, instrument);
             }
           }
-
-          for (const [pairKey, ltpData] of Object.entries(ltpResults)) {
-            const instrument = pairKeyToInstrument.get(pairKey);
-            if (!instrument) continue;
-
-            const lastPrice = (ltpData as any)?.last_price;
-            const hasValidLtp =
-              Number.isFinite(lastPrice) && lastPrice !== null && lastPrice > 0;
-
-            if (hasValidLtp) {
+          const tokenState: Record<number, { hits: number; probes: number }> = {};
+          for (const instrument of batch) {
+            tokenState[instrument.token] = { hits: 0, probes: 0 };
+          }
+          let attemptHadEmpty = false;
+          for (let attempt = 0; attempt < probeAttempts; attempt++) {
+            // Console for easy debugging
+            // eslint-disable-next-line no-console
+            console.log(`[VortexInstrumentService] Probe ${attempt + 1}/${probeAttempts} for ${pairs.length} pairs (batch ${batchIndex + 1})`);
+            const ltpResults = await vortexProvider.getLTPByPairs(pairs, { bypassCache: true });
+            totalPairsIncluded += pairs.length;
+            const keysCount = Object.keys(ltpResults || {}).length;
+            if (keysCount === 0) attemptHadEmpty = true;
+            // For every instrument in this batch, count probe and hits
+            for (const instrument of batch) {
+              const normalizedEx = this.normalizeExchange(instrument.exchange || '');
+              if (!normalizedEx || !allowedExchanges.has(normalizedEx)) continue;
+              const pairKey = `${normalizedEx}-${instrument.token}`;
+              tokenState[instrument.token].probes += 1;
+              const ltpData: any = (ltpResults && (ltpResults as any)[pairKey]) || undefined;
+              const lastPrice = ltpData?.last_price;
+              if (Number.isFinite(lastPrice) && lastPrice > 0) {
+                tokenState[instrument.token].hits += 1;
+              }
+            }
+            if (attempt < probeAttempts - 1) {
+              await new Promise((r) => setTimeout(r, probeIntervalMs));
+            }
+          }
+          // Classify after probes
+          for (const instrument of batch) {
+            const normalizedEx = this.normalizeExchange(instrument.exchange || '');
+            if (!normalizedEx || !allowedExchanges.has(normalizedEx)) continue;
+            const state = tokenState[instrument.token] || { hits: 0, probes: 0 };
+            if (state.hits > 0) {
               validLtpCount++;
-              // Console for easy debugging
-              // eslint-disable-next-line no-console
-              console.log(
-                `[VortexInstrumentService] Instrument ${instrument.token} (${instrument.symbol}) has valid LTP: ${lastPrice}`,
-              );
-            } else {
-              invalidLtpCount++;
-              const reason = lastPrice === null ? 'no_ltp_data' : 'invalid_ltp_value';
+              continue;
+            }
+            // No hits across attempts
+            if (attemptHadEmpty) {
+              // Mark as indeterminate, do not count as invalid for cleanup
+              totalIndeterminate++;
               invalidInstruments.push({
                 token: instrument.token,
                 exchange: instrument.exchange || 'UNKNOWN',
@@ -1703,43 +1730,44 @@ export class VortexInstrumentService {
                 strike_price: instrument.strike_price || null,
                 tick: instrument.tick || null,
                 lot_size: instrument.lot_size || null,
-                reason,
-                ltp_response: ltpData,
+                reason: 'indeterminate',
+                ltp_response: null,
               });
-              reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
-              // Console for easy debugging
-              // eslint-disable-next-line no-console
-              console.log(
-                `[VortexInstrumentService] Instrument ${instrument.token} (${instrument.symbol}) has invalid LTP: reason=${reason}, response=${JSON.stringify(ltpData)}`,
-              );
-            }
-          }
-
-          // Check for instruments in batch that weren't in LTP results
-          // Use normalized exchange for pair key matching
-          for (const instrument of batch) {
-            const normalizedEx = this.normalizeExchange(instrument.exchange || '');
-            if (!normalizedEx || !allowedExchanges.has(normalizedEx)) continue;
-
-            const pairKey = `${normalizedEx}-${instrument.token}`;
-            if (!(pairKey in ltpResults)) {
+              reasonCounts['indeterminate'] = (reasonCounts['indeterminate'] || 0) + 1;
+            } else if (state.probes >= requireConsensus) {
               invalidLtpCount++;
               invalidInstruments.push({
                 token: instrument.token,
                 exchange: instrument.exchange || 'UNKNOWN',
                 symbol: instrument.symbol || '',
                 instrument_name: instrument.instrument_name || '',
-                reason: 'missing_from_response',
+                description: instrument.description || null,
+                expiry_date: instrument.expiry_date || null,
+                option_type: instrument.option_type || null,
+                strike_price: instrument.strike_price || null,
+                tick: instrument.tick || null,
+                lot_size: instrument.lot_size || null,
+                reason: 'no_ltp_data',
                 ltp_response: null,
               });
-              totalMissingFromResponse++;
-              reasonCounts['missing_from_response'] =
-                (reasonCounts['missing_from_response'] || 0) + 1;
-              // Console for easy debugging
-              // eslint-disable-next-line no-console
-              console.log(
-                `[VortexInstrumentService] Instrument ${instrument.token} (${instrument.symbol}) missing from LTP response`,
-              );
+              reasonCounts['no_ltp_data'] = (reasonCounts['no_ltp_data'] || 0) + 1;
+            } else {
+              totalIndeterminate++;
+              invalidInstruments.push({
+                token: instrument.token,
+                exchange: instrument.exchange || 'UNKNOWN',
+                symbol: instrument.symbol || '',
+                instrument_name: instrument.instrument_name || '',
+                description: instrument.description || null,
+                expiry_date: instrument.expiry_date || null,
+                option_type: instrument.option_type || null,
+                strike_price: instrument.strike_price || null,
+                tick: instrument.tick || null,
+                lot_size: instrument.lot_size || null,
+                reason: 'indeterminate',
+                ltp_response: null,
+              });
+              reasonCounts['indeterminate'] = (reasonCounts['indeterminate'] || 0) + 1;
             }
           }
         } catch (batchError) {
@@ -1793,13 +1821,19 @@ export class VortexInstrumentService {
       let removedCount = 0;
 
       if (autoCleanup && !dryRun && invalidInstruments.length > 0) {
+        const candidates = safeCleanup
+          ? invalidInstruments.filter((x) => x.reason !== 'indeterminate')
+          : invalidInstruments;
+        const invalidTokens = candidates.map((inv) => inv.token);
         // Console for easy debugging
         // eslint-disable-next-line no-console
         console.log(
-          `[VortexInstrumentService] Starting cleanup: deactivating ${invalidInstruments.length} invalid instruments`,
+          `[VortexInstrumentService] Starting cleanup: deactivating ${invalidTokens.length} invalid instruments${safeCleanup ? ' (safe_cleanup enabled)' : ''}`,
         );
-
-        const invalidTokens = invalidInstruments.map((inv) => inv.token);
+        if (safeCleanup && candidates.length !== invalidInstruments.length) {
+          // eslint-disable-next-line no-console
+          console.log(`[VortexInstrumentService] Safe cleanup: skipping ${invalidInstruments.length - candidates.length} indeterminate instruments`);
+        }
 
         // Deactivate invalid instruments using query builder for better reliability
         // Batch processing to avoid SQL parameter limits (PostgreSQL has ~65535 parameter limit)
@@ -1894,6 +1928,10 @@ export class VortexInstrumentService {
             invalid_exchange: totalInvalidExchange,
             missing_from_response: totalMissingFromResponse,
           },
+          attempts: probeAttempts,
+          require_consensus: requireConsensus,
+          probe_interval_ms: probeIntervalMs,
+          indeterminate: totalIndeterminate,
         },
       };
     } catch (error) {

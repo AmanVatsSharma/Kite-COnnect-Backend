@@ -1679,6 +1679,30 @@ export class StockController {
           default: false,
           description: 'If true, includes full list of invalid instruments in response (may be large). Default false to avoid large responses.',
         },
+        probe_attempts: {
+          type: 'number',
+          example: 3,
+          default: 3,
+          description: 'Number of probe attempts per batch for consensus',
+        },
+        probe_interval_ms: {
+          type: 'number',
+          example: 1000,
+          default: 1000,
+          description: 'Milliseconds to wait between Vortex calls (>=1000 enforced)',
+        },
+        require_consensus: {
+          type: 'number',
+          example: 2,
+          default: 2,
+          description: 'Consensus threshold for classifying as no_ltp',
+        },
+        safe_cleanup: {
+          type: 'boolean',
+          example: true,
+          default: true,
+          description: 'If true, never deactivate indeterminate tokens (recommended)',
+        },
       },
     },
   })
@@ -1710,6 +1734,10 @@ export class StockController {
           auto_cleanup: body.auto_cleanup || false,
           dry_run: body.dry_run !== false,
           include_invalid_list: includeInvalidList,
+          probe_attempts: body.probe_attempts,
+          probe_interval_ms: body.probe_interval_ms,
+          require_consensus: body.require_consensus,
+          safe_cleanup: body.safe_cleanup,
         },
         this.vortexProvider,
       );
@@ -1811,6 +1839,10 @@ export class StockController {
           auto_cleanup: false,
           dry_run: true,
           include_invalid_list: true,
+          probe_attempts: body.probe_attempts,
+          probe_interval_ms: body.probe_interval_ms,
+          require_consensus: body.require_consensus,
+          safe_cleanup: body.safe_cleanup,
         },
         this.vortexProvider,
       );

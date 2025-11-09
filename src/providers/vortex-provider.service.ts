@@ -418,7 +418,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     }
   }
 
-  async getLTP(tokens: string[]): Promise<Record<string, any>> {
+  async getLTP(tokens: string[], options?: { bypassCache?: boolean }): Promise<Record<string, any>> {
     try {
       await this.ensureTokenLoaded();
       if (!this.http) {
@@ -428,8 +428,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         return {};
       }
       await this.rateLimit('ltp');
-      // Try cache first
-      const cache = await this.getCachedLtpForTokens(tokens);
+      // Try cache first unless bypassCache=true
+      const useCache = !(options && options.bypassCache === true);
+      const cache = useCache ? await this.getCachedLtpForTokens(tokens) : {};
       const missingForCache = tokens.filter((t) => {
         const lp = cache[String(t)]?.last_price;
         return !(Number.isFinite(lp as any) && (lp as any) > 0);
@@ -458,11 +459,13 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         data = (resp as any)?.data?.data || {};
       }
       const out: Record<string, any> = {};
-      // Start with cache values
-      for (const t of tokens) {
-        const cached = cache[String(t)]?.last_price ?? null;
-        if (Number.isFinite(cached as any) && (cached as any) > 0) {
-          out[String(t)] = { last_price: cached };
+      // Start with cache values when allowed
+      if (useCache) {
+        for (const t of tokens) {
+          const cached = cache[String(t)]?.last_price ?? null;
+          if (Number.isFinite(cached as any) && (cached as any) > 0) {
+            out[String(t)] = { last_price: cached };
+          }
         }
       }
       for (const [exToken, quote] of Object.entries<any>(data)) {
@@ -500,6 +503,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
       token: string | number;
     }>,
+    options?: { bypassCache?: boolean },
   ): Promise<Record<string, { last_price: number | null }>> {
     const result: Record<string, { last_price: number | null }> = {};
     try {
@@ -542,7 +546,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         const tokenPart = Number(String(k.split('-').pop()));
         if (Number.isFinite(tokenPart)) tokenByKey.set(k, tokenPart);
       }
-      if (tokenByKey.size) {
+      const useCache = !(options && options.bypassCache === true);
+      if (useCache && tokenByKey.size) {
         const cached = await this.getCachedLtpForTokens(
           Array.from(new Set(Array.from(tokenByKey.values()).map((n) => String(n))))
         );
