@@ -3,60 +3,56 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class OptimizeVortexInstruments1700000000002
   implements MigrationInterface
 {
-  // Run this migration outside of a transaction because Postgres requires
-  // CREATE INDEX CONCURRENTLY to be executed without an active transaction.
-  public transaction = 'none' as const;
-
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Composite index for symbol + exchange searches (most common)
     await queryRunner.query(`
-      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vortex_symbol_exchange 
+      CREATE INDEX IF NOT EXISTS idx_vortex_symbol_exchange 
       ON vortex_instruments(symbol, exchange)
     `);
 
     // Composite index for exchange + instrument type filtering
     await queryRunner.query(`
-      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vortex_exchange_type 
+      CREATE INDEX IF NOT EXISTS idx_vortex_exchange_type 
       ON vortex_instruments(exchange, instrument_name)
     `);
 
     // Specialized index for options search (symbol + expiry + strike + option_type)
     await queryRunner.query(`
-      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vortex_options 
+      CREATE INDEX IF NOT EXISTS idx_vortex_options 
       ON vortex_instruments(symbol, expiry_date, strike_price, option_type) 
       WHERE option_type IS NOT NULL
     `);
 
     // Full-text search index for fuzzy symbol matching
     await queryRunner.query(`
-      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vortex_symbol_fts 
+      CREATE INDEX IF NOT EXISTS idx_vortex_symbol_fts 
       ON vortex_instruments USING gin(to_tsvector('english', symbol))
     `);
 
     // Partial index for active instruments only (most queries filter by is_active)
     await queryRunner.query(`
-      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vortex_active_symbol 
+      CREATE INDEX IF NOT EXISTS idx_vortex_active_symbol 
       ON vortex_instruments(symbol, exchange) 
       WHERE is_active = true
     `);
 
     // Index for strike price range queries on options
     await queryRunner.query(`
-      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vortex_strike_price 
+      CREATE INDEX IF NOT EXISTS idx_vortex_strike_price 
       ON vortex_instruments(strike_price) 
       WHERE option_type IS NOT NULL AND strike_price > 0
     `);
 
     // Index for expiry date range queries
     await queryRunner.query(`
-      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vortex_expiry_date 
+      CREATE INDEX IF NOT EXISTS idx_vortex_expiry_date 
       ON vortex_instruments(expiry_date) 
       WHERE expiry_date IS NOT NULL
     `);
 
     // Composite index for autocomplete queries (symbol prefix matching)
     await queryRunner.query(`
-      CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vortex_symbol_prefix 
+      CREATE INDEX IF NOT EXISTS idx_vortex_symbol_prefix 
       ON vortex_instruments(symbol text_pattern_ops) 
       WHERE is_active = true
     `);
