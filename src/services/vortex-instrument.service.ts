@@ -36,11 +36,21 @@ export class VortexInstrumentService {
   async syncVortexInstruments(
     exchange?: string,
     csvUrl?: string,
-  ): Promise<{ synced: number; updated: number }> {
+    onProgress?: (p: {
+      phase: 'init' | 'fetch_csv' | 'upsert' | 'complete';
+      total?: number;
+      processed?: number;
+      synced?: number;
+      updated?: number;
+      errors?: number;
+      lastMessage?: string;
+    }) => void,
+  ): Promise<{ synced: number; updated: number; total?: number }> {
     try {
       this.logger.log(
         `[VortexInstrumentService] Starting Vortex instrument sync for exchange=${exchange || 'all'}`,
       );
+      onProgress?.({ phase: 'init', lastMessage: 'Starting Vortex instrument sync' });
 
       // Get instruments from Vortex provider
       const instruments = await this.vortexProvider.getInstruments(exchange, {
@@ -51,15 +61,45 @@ export class VortexInstrumentService {
         this.logger.warn(
           '[VortexInstrumentService] No instruments received from Vortex provider',
         );
-        return { synced: 0, updated: 0 };
+        onProgress?.({
+          phase: 'complete',
+          total: 0,
+          processed: 0,
+          synced: 0,
+          updated: 0,
+          errors: 0,
+          lastMessage: 'No instruments received from provider',
+        });
+        return { synced: 0, updated: 0, total: 0 };
       }
 
       this.logger.log(
         `[VortexInstrumentService] Received ${instruments.length} instruments from Vortex CSV`,
       );
+      onProgress?.({
+        phase: 'fetch_csv',
+        total: instruments.length,
+        processed: 0,
+        synced: 0,
+        updated: 0,
+        errors: 0,
+        lastMessage: `Fetched ${instruments.length} instruments from CSV`,
+      });
 
       let synced = 0;
       let updated = 0;
+      let processed = 0;
+      let errors = 0;
+
+      onProgress?.({
+        phase: 'upsert',
+        total: instruments.length,
+        processed,
+        synced,
+        updated,
+        errors,
+        lastMessage: 'Beginning upsert of instruments',
+      });
 
       for (const vortexInstrument of instruments) {
         try {
@@ -115,22 +155,54 @@ export class VortexInstrumentService {
           // Update instrument mapping with exchange-token format
           await this.updateInstrumentMapping(vortexInstrument);
         } catch (error) {
+          errors++;
           this.logger.error(
             `[VortexInstrumentService] Failed to process instrument token=${vortexInstrument.token}`,
             error,
           );
+        }
+        processed++;
+        // Emit progress periodically
+        if (processed % 500 === 0) {
+          onProgress?.({
+            phase: 'upsert',
+            total: instruments.length,
+            processed,
+            synced,
+            updated,
+            errors,
+            lastMessage: `Upsert progress ${processed}/${instruments.length}`,
+          });
         }
       }
 
       this.logger.log(
         `[VortexInstrumentService] Sync completed. Synced: ${synced}, Updated: ${updated}`,
       );
-      return { synced, updated };
+      onProgress?.({
+        phase: 'complete',
+        total: instruments.length,
+        processed,
+        synced,
+        updated,
+        errors,
+        lastMessage: 'Sync complete',
+      });
+      return { synced, updated, total: instruments.length };
     } catch (error) {
       this.logger.error(
         '[VortexInstrumentService] Error syncing Vortex instruments',
         error,
       );
+      onProgress?.({
+        phase: 'complete',
+        total: 0,
+        processed: 0,
+        synced: 0,
+        updated: 0,
+        errors: 1,
+        lastMessage: `Error: ${(error as any)?.message || 'unknown'}`,
+      });
       throw error;
     }
   }
@@ -1395,6 +1467,12 @@ export class VortexInstrumentService {
       exchange: string;
       symbol: string;
       instrument_name: string;
+      description?: string | null;
+      expiry_date?: string | null;
+      option_type?: string | null;
+      strike_price?: number | null;
+      tick?: number | null;
+      lot_size?: number | null;
       reason: string;
       ltp_response: any;
     }>;
@@ -1403,6 +1481,10 @@ export class VortexInstrumentService {
       removed: number;
     };
     batches_processed: number;
+    diagnostics?: {
+      reason_counts: Record<string, number>;
+      resolution: { requested: number; included: number; invalid_exchange: number; missing_from_response: number };
+    };
   }> {
     try {
       // Console for easy debugging
@@ -1489,12 +1571,22 @@ export class VortexInstrumentService {
         exchange: string;
         symbol: string;
         instrument_name: string;
+        description?: string | null;
+        expiry_date?: string | null;
+        option_type?: string | null;
+        strike_price?: number | null;
+        tick?: number | null;
+        lot_size?: number | null;
         reason: string;
         ltp_response: any;
       }> = [];
       let validLtpCount = 0;
       let invalidLtpCount = 0;
       let errorCount = 0;
+      const reasonCounts: Record<string, number> = {};
+      let totalPairsIncluded = 0;
+      let totalInvalidExchange = 0;
+      let totalMissingFromResponse = 0;
 
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
         const batch = batches[batchIndex];
@@ -1533,10 +1625,18 @@ export class VortexInstrumentService {
                 exchange: instrument.exchange || 'UNKNOWN',
                 symbol: instrument.symbol || '',
                 instrument_name: instrument.instrument_name || '',
+                description: instrument.description || null,
+                expiry_date: instrument.expiry_date || null,
+                option_type: instrument.option_type || null,
+                strike_price: instrument.strike_price || null,
+                tick: instrument.tick || null,
+                lot_size: instrument.lot_size || null,
                 reason: 'invalid_exchange',
                 ltp_response: null,
               });
               invalidLtpCount++;
+              totalInvalidExchange++;
+              reasonCounts['invalid_exchange'] = (reasonCounts['invalid_exchange'] || 0) + 1;
               // Console for easy debugging
               // eslint-disable-next-line no-console
               console.log(
@@ -1561,6 +1661,7 @@ export class VortexInstrumentService {
             `[VortexInstrumentService] Fetching LTP for ${pairs.length} pairs in batch ${batchIndex + 1}`,
           );
           const ltpResults = await vortexProvider.getLTPByPairs(pairs);
+          totalPairsIncluded += pairs.length;
 
           // Identify tokens with null/invalid LTP
           // Use normalized exchange for pair key matching
@@ -1596,9 +1697,16 @@ export class VortexInstrumentService {
                 exchange: instrument.exchange || 'UNKNOWN',
                 symbol: instrument.symbol || '',
                 instrument_name: instrument.instrument_name || '',
+                description: instrument.description || null,
+                expiry_date: instrument.expiry_date || null,
+                option_type: instrument.option_type || null,
+                strike_price: instrument.strike_price || null,
+                tick: instrument.tick || null,
+                lot_size: instrument.lot_size || null,
                 reason,
                 ltp_response: ltpData,
               });
+              reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
               // Console for easy debugging
               // eslint-disable-next-line no-console
               console.log(
@@ -1624,6 +1732,9 @@ export class VortexInstrumentService {
                 reason: 'missing_from_response',
                 ltp_response: null,
               });
+              totalMissingFromResponse++;
+              reasonCounts['missing_from_response'] =
+                (reasonCounts['missing_from_response'] || 0) + 1;
               // Console for easy debugging
               // eslint-disable-next-line no-console
               console.log(
@@ -1654,6 +1765,7 @@ export class VortexInstrumentService {
               ltp_response: { error: batchError.message },
             });
             invalidLtpCount++;
+            reasonCounts['batch_error'] = (reasonCounts['batch_error'] || 0) + 1;
           }
         }
 
@@ -1774,6 +1886,15 @@ export class VortexInstrumentService {
           removed: removedCount,
         },
         batches_processed: batches.length,
+        diagnostics: {
+          reason_counts: reasonCounts,
+          resolution: {
+            requested: totalInstruments,
+            included: totalPairsIncluded,
+            invalid_exchange: totalInvalidExchange,
+            missing_from_response: totalMissingFromResponse,
+          },
+        },
       };
     } catch (error) {
       // Console for easy debugging

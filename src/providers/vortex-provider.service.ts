@@ -468,7 +468,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       for (const [exToken, quote] of Object.entries<any>(data)) {
         const tokenPart = exToken.split('-').pop();
         if (!tokenPart) continue;
-        const raw = Number(quote?.last_trade_price);
+        const raw = Number(
+          (quote && (quote as any).last_trade_price) ?? (quote as any)?.ltp,
+        );
         out[tokenPart] = {
           last_price: Number.isFinite(raw) && raw > 0 ? raw : null,
         };

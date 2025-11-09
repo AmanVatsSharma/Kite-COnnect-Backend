@@ -96,6 +96,13 @@ sequenceDiagram
     Service->>Service: Return sync statistics
 ```
 
+### Validation Output Enrichment
+- When `include_invalid_list=true` is passed to `POST /api/stock/vayu/validate-instruments`, each invalid item includes:
+  - `token`, `exchange`, `symbol`, `instrument_name`, `description`, `expiry_date`, `option_type`, `strike_price`, `tick`, `lot_size`, `reason`, `ltp_response`
+- The response also contains small diagnostics:
+  - `diagnostics.reason_counts` (counts per reason)
+  - `diagnostics.resolution` with `{ requested, included, invalid_exchange, missing_from_response }`
+
 ## API Endpoints
 
 ### Vortex-Specific Endpoints

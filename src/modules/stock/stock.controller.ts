@@ -11,10 +11,12 @@ import {
   HttpStatus,
   UseGuards,
   Request,
+  Res,
 } from '@nestjs/common';
 import { StockService } from './stock.service';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
 import { VortexProviderService } from '../../providers/vortex-provider.service';
+import { RedisService } from '../../services/redis.service';
 import {
   ApiTags,
   ApiOperation,
@@ -31,6 +33,7 @@ import { InstrumentsRequestDto } from './dto/instruments.dto';
 import { BatchTokensDto } from './dto/batch-tokens.dto';
 import { ClearCacheDto } from './dto/clear-cache.dto';
 import { ValidateInstrumentsDto } from './dto/validate-instruments.dto';
+import { randomUUID } from 'crypto';
 
 @Controller('stock')
 @UseGuards(ApiKeyGuard)
@@ -41,6 +44,7 @@ export class StockController {
     private readonly stockService: StockService,
     private readonly vortexInstrumentService: VortexInstrumentService,
     private readonly vortexProvider: VortexProviderService,
+    private readonly redisService: RedisService,
   ) {}
 
   @Post('instruments/sync')
@@ -91,6 +95,188 @@ export class StockController {
           message: 'Failed to sync instruments',
           error: error.message,
         },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('vayu/instruments/sync/stream')
+  @ApiOperation({
+    summary: 'Stream live status while syncing Vayu (Vortex) instruments (SSE)',
+    description:
+      'Streams JSON events with progress of CSV fetch and upsert. Emits fields: { phase, total, processed, synced, updated, errors, lastMessage }.',
+  })
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
+  @ApiQuery({ name: 'csv_url', required: false, description: 'Optional CSV URL override' })
+  async streamVayuSync(
+    @Query('exchange') exchange?: string,
+    @Query('csv_url') csvUrl?: string,
+    @Res() res?: any,
+  ) {
+    try {
+      // Set SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+
+      const send = (data: any) => {
+        try {
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[Vayu Sync SSE] write failed:', e);
+        }
+      };
+
+      send({ success: true, event: 'start', exchange: exchange || 'all', ts: new Date().toISOString() });
+
+      const result = await this.vortexInstrumentService.syncVortexInstruments(
+        exchange,
+        csvUrl,
+        (p) => send({ success: true, event: 'progress', ...p, ts: new Date().toISOString() }),
+      );
+
+      send({ success: true, event: 'complete', result, ts: new Date().toISOString() });
+      res.end();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[Vayu Sync SSE] Error:', error);
+      try {
+        res.write(`data: ${JSON.stringify({ success: false, error: (error as any)?.message || 'unknown' })}\n\n`);
+      } catch {}
+      res.end();
+    }
+  }
+
+  @Post('vayu/instruments/sync')
+  @ApiOperation({
+    summary: 'Start Vayu (Vortex) instruments sync (supports async polling)',
+    description:
+      'If async=true, starts a background sync job and returns jobId. Poll progress via GET /api/stock/vayu/instruments/sync/status?jobId=... Otherwise runs sync inline and returns summary.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Sync started or completed',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        jobId: { type: 'string', nullable: true, example: 'a2b6f2ee-0f27-4a2d-ae26-0ff4ac4a93fc' },
+        data: {
+          type: 'object',
+          nullable: true,
+          description: 'Present when async=false (inline run)',
+          properties: {
+            synced: { type: 'number', example: 1200 },
+            updated: { type: 'number', example: 3400 },
+            total: { type: 'number', example: 4600 },
+          },
+        },
+        timestamp: { type: 'string' },
+      },
+    },
+  })
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
+  @ApiQuery({ name: 'csv_url', required: false, description: 'Optional CSV URL override' })
+  @ApiQuery({ name: 'async', required: false, example: true, description: 'Run in background and poll status' })
+  async startVayuSync(
+    @Query('exchange') exchange?: string,
+    @Query('csv_url') csvUrl?: string,
+    @Query('async') asyncRaw?: string | boolean,
+  ) {
+    const isAsync = String(asyncRaw || '').toLowerCase() === 'true' || asyncRaw === true;
+    if (!isAsync) {
+      try {
+        const summary = await this.vortexInstrumentService.syncVortexInstruments(exchange, csvUrl);
+        return { success: true, message: 'Sync completed', data: summary, timestamp: new Date().toISOString() };
+      } catch (error) {
+        if (error instanceof HttpException) throw error;
+        throw new HttpException(
+          { success: false, message: 'Vayu sync failed', error: (error as any)?.message || 'unknown' },
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+    }
+    // Async path using Redis progress store
+    try {
+      const jobId = randomUUID();
+      const key = `vayu:sync:job:${jobId}`;
+      await this.redisService.set(key, { status: 'started', exchange: exchange || 'all', ts: Date.now() }, 3600);
+      setImmediate(async () => {
+        try {
+          await this.vortexInstrumentService.syncVortexInstruments(exchange, csvUrl, async (p) => {
+            try {
+              await this.redisService.set(key, { status: 'running', progress: p, ts: Date.now() }, 3600);
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.warn('[Vayu Sync] Failed to write progress to Redis', e);
+            }
+          });
+          await this.redisService.set(key, { status: 'completed', ts: Date.now() }, 3600);
+        } catch (e) {
+          await this.redisService.set(key, { status: 'failed', error: (e as any)?.message || 'unknown', ts: Date.now() }, 3600);
+        }
+      });
+      return { success: true, message: 'Sync job started', jobId, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Failed to start Vayu sync', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('vayu/instruments/sync/status')
+  @ApiOperation({ summary: 'Poll Vayu (Vortex) sync status' })
+  @ApiQuery({ name: 'jobId', required: true })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns job status from progress store',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        data: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', example: 'running' },
+            progress: {
+              type: 'object',
+              nullable: true,
+              properties: {
+                phase: { type: 'string', example: 'upsert' },
+                total: { type: 'number', example: 28981 },
+                processed: { type: 'number', example: 15000 },
+                synced: { type: 'number', example: 5000 },
+                updated: { type: 'number', example: 9000 },
+                errors: { type: 'number', example: 10 },
+                lastMessage: { type: 'string', example: 'Upsert progress 15000/28981' },
+              },
+            },
+            ts: { type: 'number', example: 1731147600000 },
+          },
+        },
+      },
+    },
+  })
+  async getVayuSyncStatus(@Query('jobId') jobId: string) {
+    try {
+      if (!jobId) {
+        throw new HttpException({ success: false, message: 'jobId is required' }, HttpStatus.BAD_REQUEST);
+      }
+      const key = `vayu:sync:job:${jobId}`;
+      const data = await this.redisService.get<any>(key);
+      if (!data) {
+        throw new HttpException({ success: false, message: 'Job not found or expired' }, HttpStatus.NOT_FOUND);
+      }
+      return { success: true, data };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Failed to fetch status', error: (error as any)?.message || 'unknown' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -1542,6 +1728,9 @@ export class StockController {
         batches_processed: result.batches_processed,
         timestamp: new Date().toISOString(),
       };
+      if ((result as any)?.diagnostics) {
+        response.diagnostics = (result as any).diagnostics;
+      }
 
       // Add helpful messages based on cleanup status
       const autoCleanup = body.auto_cleanup || false;
@@ -2627,6 +2816,9 @@ export class StockController {
         expiry_date: i.expiry_date,
         option_type: i.option_type,
         strike_price: i.strike_price,
+        tick: i.tick,
+        lot_size: i.lot_size,
+        description: i.description,
         last_price: ltp?.[i.token]?.last_price ?? null,
       }));
       const filtered = ltpOnly
