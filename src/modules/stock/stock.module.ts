@@ -81,6 +81,7 @@ import { VortexValidationCronService } from '../../services/vortex-validation.cr
     MarketDataGateway,
     MarketDataStreamService,
     VortexInstrumentService,
+    KiteProviderService,
   ],
 })
 export class StockModule {}

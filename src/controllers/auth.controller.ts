@@ -38,6 +38,8 @@ export class AuthController {
     private configService: ConfigService,
     private redisService: RedisService,
     private kiteProvider: KiteProviderService,
+    private streamService: MarketDataStreamService,
+    private resolver: MarketDataProviderResolverService,
     @InjectRepository(KiteSession)
     private kiteSessionRepo: Repository<KiteSession>,
   ) {}
@@ -146,6 +148,19 @@ export class AuthController {
     // update in-memory client and restart ticker
     await this.kiteProvider.updateAccessToken(session.access_token);
     await this.kiteProvider.restartTicker();
+
+    // Set global provider to kite and (re)start streaming
+    try {
+      await this.resolver.setGlobalProviderName('kite');
+    } catch {}
+    try {
+      const status = await this.streamService.getStreamingStatus();
+      if (!status?.isStreaming) {
+        await this.streamService.startStreaming();
+      } else {
+        await this.streamService.reconnectIfStreaming();
+      }
+    } catch {}
 
     // Invalidate state after successful callback
     try {

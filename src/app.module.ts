@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TerminusModule } from '@nestjs/terminus';
 import { StockModule } from './modules/stock/stock.module';
+import { FalconModule } from './modules/falcon/falcon.module';
 import { getDatabaseConfig } from './config/database.config';
 import { getRedisConfig } from './config/redis.config';
 
@@ -22,6 +23,7 @@ import { getRedisConfig } from './config/redis.config';
     }),
     TerminusModule,
     StockModule,
+    FalconModule,
   ],
   controllers: [AppController],
   providers: [AppService],
