@@ -101,6 +101,49 @@ export class StockController {
     }
   }
 
+  @Delete('vayu/instruments')
+  @ApiOperation({ summary: 'Permanently delete Vayu instruments by filter' })
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
+  @ApiQuery({ name: 'instrument_name', required: false, example: 'EQ' })
+  async deleteVayuInstrumentsByFilter(
+    @Query('exchange') exchange?: string,
+    @Query('instrument_name') instrument_name?: string,
+  ) {
+    try {
+      if (!exchange && !instrument_name) {
+        throw new HttpException(
+          {
+            success: false,
+            message:
+              'At least one filter is required: exchange or instrument_name',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const deleted =
+        await this.vortexInstrumentService.deleteInstrumentsByFilter({
+          exchange,
+          instrument_name,
+        });
+      return {
+        success: true,
+        message: 'Delete completed',
+        deleted,
+        filters: { exchange, instrument_name },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to delete instruments',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('vayu/instruments/sync/stream')
   @ApiOperation({
     summary: 'Stream live status while syncing Vayu (Vortex) instruments (SSE)',
@@ -281,6 +324,48 @@ export class StockController {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
         { success: false, message: 'Failed to fetch status', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('vayu/instruments/sync/start')
+  @ApiOperation({
+    summary: 'Start Vayu (Vortex) instruments sync (always async)',
+    description:
+      'Starts a background sync job and immediately returns a jobId to poll or monitor.',
+  })
+  @ApiProduces('application/json')
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
+  @ApiQuery({ name: 'csv_url', required: false, description: 'Optional CSV URL override' })
+  async startVayuSyncAlwaysAsync(
+    @Query('exchange') exchange?: string,
+    @Query('csv_url') csvUrl?: string,
+  ) {
+    try {
+      const jobId = randomUUID();
+      const key = `vayu:sync:job:${jobId}`;
+      await this.redisService.set(key, { status: 'started', exchange: exchange || 'all', ts: Date.now() }, 3600);
+      setImmediate(async () => {
+        try {
+          await this.vortexInstrumentService.syncVortexInstruments(exchange, csvUrl, async (p) => {
+            try {
+              await this.redisService.set(key, { status: 'running', progress: p, ts: Date.now() }, 3600);
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.warn('[Vayu Sync] Failed to write progress to Redis', e);
+            }
+          });
+          await this.redisService.set(key, { status: 'completed', ts: Date.now() }, 3600);
+        } catch (e) {
+          await this.redisService.set(key, { status: 'failed', error: (e as any)?.message || 'unknown', ts: Date.now() }, 3600);
+        }
+      });
+      return { success: true, message: 'Sync job started', jobId, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Failed to start Vayu sync', error: (error as any)?.message || 'unknown' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -1747,6 +1832,7 @@ export class StockController {
                 probe_interval_ms: body.probe_interval_ms,
                 require_consensus: body.require_consensus,
                 safe_cleanup: body.safe_cleanup,
+                limit: body.limit,
               },
               this.vortexProvider,
               async (p) => {
@@ -1813,6 +1899,7 @@ export class StockController {
           probe_interval_ms: body.probe_interval_ms,
           require_consensus: body.require_consensus,
           safe_cleanup: body.safe_cleanup,
+          limit: body.limit,
         },
         this.vortexProvider,
       );
@@ -1989,6 +2076,7 @@ export class StockController {
           probe_interval_ms: body.probe_interval_ms,
           require_consensus: body.require_consensus,
           safe_cleanup: body.safe_cleanup,
+          limit: body.limit,
         },
         this.vortexProvider,
         (p) =>
@@ -2558,15 +2646,22 @@ export class StockController {
           limit: requestedLimit,
           offset: startOffset,
         });
-        const tokens = result.instruments.map((i) => i.token);
-        const ltp = tokens.length ? await this.vortexInstrumentService.getVortexLTP(tokens) : {};
-        const list = result.instruments.map((i) => ({
-          token: i.token,
-          symbol: i.symbol,
-          exchange: i.exchange,
-          description: (i as any)?.description || null,
-          last_price: ltp?.[i.token]?.last_price ?? null,
+        const pairs = result.instruments.map((i) => ({
+          exchange: String(i.exchange || '').toUpperCase(),
+          token: String(i.token),
         }));
+        const ltpByPair = pairs.length ? await this.vortexProvider.getLTPByPairs(pairs as any) : {};
+        const list = result.instruments.map((i) => {
+          const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+          const lp = ltpByPair?.[key]?.last_price ?? null;
+          return {
+            token: i.token,
+            symbol: i.symbol,
+            exchange: i.exchange,
+            description: (i as any)?.description || null,
+            last_price: lp,
+          };
+        });
         return {
           success: true,
           data: {
@@ -2593,10 +2688,14 @@ export class StockController {
           limit: pageSize,
           offset: currentOffset,
         });
-        const tokens = page.instruments.map((i) => i.token);
-        const ltp = tokens.length ? await this.vortexInstrumentService.getVortexLTP(tokens) : {};
+        const pairs = page.instruments.map((i) => ({
+          exchange: String(i.exchange || '').toUpperCase(),
+          token: String(i.token),
+        }));
+        const ltpByPair = pairs.length ? await this.vortexProvider.getLTPByPairs(pairs as any) : {};
         for (const i of page.instruments) {
-          const lp = ltp?.[i.token]?.last_price ?? null;
+          const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+          const lp = ltpByPair?.[key]?.last_price ?? null;
           if (Number.isFinite(lp) && (lp as any) > 0) {
             collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, last_price: lp });
             if (collected.length >= requestedLimit) break;

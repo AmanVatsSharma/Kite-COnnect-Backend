@@ -77,6 +77,13 @@ export class ValidateInstrumentsDto {
   @Transform(({ value }) => !(value === 'false' || value === false))
   @IsBoolean()
   safe_cleanup?: boolean = true;
+
+  @ApiPropertyOptional({ description: 'Cap the total number of instruments processed (optional)', example: 2000 })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsInt()
+  @Min(1)
+  limit?: number;
 }
 
 

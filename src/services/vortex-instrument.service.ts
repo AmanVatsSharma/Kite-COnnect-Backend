@@ -1456,6 +1456,7 @@ export class VortexInstrumentService {
       probe_interval_ms?: number;
       require_consensus?: number;
       safe_cleanup?: boolean;
+      limit?: number;
     },
     vortexProvider: any,
     onProgress?: (p: {
@@ -1552,7 +1553,10 @@ export class VortexInstrumentService {
       // Only validate active instruments
       queryBuilder.andWhere('instrument.is_active = :is_active', { is_active: true });
 
-      const allInstruments = await queryBuilder.getMany();
+      let allInstruments = await queryBuilder.getMany();
+      if (filters?.limit && Number(filters.limit) > 0) {
+        allInstruments = allInstruments.slice(0, Number(filters.limit));
+      }
       const totalInstruments = allInstruments.length;
 
       // Console for easy debugging
@@ -2076,6 +2080,54 @@ export class VortexInstrumentService {
         '[VortexInstrumentService] Failed to delete inactive instruments',
         error,
       );
+      throw error;
+    }
+  }
+
+  /**
+   * Permanently delete instruments by filter (exchange and/or instrument_name).
+   * At least one filter is required to prevent accidental full-table deletion.
+   * Returns number of deleted rows.
+   */
+  async deleteInstrumentsByFilter(opts: {
+    exchange?: string;
+    instrument_name?: string;
+  }): Promise<number> {
+    const { exchange, instrument_name } = opts || {};
+    if (!exchange && !instrument_name) {
+      throw new Error('At least one filter (exchange or instrument_name) is required');
+    }
+    try {
+      // Build delete query with filters
+      const qb = this.vortexInstrumentRepo
+        .createQueryBuilder()
+        .delete()
+        .from(VortexInstrument as any);
+      const whereParts: string[] = [];
+      const params: any = {};
+      if (exchange) {
+        whereParts.push('exchange = :exchange');
+        params.exchange = exchange;
+      }
+      if (instrument_name) {
+        whereParts.push('instrument_name = :instrument_name');
+        params.instrument_name = instrument_name;
+      }
+      if (whereParts.length) {
+        qb.where(whereParts.join(' AND '), params);
+      }
+      const result = await qb.execute();
+      const deleted = result.affected || 0;
+      // eslint-disable-next-line no-console
+      console.log('[VortexInstrumentService] deleteInstrumentsByFilter:', {
+        exchange,
+        instrument_name,
+        deleted,
+      });
+      return deleted;
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[VortexInstrumentService] deleteInstrumentsByFilter failed', error);
       throw error;
     }
   }
