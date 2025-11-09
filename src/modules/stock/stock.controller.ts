@@ -25,6 +25,7 @@ import {
   ApiResponse,
   ApiSecurity,
   ApiHeader,
+  ApiProduces,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { ApiKeyGuard } from '../../guards/api-key.guard';
@@ -106,6 +107,7 @@ export class StockController {
     description:
       'Streams JSON events with progress of CSV fetch and upsert. Emits fields: { phase, total, processed, synced, updated, errors, lastMessage }.',
   })
+  @ApiProduces('text/event-stream')
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
   @ApiQuery({ name: 'csv_url', required: false, description: 'Optional CSV URL override' })
   async streamVayuSync(
@@ -155,6 +157,7 @@ export class StockController {
     description:
       'If async=true, starts a background sync job and returns jobId. Poll progress via GET /api/stock/vayu/instruments/sync/status?jobId=... Otherwise runs sync inline and returns summary.',
   })
+  @ApiProduces('application/json')
   @ApiResponse({
     status: 200,
     description: 'Sync started or completed',
@@ -231,6 +234,7 @@ export class StockController {
 
   @Get('vayu/instruments/sync/status')
   @ApiOperation({ summary: 'Poll Vayu (Vortex) sync status' })
+  @ApiProduces('application/json')
   @ApiQuery({ name: 'jobId', required: true })
   @ApiResponse({
     status: 200,
