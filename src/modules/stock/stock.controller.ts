@@ -1709,8 +1709,83 @@ export class StockController {
   async validateVortexInstruments(
     @Body()
     body: ValidateInstrumentsDto,
+    @Query('async') asyncRaw?: string | boolean,
   ) {
     try {
+      const isAsync =
+        String(asyncRaw || '').toLowerCase() === 'true' || asyncRaw === true;
+      if (isAsync) {
+        const jobId = randomUUID();
+        const key = `vayu:validate:job:${jobId}`;
+        await this.redisService.set(
+          key,
+          {
+            status: 'started',
+            ts: Date.now(),
+            filters: {
+              exchange: body.exchange,
+              instrument_name: body.instrument_name,
+              symbol: body.symbol,
+              batch_size: body.batch_size || 1000,
+            },
+          },
+          3600,
+        );
+        setImmediate(async () => {
+          try {
+            await this.vortexInstrumentService.validateAndCleanupInstruments(
+              {
+                exchange: body.exchange,
+                instrument_name: body.instrument_name,
+                symbol: body.symbol,
+                option_type: body.option_type,
+                batch_size: body.batch_size || 1000,
+                auto_cleanup: body.auto_cleanup || false,
+                dry_run: body.dry_run !== false,
+                include_invalid_list: false,
+                probe_attempts: body.probe_attempts,
+                probe_interval_ms: body.probe_interval_ms,
+                require_consensus: body.require_consensus,
+                safe_cleanup: body.safe_cleanup,
+              },
+              this.vortexProvider,
+              async (p) => {
+                try {
+                  await this.redisService.set(
+                    key,
+                    { status: 'running', progress: p, ts: Date.now() },
+                    3600,
+                  );
+                } catch (e) {
+                  // eslint-disable-next-line no-console
+                  console.warn('[Vayu Validate] Failed to write progress to Redis', e);
+                }
+              },
+            );
+            await this.redisService.set(
+              key,
+              { status: 'completed', ts: Date.now() },
+              3600,
+            );
+          } catch (e) {
+            await this.redisService.set(
+              key,
+              {
+                status: 'failed',
+                error: (e as any)?.message || 'unknown',
+                ts: Date.now(),
+              },
+              3600,
+            );
+          }
+        });
+        return {
+          success: true,
+          message: 'Validation job started',
+          jobId,
+          timestamp: new Date().toISOString(),
+        };
+      }
       // Console for easy debugging
       // eslint-disable-next-line no-console
       console.log('[Validate Instruments] Request received:', {
@@ -1865,6 +1940,116 @@ export class StockController {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
         { success: false, message: 'Failed to export invalid instruments', error: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('vayu/validate-instruments/stream')
+  @ApiOperation({
+    summary: 'Stream live status for Vayu validation/cleanup (SSE)',
+    description:
+      'Streams JSON events per batch. Emits: { event, total_instruments, batch_index, batches, valid_so_far, invalid_so_far, indeterminate_so_far }',
+  })
+  @ApiProduces('text/event-stream')
+  @ApiBody({ type: ValidateInstrumentsDto })
+  async streamValidateVortexInstruments(
+    @Body() body: ValidateInstrumentsDto,
+    @Res() res?: any,
+  ) {
+    try {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+      const send = (data: any) => {
+        try {
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[Vayu Validate SSE] write failed:', e);
+        }
+      };
+      send({
+        success: true,
+        event: 'start',
+        ts: new Date().toISOString(),
+      });
+      const result = await this.vortexInstrumentService.validateAndCleanupInstruments(
+        {
+          exchange: body.exchange,
+          instrument_name: body.instrument_name,
+          symbol: body.symbol,
+          option_type: body.option_type,
+          batch_size: body.batch_size || 1000,
+          auto_cleanup: body.auto_cleanup || false,
+          dry_run: body.dry_run !== false,
+          include_invalid_list: body.include_invalid_list || false,
+          probe_attempts: body.probe_attempts,
+          probe_interval_ms: body.probe_interval_ms,
+          require_consensus: body.require_consensus,
+          safe_cleanup: body.safe_cleanup,
+        },
+        this.vortexProvider,
+        (p) =>
+          send({
+            success: true,
+            event: 'progress',
+            ...p,
+            ts: new Date().toISOString(),
+          }),
+      );
+      send({
+        success: true,
+        event: 'complete',
+        result,
+        ts: new Date().toISOString(),
+      });
+      res.end();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[Vayu Validate SSE] Error:', error);
+      try {
+        res.write(
+          `data: ${JSON.stringify({
+            success: false,
+            error: (error as any)?.message || 'unknown',
+          })}\n\n`,
+        );
+      } catch {}
+      res.end();
+    }
+  }
+
+  @Get('vayu/validate-instruments/status')
+  @ApiOperation({ summary: 'Poll Vayu validation/cleanup status' })
+  @ApiProduces('application/json')
+  @ApiQuery({ name: 'jobId', required: true })
+  async getValidateStatus(@Query('jobId') jobId: string) {
+    try {
+      if (!jobId) {
+        throw new HttpException(
+          { success: false, message: 'jobId is required' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const key = `vayu:validate:job:${jobId}`;
+      const data = await this.redisService.get<any>(key);
+      if (!data) {
+        throw new HttpException(
+          { success: false, message: 'Job not found or expired' },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      return { success: true, data };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to fetch validation status',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

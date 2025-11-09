@@ -1458,6 +1458,17 @@ export class VortexInstrumentService {
       safe_cleanup?: boolean;
     },
     vortexProvider: any,
+    onProgress?: (p: {
+      event: 'start' | 'batch_start' | 'batch_complete' | 'complete';
+      total_instruments?: number;
+      batch_index?: number;
+      batches?: number;
+      batch_size?: number;
+      valid_so_far?: number;
+      invalid_so_far?: number;
+      indeterminate_so_far?: number;
+      lastMessage?: string;
+    }) => void,
   ): Promise<{
     summary: {
       total_instruments: number;
@@ -1576,6 +1587,13 @@ export class VortexInstrumentService {
       console.log(
         `[VortexInstrumentService] Processing ${batches.length} batches of up to ${batchSize} instruments each`,
       );
+      onProgress?.({
+        event: 'start',
+        total_instruments: totalInstruments,
+        batches: batches.length,
+        batch_size: batchSize,
+        lastMessage: `Starting validation of ${totalInstruments} instruments in ${batches.length} batches`,
+      });
 
       // Step 3: Process each batch
       const invalidInstruments: Array<{
@@ -1608,6 +1626,16 @@ export class VortexInstrumentService {
         console.log(
           `[VortexInstrumentService] Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} instruments`,
         );
+        onProgress?.({
+          event: 'batch_start',
+          batch_index: batchIndex + 1,
+          batches: batches.length,
+          batch_size: batch.length,
+          valid_so_far: validLtpCount,
+          invalid_so_far: invalidLtpCount,
+          indeterminate_so_far: totalIndeterminate,
+          lastMessage: `Batch ${batchIndex + 1} started`,
+        });
 
         try {
           // Build exchange-token pairs using authoritative exchange from DB
@@ -1664,6 +1692,16 @@ export class VortexInstrumentService {
             console.log(
               `[VortexInstrumentService] Batch ${batchIndex + 1} has no valid pairs, skipping`,
             );
+            onProgress?.({
+              event: 'batch_complete',
+              batch_index: batchIndex + 1,
+              batches: batches.length,
+              batch_size: batch.length,
+              valid_so_far: validLtpCount,
+              invalid_so_far: invalidLtpCount,
+              indeterminate_so_far: totalIndeterminate,
+              lastMessage: `Batch ${batchIndex + 1} skipped (no valid pairs)`,
+            });
             continue;
           }
 
@@ -1770,6 +1808,16 @@ export class VortexInstrumentService {
               reasonCounts['indeterminate'] = (reasonCounts['indeterminate'] || 0) + 1;
             }
           }
+          onProgress?.({
+            event: 'batch_complete',
+            batch_index: batchIndex + 1,
+            batches: batches.length,
+            batch_size: batch.length,
+            valid_so_far: validLtpCount,
+            invalid_so_far: invalidLtpCount,
+            indeterminate_so_far: totalIndeterminate,
+            lastMessage: `Batch ${batchIndex + 1} complete`,
+          });
         } catch (batchError) {
           errorCount++;
           // Console for easy debugging
@@ -1911,6 +1959,17 @@ export class VortexInstrumentService {
           `[VortexInstrumentService] Dry run mode: would deactivate ${invalidInstruments.length} instruments`,
         );
       }
+
+      onProgress?.({
+        event: 'complete',
+        total_instruments: totalInstruments,
+        batches: batches.length,
+        batch_size: batchSize,
+        valid_so_far: validLtpCount,
+        invalid_so_far: invalidLtpCount,
+        indeterminate_so_far: totalIndeterminate,
+        lastMessage: 'Validation complete',
+      });
 
       return {
         summary,
