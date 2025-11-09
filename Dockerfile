@@ -53,4 +53,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ENTRYPOINT ["dumb-init", "--"]
 # Note: TS builds emit into dist/src when multiple TS roots are compiled.
 # Run the compiled entry file accordingly.
-CMD ["node", "dist/src/main"]
+CMD ["node", "dist/main"]

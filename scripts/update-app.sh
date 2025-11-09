@@ -142,7 +142,7 @@ if docker exec trading-postgres pg_isready -U trading_user -d trading_app > /dev
     echo -e "${GREEN}✓ Database is connected and healthy${NC}"
     
     # Get row count to verify data integrity
-    DB_COUNT=$(docker exec trading-postgres psql -U trading_user -d trading_app -t -c "SELECT COUNT(*) FROM instrument;" 2>/dev/null || echo "0")
+    DB_COUNT=$(docker exec trading-postgres psql -U trading_user -d trading_app -t -c "SELECT COUNT(*) FROM instruments;" 2>/dev/null || echo "0")
     if [ ! -z "$DB_COUNT" ]; then
         echo -e "${GREEN}✓ Database contains $DB_COUNT instruments${NC}"
     fi
