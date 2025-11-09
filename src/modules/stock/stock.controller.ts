@@ -2363,7 +2363,7 @@ export class StockController {
         };
       }
 
-      const collected: Array<{ token: number; symbol: string; exchange: string; last_price: number | null }> = [];
+      const collected: Array<{ token: number; symbol: string; exchange: string; description?: string | null; last_price: number | null }> = [];
       let currentOffset = startOffset;
       let hasMore = true;
       const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
@@ -2481,7 +2481,7 @@ export class StockController {
         };
       }
 
-      const collected: Array<{ token: number; symbol: string; exchange: string; expiry_date: any; last_price: number | null }> = [];
+      const collected: Array<{ token: number; symbol: string; exchange: string; description?: string | null; expiry_date: any; last_price: number | null }> = [];
       let currentOffset = startOffset;
       let hasMore = true;
       const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
@@ -2612,7 +2612,7 @@ export class StockController {
         };
       }
 
-      const collected: Array<{ token: number; symbol: string; exchange: string; expiry_date: any; option_type?: string; strike_price?: number; last_price: number | null }> = [];
+      const collected: Array<{ token: number; symbol: string; exchange: string; description?: string | null; expiry_date: any; option_type?: string; strike_price?: number; last_price: number | null }> = [];
       let currentOffset = startOffset;
       let hasMore = true;
       const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
@@ -2729,7 +2729,7 @@ export class StockController {
         };
       }
 
-      const collected: Array<{ token: number; symbol: string; exchange: string; instrument_name: string; expiry_date: any; last_price: number | null }> = [];
+      const collected: Array<{ token: number; symbol: string; exchange: string; description?: string | null; instrument_name: string; expiry_date: any; last_price: number | null }> = [];
       let currentOffset = startOffset;
       let hasMore = true;
       const pageSize = Math.min(Math.max(requestedLimit, 1), 500);

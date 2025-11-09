@@ -8,15 +8,19 @@ import {
   HttpStatus,
   HttpException,
   Param,
+  UseGuards,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FalconInstrumentService } from '../services/falcon-instrument.service';
 import { FalconProviderAdapter } from '../services/falcon-provider.adapter';
 import { RedisService } from '../../../services/redis.service';
 import { randomUUID } from 'crypto';
-import { ApiBadRequestResponse, ApiOkResponse, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBadRequestResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiKeyGuard } from '../../../guards/api-key.guard';
 
 @ApiTags('falcon')
+@UseGuards(ApiKeyGuard)
+@ApiSecurity('apiKey')
 @Controller('stock/falcon')
 export class FalconController {
   constructor(
@@ -27,6 +31,7 @@ export class FalconController {
 
   @Get('health')
   @ApiOperation({ summary: 'Falcon provider health and sample LTP probe' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async health() {
     try {
       const probe = await this.falconAdapter.getLTP(['26000']); // SBIN as a common example token
@@ -51,6 +56,7 @@ export class FalconController {
   @Post('instruments/sync')
   @ApiOperation({ summary: 'Sync Falcon (Kite) instruments into falcon_instruments' })
   @ApiQuery({ name: 'exchange', required: false })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async syncInstruments(
     @Query('exchange') exchange?: string,
   ) {
@@ -152,6 +158,7 @@ export class FalconController {
 
   @Post('instruments/sync/stream')
   @ApiOperation({ summary: 'Stream live status while syncing Falcon instruments (SSE)' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async syncInstrumentsStream(
     @Res() res: Response,
     @Query('exchange') exchange?: string,
@@ -199,6 +206,7 @@ export class FalconController {
   @Get('instruments/sync/status')
   @ApiOperation({ summary: 'Poll Falcon sync job status' })
   @ApiQuery({ name: 'jobId', required: true })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async syncStatus(@Query('jobId') jobId?: string) {
     if (!jobId) {
       throw new HttpException({ success: false, message: 'jobId is required' }, HttpStatus.BAD_REQUEST);
@@ -219,6 +227,7 @@ export class FalconController {
   @Post('ltp')
   @ApiOperation({ summary: 'Get Falcon LTP for instrument tokens' })
   @ApiOkResponse({ description: 'Map of token → { last_price }' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async ltp(@Body() body: { instruments: number[] }) {
     try {
       const tokens = (body?.instruments || []).map((t) => String(t));
@@ -242,6 +251,7 @@ export class FalconController {
   @Get('ltp')
   @ApiOperation({ summary: 'Get Falcon LTP for instrument tokens (comma-separated)' })
   @ApiQuery({ name: 'tokens', required: true, example: '738561,5633' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async getLtp(@Query('tokens') tokensRaw?: string) {
     try {
       const tokens = String(tokensRaw || '')
@@ -267,6 +277,7 @@ export class FalconController {
 
   @Post('instruments/batch')
   @ApiOperation({ summary: 'Batch lookup Falcon instruments by tokens' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async batch(@Body() body: { tokens: number[] }) {
     try {
       const tokens = Array.isArray(body?.tokens) ? body.tokens.map((n) => Number(n)).filter((n) => Number.isFinite(n)) : [];
@@ -289,6 +300,7 @@ export class FalconController {
 
   @Post('validate-instruments')
   @ApiOperation({ summary: 'Validate Falcon instruments via live LTP, optional cleanup' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async validate(@Body() body: { limit?: number; offset?: number; batchSize?: number; dry_run?: boolean; auto_cleanup?: boolean }) {
     try {
       const result = await this.falconInstruments.validateFalconInstruments({
@@ -317,6 +329,7 @@ export class FalconController {
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
   @ApiQuery({ name: 'limit', required: false, example: 100 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async equities(
     @Query('exchange') exchange?: string,
     @Query('q') q?: string,
@@ -351,6 +364,7 @@ export class FalconController {
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
   @ApiQuery({ name: 'limit', required: false, example: 100 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async futures(
     @Query('symbol') symbol?: string,
     @Query('exchange') exchange?: string,
@@ -390,6 +404,7 @@ export class FalconController {
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
   @ApiQuery({ name: 'limit', required: false, example: 100 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async options(
     @Query('symbol') symbol?: string,
     @Query('exchange') exchange?: string,
@@ -431,6 +446,7 @@ export class FalconController {
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
   @ApiQuery({ name: 'limit', required: false, example: 100 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async commodities(
     @Query('symbol') symbol?: string,
     @Query('exchange') exchange?: string,
@@ -462,6 +478,7 @@ export class FalconController {
   @ApiQuery({ name: 'q', required: true, example: 'NSE:SBIN or SBIN' })
   @ApiQuery({ name: 'limit', required: false, example: 20 })
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async tickerSearch(
     @Query('q') q?: string,
     @Query('limit') limitRaw?: string,
@@ -486,6 +503,7 @@ export class FalconController {
 
   @Get('tickers/:symbol')
   @ApiOperation({ summary: 'Get Falcon ticker by symbol with live LTP' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async tickerBySymbol(@Param('symbol') symbol: string) {
     try {
       const data = await this.falconInstruments.getTickerBySymbol(symbol);
