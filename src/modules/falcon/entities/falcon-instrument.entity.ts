@@ -74,6 +74,9 @@ export class FalconInstrument {
   @Column({ default: true })
   is_active: boolean;
 
+  @Column({ type: 'text', nullable: true })
+  description: string;
+
   @CreateDateColumn()
   created_at: Date;
 

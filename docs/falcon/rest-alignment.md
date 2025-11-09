@@ -17,6 +17,12 @@
 - POST /api/stock/falcon/validate-instruments
 - GET  /api/stock/falcon/ltp?tokens=token1,token2
 - POST /api/stock/falcon/ltp { instruments: number[] }
+- GET  /api/stock/falcon/equities?exchange=&q=&is_active=&ltp_only=&limit=&offset=
+- GET  /api/stock/falcon/futures?symbol=&exchange=&expiry_from=&expiry_to=&is_active=&ltp_only=&limit=&offset=
+- GET  /api/stock/falcon/options?symbol=&exchange=&expiry_from=&expiry_to=&strike_min=&strike_max=&option_type=CE|PE&ltp_only=&is_active=&limit=&offset=
+- GET  /api/stock/falcon/commodities?symbol=&exchange=MCX&instrument_type=&is_active=&ltp_only=&limit=&offset=
+- GET  /api/stock/falcon/tickers/search?q=&limit=&ltp_only=
+- GET  /api/stock/falcon/tickers/:symbol
 
 ### Notes
 - Pairs (`EXCHANGE-TOKEN`) are a Vayu concept; Falcon uses token or `i=EX:SYMBOL`.

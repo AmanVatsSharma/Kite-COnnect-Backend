@@ -5,6 +5,7 @@ import { FalconInstrument } from '../entities/falcon-instrument.entity';
 import { Instrument } from '../../../entities/instrument.entity';
 import { InstrumentMapping } from '../../../entities/instrument-mapping.entity';
 import { KiteProviderService } from '../../../providers/kite-provider.service';
+import { FalconProviderAdapter } from './falcon-provider.adapter';
 
 @Injectable()
 export class FalconInstrumentService {
@@ -18,6 +19,7 @@ export class FalconInstrumentService {
     @InjectRepository(InstrumentMapping)
     private mappingRepo: Repository<InstrumentMapping>,
     private kite: KiteProviderService,
+    private falconAdapter: FalconProviderAdapter,
   ) {}
 
   async syncFalconInstruments(
@@ -59,6 +61,10 @@ export class FalconInstrumentService {
             exchange: String(row.exchange || ''),
             is_active: true,
           };
+          // Compute description (equities, futures, options)
+          try {
+            payload.description = this.buildDescription(payload as FalconInstrument);
+          } catch {}
           if (existing) {
             await this.falconInstrumentRepo.update({ instrument_token: token }, payload);
             updated++;
@@ -181,6 +187,215 @@ export class FalconInstrumentService {
     return { total, by_exchange, by_type, active, inactive };
   }
 
+  async getEquities(filters: {
+    exchange?: string;
+    q?: string;
+    is_active?: boolean;
+    ltp_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: Array<FalconInstrument & { last_price_live?: number | null }>; total: number }> {
+    const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
+    qb.where(`(fi.instrument_type = 'EQ' OR fi.segment IN ('NSE','BSE'))`);
+    if (filters?.exchange) qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
+    if (typeof filters?.is_active === 'boolean') qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
+    if (filters?.q) {
+      const q = `%${String(filters.q).trim().toUpperCase()}%`;
+      qb.andWhere('(UPPER(fi.tradingsymbol) LIKE :q OR UPPER(fi.name) LIKE :q)', { q });
+    }
+    const total = await qb.getCount();
+    const limit = Math.max(1, Math.min(1000, filters?.limit ?? 100));
+    const offset = Math.max(0, filters?.offset ?? 0);
+    qb.orderBy('fi.tradingsymbol', 'ASC').limit(limit).offset(offset);
+    const items = await qb.getMany();
+    // LTP enrichment
+    let withLive = items.map((i) => ({ ...i, last_price_live: null as number | null }));
+    try {
+      const tokens = items.map((i) => String(i.instrument_token));
+      const ltp = await this.falconAdapter.getLTP(tokens);
+      withLive = items.map((i) => {
+        const lp = Number(ltp?.[String(i.instrument_token)]?.last_price);
+        return { ...i, last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null };
+      });
+      if (filters?.ltp_only) {
+        withLive = withLive.filter((x) => Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0);
+      }
+    } catch {}
+    return { items: withLive, total };
+  }
+
+  async getFutures(filters: {
+    symbol?: string;
+    exchange?: string;
+    expiry_from?: string;
+    expiry_to?: string;
+    is_active?: boolean;
+    ltp_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: Array<FalconInstrument & { last_price_live?: number | null }>; total: number }> {
+    const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
+    qb.where(`(fi.instrument_type = 'FUT' OR fi.segment ILIKE '%FUT%')`);
+    if (filters?.exchange) qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
+    if (filters?.symbol) qb.andWhere('fi.tradingsymbol = :sym', { sym: filters.symbol });
+    if (filters?.expiry_from) qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
+    if (filters?.expiry_to) qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
+    if (typeof filters?.is_active === 'boolean') qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
+    const total = await qb.getCount();
+    const limit = Math.max(1, Math.min(1000, filters?.limit ?? 100));
+    const offset = Math.max(0, filters?.offset ?? 0);
+    qb.orderBy('fi.tradingsymbol', 'ASC').limit(limit).offset(offset);
+    const items = await qb.getMany();
+    let withLive = items.map((i) => ({ ...i, last_price_live: null as number | null }));
+    try {
+      const tokens = items.map((i) => String(i.instrument_token));
+      const ltp = await this.falconAdapter.getLTP(tokens);
+      withLive = items.map((i) => {
+        const lp = Number(ltp?.[String(i.instrument_token)]?.last_price);
+        return { ...i, last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null };
+      });
+      if (filters?.ltp_only) {
+        withLive = withLive.filter((x) => Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0);
+      }
+    } catch {}
+    return { items: withLive, total };
+  }
+
+  async getOptions(filters: {
+    symbol?: string;
+    exchange?: string;
+    expiry_from?: string;
+    expiry_to?: string;
+    strike_min?: number;
+    strike_max?: number;
+    option_type?: 'CE' | 'PE';
+    is_active?: boolean;
+    ltp_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: Array<FalconInstrument & { last_price_live?: number | null }>; total: number }> {
+    const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
+    qb.where(`(fi.instrument_type IN ('CE','PE') OR fi.segment ILIKE '%OPT%')`);
+    if (filters?.exchange) qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
+    if (filters?.symbol) qb.andWhere('fi.tradingsymbol = :sym', { sym: filters.symbol });
+    if (filters?.expiry_from) qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
+    if (filters?.expiry_to) qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
+    if (typeof filters?.strike_min === 'number') qb.andWhere('fi.strike >= :smin', { smin: filters.strike_min });
+    if (typeof filters?.strike_max === 'number') qb.andWhere('fi.strike <= :smax', { smax: filters.strike_max });
+    if (filters?.option_type) qb.andWhere('fi.instrument_type = :ot', { ot: filters.option_type });
+    if (typeof filters?.is_active === 'boolean') qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
+    const total = await qb.getCount();
+    const limit = Math.max(1, Math.min(1000, filters?.limit ?? 100));
+    const offset = Math.max(0, filters?.offset ?? 0);
+    qb.orderBy('fi.tradingsymbol', 'ASC').limit(limit).offset(offset);
+    const items = await qb.getMany();
+    let withLive = items.map((i) => ({ ...i, last_price_live: null as number | null }));
+    try {
+      const tokens = items.map((i) => String(i.instrument_token));
+      const ltp = await this.falconAdapter.getLTP(tokens);
+      withLive = items.map((i) => {
+        const lp = Number(ltp?.[String(i.instrument_token)]?.last_price);
+        return { ...i, last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null };
+      });
+      if (filters?.ltp_only) {
+        withLive = withLive.filter((x) => Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0);
+      }
+    } catch {}
+    return { items: withLive, total };
+  }
+
+  async getCommodities(filters: {
+    symbol?: string;
+    exchange?: string; // default MCX at controller
+    instrument_type?: string;
+    is_active?: boolean;
+    ltp_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: Array<FalconInstrument & { last_price_live?: number | null }>; total: number }> {
+    const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
+    if (filters?.exchange) qb.where('fi.exchange = :ex', { ex: filters.exchange });
+    else qb.where(`fi.exchange = 'MCX'`);
+    if (filters?.symbol) qb.andWhere('fi.tradingsymbol = :sym', { sym: filters.symbol });
+    if (filters?.instrument_type) qb.andWhere('fi.instrument_type = :it', { it: filters.instrument_type });
+    if (typeof filters?.is_active === 'boolean') qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
+    const total = await qb.getCount();
+    const limit = Math.max(1, Math.min(1000, filters?.limit ?? 100));
+    const offset = Math.max(0, filters?.offset ?? 0);
+    qb.orderBy('fi.tradingsymbol', 'ASC').limit(limit).offset(offset);
+    const items = await qb.getMany();
+    let withLive = items.map((i) => ({ ...i, last_price_live: null as number | null }));
+    try {
+      const tokens = items.map((i) => String(i.instrument_token));
+      const ltp = await this.falconAdapter.getLTP(tokens);
+      withLive = items.map((i) => {
+        const lp = Number(ltp?.[String(i.instrument_token)]?.last_price);
+        return { ...i, last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null };
+      });
+      if (filters?.ltp_only) {
+        withLive = withLive.filter((x) => Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0);
+      }
+    } catch {}
+    return { items: withLive, total };
+  }
+
+  async searchTickers(q: string, limit = 20, ltp_only = false) {
+    const normalized = (q || '').trim().toUpperCase();
+    if (!normalized) return [];
+    const list = await this.falconInstrumentRepo
+      .createQueryBuilder('fi')
+      .where('UPPER(fi.tradingsymbol) LIKE :q', { q: `%${normalized}%` })
+      .orWhere('UPPER(fi.name) LIKE :q', { q: `%${normalized}%` })
+      .andWhere('fi.is_active = true')
+      .limit(Math.max(1, Math.min(200, limit)))
+      .orderBy('fi.tradingsymbol', 'ASC')
+      .getMany();
+    const tokens = list.map((i) => String(i.instrument_token));
+    let ltp: Record<string, any> = {};
+    try {
+      ltp = await this.falconAdapter.getLTP(tokens);
+    } catch {}
+    const out = list
+      .map((i) => {
+        const lp = Number(ltp?.[String(i.instrument_token)]?.last_price);
+        const last_price = Number.isFinite(lp) && lp > 0 ? lp : null;
+        return {
+          instrument_token: i.instrument_token,
+          symbol: i.tradingsymbol,
+          exchange: i.exchange,
+          instrument_type: i.instrument_type,
+          description: i.description,
+          last_price,
+        };
+      })
+      .filter((x) => (ltp_only ? Number.isFinite(x.last_price) && (x.last_price as any) > 0 : true));
+    return out;
+  }
+
+  async getTickerBySymbol(symbol: string) {
+    const sym = (symbol || '').trim().toUpperCase();
+    if (!sym) return null;
+    const row = await this.falconInstrumentRepo
+      .createQueryBuilder('fi')
+      .where('fi.tradingsymbol = :sym', { sym })
+      .orderBy('fi.tradingsymbol', 'ASC')
+      .getOne();
+    if (!row) return null;
+    let last_price: number | null = null;
+    try {
+      const ltp = await this.falconAdapter.getLTP([String(row.instrument_token)]);
+      const lp = Number(ltp?.[String(row.instrument_token)]?.last_price);
+      last_price = Number.isFinite(lp) && lp > 0 ? lp : null;
+    } catch {}
+    return {
+      instrument_token: row.instrument_token,
+      symbol: row.tradingsymbol,
+      exchange: row.exchange,
+      instrument_type: row.instrument_type,
+      description: row.description,
+      last_price,
+    };
+  }
   async validateFalconInstruments(opts: {
     limit?: number;
     offset?: number;
@@ -232,6 +447,33 @@ export class FalconInstrumentService {
       }
     }
     return { tested: tokens.length, invalid_instruments: invalid, deactivated };
+  }
+
+  private buildDescription(i: FalconInstrument): string {
+    const ex = (i.exchange || '').toUpperCase();
+    const sym = (i.tradingsymbol || '').toUpperCase();
+    const it = (i.instrument_type || '').toUpperCase();
+    if (it === 'EQ' || i.segment?.toUpperCase() === 'NSE' || i.segment?.toUpperCase() === 'BSE') {
+      return `${ex} ${sym} EQ`.trim();
+    }
+    // FUT/OPT with expiry (YYYY-MM-DD) -> DDMONYYYY
+    const expiry = (i.expiry || '').trim();
+    const ddMonYYYY = (() => {
+      if (!expiry || !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return '';
+      const [y, m, d] = expiry.split('-').map((s) => parseInt(s, 10));
+      const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      const mon = months[(m || 1) - 1] || '';
+      return `${String(d).padStart(2, '0')}${mon}${y}`;
+    })();
+    if (it === 'FUT' || i.segment?.toUpperCase().includes('FUT')) {
+      return `${ex} ${sym} ${ddMonYYYY} FUT`.trim();
+    }
+    if (it === 'CE' || it === 'PE' || i.segment?.toUpperCase().includes('OPT')) {
+      const strike = Number(i.strike) || 0;
+      return `${ex} ${sym} ${ddMonYYYY} ${strike} ${it}`.trim();
+    }
+    // MCX/others
+    return `${ex} ${sym} ${it}`.trim();
   }
 }
 
