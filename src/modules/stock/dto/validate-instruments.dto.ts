@@ -9,10 +9,24 @@ export class ValidateInstrumentsDto {
   @IsIn(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'])
   exchange?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by instrument type', example: 'FUTCOM' })
+  @ApiPropertyOptional({
+    description: 'Filter by instrument_name (exact DB code)',
+    example: 'EQ',
+    enum: ['EQ', 'FUTSTK', 'FUTIDX', 'OPTSTK', 'OPTIDX', 'FUTCOM', 'FUTCUR', 'OPTCUR'],
+  })
   @IsOptional()
   @IsString()
   instrument_name?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filter by high-level instrument type (maps to multiple instrument_name codes)',
+    example: 'EQUITIES',
+    enum: ['EQUITIES', 'FUTURES', 'OPTIONS', 'COMMODITIES', 'CURRENCY'],
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['EQUITIES', 'FUTURES', 'OPTIONS', 'COMMODITIES', 'CURRENCY'])
+  instrument_type?: string;
 
   @ApiPropertyOptional({ description: 'Filter by symbol (partial match)', example: 'GOLD' })
   @IsOptional()

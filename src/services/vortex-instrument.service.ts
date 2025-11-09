@@ -1533,6 +1533,23 @@ export class VortexInstrumentService {
           instrument_name: filters.instrument_name,
         });
       }
+      // Map high-level instrument_type to specific instrument_name codes if provided
+      if (!filters.instrument_name && filters['instrument_type']) {
+        const type = String(filters['instrument_type']).toUpperCase();
+        const map: Record<string, string[]> = {
+          EQUITIES: ['EQ'],
+          FUTURES: ['FUTSTK', 'FUTIDX', 'FUTCUR', 'FUTCOM'],
+          OPTIONS: ['OPTSTK', 'OPTIDX', 'OPTCUR'],
+          COMMODITIES: ['FUTCOM'],
+          CURRENCY: ['FUTCUR', 'OPTCUR'],
+        };
+        const names = map[type] || [];
+        if (names.length) {
+          queryBuilder.andWhere('instrument.instrument_name IN (:...names)', {
+            names,
+          });
+        }
+      }
 
       if (filters.symbol) {
         queryBuilder.andWhere('instrument.symbol ILIKE :symbol', {
@@ -2092,9 +2109,10 @@ export class VortexInstrumentService {
   async deleteInstrumentsByFilter(opts: {
     exchange?: string;
     instrument_name?: string;
+    instrument_type?: string;
   }): Promise<number> {
-    const { exchange, instrument_name } = opts || {};
-    if (!exchange && !instrument_name) {
+    const { exchange, instrument_name, instrument_type } = opts || {};
+    if (!exchange && !instrument_name && !instrument_type) {
       throw new Error('At least one filter (exchange or instrument_name) is required');
     }
     try {
@@ -2113,6 +2131,21 @@ export class VortexInstrumentService {
         whereParts.push('instrument_name = :instrument_name');
         params.instrument_name = instrument_name;
       }
+      if (!instrument_name && instrument_type) {
+        const type = String(instrument_type).toUpperCase();
+        const map: Record<string, string[]> = {
+          EQUITIES: ['EQ'],
+          FUTURES: ['FUTSTK', 'FUTIDX', 'FUTCUR', 'FUTCOM'],
+          OPTIONS: ['OPTSTK', 'OPTIDX', 'OPTCUR'],
+          COMMODITIES: ['FUTCOM'],
+          CURRENCY: ['FUTCUR', 'OPTCUR'],
+        };
+        const names = map[type] || [];
+        if (names.length) {
+          whereParts.push('instrument_name IN (:...names)');
+          params.names = names;
+        }
+      }
       if (whereParts.length) {
         qb.where(whereParts.join(' AND '), params);
       }
@@ -2122,6 +2155,7 @@ export class VortexInstrumentService {
       console.log('[VortexInstrumentService] deleteInstrumentsByFilter:', {
         exchange,
         instrument_name,
+        instrument_type,
         deleted,
       });
       return deleted;

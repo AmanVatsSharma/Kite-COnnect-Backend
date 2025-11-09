@@ -101,21 +101,29 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Delete('vayu/instruments')
   @ApiOperation({ summary: 'Permanently delete Vayu instruments by filter' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
   @ApiQuery({ name: 'instrument_name', required: false, example: 'EQ' })
+  @ApiQuery({
+    name: 'instrument_type',
+    required: false,
+    example: 'EQUITIES',
+    description: 'High-level type (EQUITIES, FUTURES, OPTIONS, COMMODITIES, CURRENCY)',
+  })
   async deleteVayuInstrumentsByFilter(
     @Query('exchange') exchange?: string,
     @Query('instrument_name') instrument_name?: string,
+    @Query('instrument_type') instrument_type?: string,
   ) {
     try {
-      if (!exchange && !instrument_name) {
+      if (!exchange && !instrument_name && !instrument_type) {
         throw new HttpException(
           {
             success: false,
             message:
-              'At least one filter is required: exchange or instrument_name',
+              'At least one filter is required: exchange or instrument_name or instrument_type',
           },
           HttpStatus.BAD_REQUEST,
         );
@@ -124,12 +132,13 @@ export class StockController {
         await this.vortexInstrumentService.deleteInstrumentsByFilter({
           exchange,
           instrument_name,
+          instrument_type,
         });
       return {
         success: true,
         message: 'Delete completed',
         deleted,
-        filters: { exchange, instrument_name },
+        filters: { exchange, instrument_name, instrument_type },
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
@@ -144,6 +153,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/instruments/sync/stream')
   @ApiOperation({
     summary: 'Stream live status while syncing Vayu (Vortex) instruments (SSE)',
@@ -194,6 +204,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/instruments/sync')
   @ApiOperation({
     summary: 'Start Vayu (Vortex) instruments sync (supports async polling)',
@@ -275,6 +286,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/instruments/sync/status')
   @ApiOperation({ summary: 'Poll Vayu (Vortex) sync status' })
   @ApiProduces('application/json')
@@ -329,6 +341,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/instruments/sync/start')
   @ApiOperation({
     summary: 'Start Vayu (Vortex) instruments sync (always async)',
@@ -1193,6 +1206,7 @@ export class StockController {
 
   // ===== VAYU-SPECIFIC ENDPOINTS =====
 
+  @ApiTags('vayu')
   @Get('vayu/health')
   @ApiOperation({ summary: 'Vayu provider health and debug status' })
   async getVayuHealth() {
@@ -1210,6 +1224,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/debug/resolve')
   @ApiOperation({ summary: 'Resolve exchanges for tokens with source attribution' })
   @ApiQuery({ name: 'tokens', required: true, example: '738561,135938' })
@@ -1239,6 +1254,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/debug/build-q')
   @ApiOperation({ summary: 'Build Vortex quotes query for tokens (debug)' })
   @ApiQuery({ name: 'tokens', required: true, example: '738561,135938' })
@@ -1276,6 +1292,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/ltp')
   @ApiOperation({
     summary:
@@ -1385,6 +1402,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/ltp')
   @ApiOperation({
     summary: 'Get Vayu LTP with enriched instrument data',
@@ -1633,6 +1651,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/validate-instruments')
   @ApiOperation({
     summary: 'Validate and cleanup invalid Vortex instruments',
@@ -1982,6 +2001,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/validate-instruments/export')
   @ApiOperation({ summary: 'Validate instruments and export invalid set as CSV' })
   @ApiResponse({ status: 200, description: 'CSV content of invalid instruments' })
@@ -2032,6 +2052,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/validate-instruments/stream')
   @ApiOperation({
     summary: 'Stream live status for Vayu validation/cleanup (SSE)',
@@ -2109,6 +2130,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/validate-instruments/status')
   @ApiOperation({ summary: 'Poll Vayu validation/cleanup status' })
   @ApiProduces('application/json')
@@ -2143,6 +2165,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/instruments')
   @ApiOperation({ summary: 'Get Vayu instruments with optional filters' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
@@ -2253,6 +2276,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/instruments/search')
   @ApiOperation({
     summary: 'Search Vayu instruments by symbol or instrument name',
@@ -2337,6 +2361,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/instruments/stats')
   @ApiOperation({ summary: 'Get Vayu instrument statistics' })
   async getVortexInstrumentStats() {
@@ -2359,6 +2384,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/instruments/:token')
   @ApiOperation({ summary: 'Get specific Vayu instrument by token' })
   @ApiResponse({ status: 200, description: 'Vayu instrument found' })
@@ -2444,6 +2470,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/options/chain/:symbol')
   @ApiOperation({ summary: 'Get options chain for a symbol' })
   @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only options with valid last_price are returned' })
@@ -2525,6 +2552,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/instruments/batch')
   @ApiOperation({ summary: 'Batch lookup for multiple Vayu instruments' })
   @ApiBody({
@@ -2615,6 +2643,7 @@ export class StockController {
 
   // ===== MARKET SEGMENT ENDPOINTS =====
 
+  @ApiTags('vayu')
   @Get('vayu/equities')
   @ApiOperation({ summary: 'Get Vayu equities with filters' })
   @ApiQuery({ name: 'q', required: false, description: 'Symbol search' })
@@ -2729,6 +2758,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/futures')
   @ApiOperation({ summary: 'Get Vayu futures with filters' })
   @ApiQuery({ name: 'q', required: false, description: 'Symbol search' })
@@ -2849,6 +2879,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/options')
   @ApiOperation({ summary: 'Get Vayu options with filters' })
   @ApiQuery({ name: 'q', required: false, description: 'Symbol search' })
@@ -2983,6 +3014,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/commodities')
   @ApiOperation({ summary: 'Get Vayu commodities (MCX) with filters' })
   @ApiQuery({ name: 'q', required: false, description: 'Symbol search' })
@@ -3096,6 +3128,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/instruments/popular')
   @ApiOperation({ summary: 'Get popular Vayu instruments with caching' })
   @ApiQuery({
@@ -3142,6 +3175,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/instruments/cached-stats')
   @ApiOperation({ summary: 'Get Vayu instrument stats with caching' })
   async getVortexInstrumentStatsCached() {
@@ -3173,6 +3207,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Post('vayu/cache/clear')
   @ApiOperation({ summary: 'Clear Vayu cache' })
   @ApiBody({
@@ -3206,6 +3241,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/tickers/search')
   @ApiOperation({
     summary: 'Search Vayu tickers and return live price + metadata',
@@ -3286,6 +3322,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Get('vayu/tickers/:symbol')
   @ApiOperation({
     summary:
@@ -3427,6 +3464,7 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
   @Delete('vayu/instruments/inactive')
   @ApiOperation({
     summary: 'Delete all inactive Vortex instruments',
