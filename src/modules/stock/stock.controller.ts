@@ -2347,6 +2347,7 @@ export class StockController {
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
+          description: (i as any)?.description || null,
           last_price: ltp?.[i.token]?.last_price ?? null,
         }));
         return {
@@ -2380,7 +2381,7 @@ export class StockController {
         for (const i of page.instruments) {
           const lp = ltp?.[i.token]?.last_price ?? null;
           if (Number.isFinite(lp) && (lp as any) > 0) {
-            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, last_price: lp });
+            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, last_price: lp });
             if (collected.length >= requestedLimit) break;
           }
         }
@@ -2463,6 +2464,7 @@ export class StockController {
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
+          description: (i as any)?.description || null,
           expiry_date: i.expiry_date,
           last_price: ltp?.[i.token]?.last_price ?? null,
         }));
@@ -2499,7 +2501,7 @@ export class StockController {
         for (const i of page.instruments) {
           const lp = ltp?.[i.token]?.last_price ?? null;
           if (Number.isFinite(lp) && (lp as any) > 0) {
-            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, expiry_date: i.expiry_date as any, last_price: lp });
+            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, expiry_date: i.expiry_date as any, last_price: lp });
             if (collected.length >= requestedLimit) break;
           }
         }
@@ -2591,6 +2593,7 @@ export class StockController {
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
+          description: (i as any)?.description || null,
           expiry_date: i.expiry_date,
           option_type: i.option_type,
           strike_price: i.strike_price,
@@ -2632,7 +2635,7 @@ export class StockController {
         for (const i of page.instruments) {
           const lp = ltp?.[i.token]?.last_price ?? null;
           if (Number.isFinite(lp) && (lp as any) > 0) {
-            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, expiry_date: i.expiry_date as any, option_type: i.option_type, strike_price: i.strike_price, last_price: lp });
+            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, expiry_date: i.expiry_date as any, option_type: i.option_type, strike_price: i.strike_price, last_price: lp });
             if (collected.length >= requestedLimit) break;
           }
         }
@@ -2710,6 +2713,7 @@ export class StockController {
           exchange: i.exchange,
           instrument_name: i.instrument_name,
           expiry_date: i.expiry_date,
+          description: (i as any)?.description || null,
           last_price: ltp?.[i.token]?.last_price ?? null,
         }));
         return {
@@ -2744,7 +2748,7 @@ export class StockController {
         for (const i of page.instruments) {
           const lp = ltp?.[i.token]?.last_price ?? null;
           if (Number.isFinite(lp) && (lp as any) > 0) {
-            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, instrument_name: i.instrument_name, expiry_date: i.expiry_date as any, last_price: lp });
+            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, instrument_name: i.instrument_name, expiry_date: i.expiry_date as any, last_price: lp });
             if (collected.length >= requestedLimit) break;
           }
         }
