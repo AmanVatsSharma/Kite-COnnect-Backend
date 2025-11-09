@@ -3,6 +3,10 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class OptimizeVortexInstruments1700000000002
   implements MigrationInterface
 {
+  // Run this migration outside of a transaction because Postgres requires
+  // CREATE INDEX CONCURRENTLY to be executed without an active transaction.
+  public transaction = 'none' as const;
+
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Composite index for symbol + exchange searches (most common)
     await queryRunner.query(`
