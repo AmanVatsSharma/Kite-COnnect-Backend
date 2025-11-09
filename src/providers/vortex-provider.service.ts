@@ -9,6 +9,8 @@ import { VortexSession } from '../entities/vortex-session.entity';
 import { Instrument } from '../entities/instrument.entity';
 import { VortexInstrument } from '../entities/vortex-instrument.entity';
 import { InstrumentMapping } from '../entities/instrument-mapping.entity';
+import { RedisService } from '../services/redis.service';
+import { LtpMemoryCacheService } from '../services/ltp-memory-cache.service';
 
 // Minimal safe no-op ticker used when Vortex streaming is not configured
 class NoopTicker {
@@ -168,8 +170,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
 
   constructor(
     private configService: ConfigService,
-    private readonly redisService: import('../services/redis.service').RedisService,
-    private readonly ltpCache: import('../services/ltp-memory-cache.service').LtpMemoryCacheService,
+    private readonly redisService: RedisService,
+    private readonly ltpCache: LtpMemoryCacheService,
     @InjectRepository(VortexSession)
     private vortexSessionRepo: Repository<VortexSession>,
     @InjectRepository(Instrument)
