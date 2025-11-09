@@ -377,3 +377,19 @@ Note:
   - On reconnect, only tokens with known exchange mappings are resubscribed (no `NSE_EQ` fallback). Unresolved tokens are skipped and logged for investigation.
 
 These semantics ensure the backend remains consistent with Vortex API behavior and avoids accidental data mismatches due to exchange defaults.
+
+### LTP-only filters and enrichment (Vayu endpoints)
+- GET `/api/stock/vayu/instruments`
+  - Query params:
+    - `include_ltp` (boolean, default true): Enrich each instrument with `last_price` via Vortex quotes (mode=ltp)
+    - `ltp_only` (boolean, default false): If true, only return instruments with valid LTP (> 0)
+  - Implementation:
+    - Uses DB exchange from `vortex_instruments` to build authoritative `EXCHANGE-TOKEN` pairs
+    - Calls provider with chunking (<=1000) and 1 req/sec rate-limit
+    - No implicit NSE_EQ fallback
+
+- GET `/api/stock/vayu/tickers/search`
+  - Query params:
+    - `include_ltp` (boolean, default true)
+    - `ltp_only` (boolean, default false)
+  - Implementation mirrors `/vayu/instruments` (pairs built from DB resolution, no fallback)

@@ -1847,6 +1847,19 @@ export class StockController {
   @ApiQuery({ name: 'is_active', required: false, example: true })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
+  @ApiQuery({
+    name: 'include_ltp',
+    required: false,
+    example: true,
+    description:
+      'If true (default), enrich each instrument with LTP using Vortex quotes (mode=ltp)',
+  })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: false,
+    description: 'If true, only instruments with a valid last_price are returned',
+  })
   async getVortexInstruments(
     @Query('exchange') exchange?: string,
     @Query('instrument_name') instrumentName?: string,
@@ -1855,6 +1868,8 @@ export class StockController {
     @Query('is_active') isActive?: boolean,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
+    @Query('include_ltp') includeLtpRaw?: string | boolean,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
       const filters = {
@@ -1869,18 +1884,57 @@ export class StockController {
 
       const result =
         await this.vortexInstrumentService.getVortexInstruments(filters);
-      
+      const includeLtp =
+        String(includeLtpRaw || 'true').toLowerCase() === 'true' ||
+        includeLtpRaw === true;
+      const ltpOnly =
+        String(ltpOnlyRaw || 'false').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
+      const instruments = result.instruments || [];
+      let pairLtp: Record<string, { last_price: number | null }> = {};
+      if (includeLtp && instruments.length) {
+        const pairs = instruments.map((i) => ({
+          exchange: String(i?.exchange || '').toUpperCase(),
+          token: String(i?.token),
+        }));
+        pairLtp = await this.vortexProvider.getLTPByPairs(pairs as any);
+      }
+      const enriched = instruments.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = includeLtp ? pairLtp?.[key]?.last_price ?? null : null;
+        return { ...i, last_price: lp };
+      });
+      const filtered = ltpOnly
+        ? enriched.filter(
+            (v: any) =>
+              Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0),
+          )
+        : enriched;
+      const filteredOut = enriched.length - filtered.length;
+
       // Console for easy debugging
       // eslint-disable-next-line no-console
       console.log('[Get Vayu Instruments] Returning', {
         total: result.total,
-        count: result.instruments.length,
-        hasDescriptions: result.instruments.some((i) => i.description),
+        count: filtered.length,
+        include_ltp: includeLtp,
+        ltp_only: ltpOnly,
+        filtered_out: filteredOut,
+        hasDescriptions: filtered.some((i) => (i as any)?.description),
       });
       
       return {
         success: true,
-        data: result,
+        data: {
+          instruments: filtered,
+          total: result.total,
+          pagination: {
+            returned: filtered.length,
+            filtered_out: filteredOut,
+          },
+        },
+        include_ltp: includeLtp,
+        ltp_only: ltpOnly,
       };
     } catch (error) {
       throw new HttpException(
@@ -1900,9 +1954,24 @@ export class StockController {
   })
   @ApiQuery({ name: 'q', required: true, example: 'RELIANCE' })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiQuery({
+    name: 'include_ltp',
+    required: false,
+    example: true,
+    description:
+      'If true (default), enrich each instrument with LTP using Vortex quotes (mode=ltp)',
+  })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: false,
+    description: 'If true, only instruments with a valid last_price are returned',
+  })
   async searchVortexInstruments(
     @Query('q') query: string,
     @Query('limit') limit?: number,
+    @Query('include_ltp') includeLtpRaw?: string | boolean,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
       if (!query || query.trim().length === 0) {
@@ -1918,9 +1987,38 @@ export class StockController {
           limit ? parseInt(limit.toString()) : 50,
         );
 
+      const includeLtp =
+        String(includeLtpRaw || 'true').toLowerCase() === 'true' ||
+        includeLtpRaw === true;
+      const ltpOnly =
+        String(ltpOnlyRaw || 'false').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
+      let list = instruments || [];
+      let pairLtp: Record<string, { last_price: number | null }> = {};
+      if (includeLtp && list.length) {
+        const pairs = list.map((i) => ({
+          exchange: String((i as any)?.exchange || '').toUpperCase(),
+          token: String((i as any)?.token),
+        }));
+        pairLtp = await this.vortexProvider.getLTPByPairs(pairs as any);
+      }
+      const enriched = list.map((i) => {
+        const key = `${String((i as any).exchange || '').toUpperCase()}-${String((i as any).token)}`;
+        const lp = includeLtp ? pairLtp?.[key]?.last_price ?? null : null;
+        return { ...(i as any), last_price: lp };
+      });
+      const filtered = ltpOnly
+        ? enriched.filter(
+            (v: any) =>
+              Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0),
+          )
+        : enriched;
+
       return {
         success: true,
-        data: { instruments },
+        data: { instruments: filtered },
+        include_ltp: includeLtp,
+        ltp_only: ltpOnly,
       };
     } catch (error) {
       throw new HttpException(
@@ -2793,8 +2891,15 @@ export class StockController {
     summary: 'Search Vayu tickers and return live price + metadata',
   })
   @ApiQuery({ name: 'q', required: true, example: 'NSE_EQ_RELIANCE' })
+  @ApiQuery({
+    name: 'include_ltp',
+    required: false,
+    example: true,
+    description:
+      'If true (default), enrich each item with LTP using Vortex quotes (mode=ltp)',
+  })
   @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only tickers with a valid last_price are returned' })
-  async searchVortexTickers(@Query('q') q: string, @Query('ltp_only') ltpOnlyRaw?: string | boolean) {
+  async searchVortexTickers(@Query('q') q: string, @Query('ltp_only') ltpOnlyRaw?: string | boolean, @Query('include_ltp') includeLtpRaw?: string | boolean) {
     try {
       if (!q) {
         throw new HttpException(
@@ -2806,25 +2911,38 @@ export class StockController {
       const { instrument, candidates } =
         await this.vortexInstrumentService.resolveVortexSymbol(q);
       const items = instrument ? [instrument] : candidates;
-      const tokens = items.map((i) => i.token);
-      const ltp = tokens.length
-        ? await this.vortexInstrumentService.getVortexLTP(tokens)
-        : {};
+      const includeLtp =
+        String(includeLtpRaw || 'true').toLowerCase() === 'true' ||
+        includeLtpRaw === true;
+      // Build authoritative pairs from DB result; avoid NSE_EQ implicit fallback
+      const pairs =
+        items?.map((i) => ({
+          exchange: String(i.exchange || '').toUpperCase(),
+          token: String(i.token),
+        })) || [];
+      let pairLtp: Record<string, { last_price: number | null }> = {};
+      if (includeLtp && pairs.length) {
+        pairLtp = await this.vortexProvider.getLTPByPairs(pairs as any);
+      }
 
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
-      const list = items.map((i) => ({
-        token: i.token,
-        symbol: i.symbol,
-        exchange: i.exchange,
-        instrument_name: i.instrument_name,
-        expiry_date: i.expiry_date,
-        option_type: i.option_type,
-        strike_price: i.strike_price,
-        tick: i.tick,
-        lot_size: i.lot_size,
-        description: i.description,
-        last_price: ltp?.[i.token]?.last_price ?? null,
-      }));
+      const list = items.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = includeLtp ? pairLtp?.[key]?.last_price ?? null : null;
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          instrument_name: i.instrument_name,
+          expiry_date: i.expiry_date,
+          option_type: i.option_type,
+          strike_price: i.strike_price,
+          tick: i.tick,
+          lot_size: i.lot_size,
+          description: i.description,
+          last_price: lp,
+        };
+      });
       const filtered = ltpOnly
         ? list.filter((v) => Number.isFinite((v as any)?.last_price) && (((v as any)?.last_price ?? 0) > 0))
         : list;
@@ -2832,6 +2950,7 @@ export class StockController {
       return {
         success: true,
         data: filtered,
+        include_ltp: includeLtp,
         ltp_only: ltpOnly || false,
       };
     } catch (error) {
