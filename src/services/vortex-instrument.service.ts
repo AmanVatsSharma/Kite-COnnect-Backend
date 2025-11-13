@@ -1056,15 +1056,7 @@ export class VortexInstrumentService {
         }
       }
 
-      // 3) Last-resort fallback to NSE_EQ for any still-missing tokens (to avoid drops)
-      const stillMissing = tokens.filter((t) => !found.has(t));
-      for (const t of stillMissing) {
-        const tok = String(t);
-        if (/^\d+$/.test(tok)) {
-          pairs.push({ exchange: 'NSE_EQ', token: tok });
-          pairKeyToToken.set(`NSE_EQ-${tok}`, t);
-        }
-      }
+      // 3) No implicit fallback: unresolved tokens are left out per backend semantics
 
       // 4) Fetch LTP using explicit pairs (single or chunked calls handled by provider)
       const ltpByPairKey = await this.vortexProvider.getLTPByPairs(pairs);

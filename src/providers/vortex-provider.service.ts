@@ -11,6 +11,7 @@ import { VortexInstrument } from '../entities/vortex-instrument.entity';
 import { InstrumentMapping } from '../entities/instrument-mapping.entity';
 import { RedisService } from '../services/redis.service';
 import { LtpMemoryCacheService } from '../services/ltp-memory-cache.service';
+import { ProviderQueueService } from '../services/provider-queue.service';
 
 // Minimal safe no-op ticker used when Vortex streaming is not configured
 class NoopTicker {
@@ -197,6 +198,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     private configService: ConfigService,
     private readonly redisService: RedisService,
     private readonly ltpCache: LtpMemoryCacheService,
+    private readonly providerQueue: ProviderQueueService,
     @InjectRepository(VortexSession)
     private vortexSessionRepo: Repository<VortexSession>,
     @InjectRepository(Instrument)
@@ -398,7 +400,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       );
       let data: any = {};
       if (toQuery.length > 0) {
-        const resp = await this.httpGet(url, 'quotes');
+        const resp = await this.providerQueue.execute('quotes' as any, async () =>
+          this.httpGet(url, 'quotes'),
+        );
         data = (resp as any)?.data?.data || {};
       }
       const out: Record<string, any> = {};
@@ -484,7 +488,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       );
       let data: any = {};
       if (toQuery.length > 0) {
-        const resp = await this.httpGet(url, 'ltp');
+        const resp = await this.providerQueue.execute('ltp' as any, async () =>
+          this.httpGet(url, 'ltp'),
+        );
         data = (resp as any)?.data?.data || {};
       }
       const out: Record<string, any> = {};
@@ -616,7 +622,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
           `[Vortex] getLTPByPairs request: pairs=${chunk.length}, url=${url}`,
         );
         try {
-          const resp = await this.httpGet(url, 'ltp');
+          const resp = await this.providerQueue.execute('ltp' as any, async () =>
+            this.httpGet(url, 'ltp'),
+          );
           const data = (resp as any)?.data?.data || {};
           for (const [exToken, quote] of Object.entries<any>(data)) {
             const raw = Number(
@@ -746,7 +754,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       const url = `/data/quotes?${qParams}&mode=${mode}`;
       let data: any = {};
       if (toQuery.length > 0) {
-        const resp = await this.httpGet(url, 'ohlc');
+        const resp = await this.providerQueue.execute('ohlc' as any, async () =>
+          this.httpGet(url, 'ohlc'),
+        );
         data = (resp as any)?.data?.data || {};
       }
       const out: Record<string, any> = {};
@@ -827,7 +837,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       const toSec = Math.floor(new Date(to).getTime() / 1000);
       const resolution = this.mapInterval(interval);
       const url = `/data/history?exchange=${exchange}&token=${token}&to=${toSec}&from=${fromSec}&resolution=${resolution}`;
-      const resp = await this.httpGet(url, 'history');
+      const resp = await this.providerQueue.execute('history' as any, async () =>
+        this.httpGet(url, 'history'),
+      );
       const d = (resp as any)?.data || {};
       if (d?.s !== 'ok') return { candles: [] };
       const candles: any[] = [];

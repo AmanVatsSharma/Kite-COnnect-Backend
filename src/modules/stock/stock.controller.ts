@@ -35,6 +35,7 @@ import { BatchTokensDto } from './dto/batch-tokens.dto';
 import { ClearCacheDto } from './dto/clear-cache.dto';
 import { ValidateInstrumentsDto } from './dto/validate-instruments.dto';
 import { randomUUID } from 'crypto';
+import { RequestBatchingService } from '../../services/request-batching.service';
 
 @Controller('stock')
 @UseGuards(ApiKeyGuard)
@@ -46,6 +47,7 @@ export class StockController {
     private readonly vortexInstrumentService: VortexInstrumentService,
     private readonly vortexProvider: VortexProviderService,
     private readonly redisService: RedisService,
+    private readonly requestBatchingService: RequestBatchingService,
   ) {}
 
   @Post('instruments/sync')
@@ -1293,6 +1295,21 @@ export class StockController {
   }
 
   @ApiTags('vayu')
+  @Get('vayu/debug/batch-stats')
+  @ApiOperation({ summary: 'Show batching service stats (debug)' })
+  async getBatchStats() {
+    try {
+      const stats = this.requestBatchingService.getBatchStats() as any;
+      return { success: true, data: stats, timestamp: new Date().toISOString() };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Failed to fetch batch stats', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @ApiTags('vayu')
   @Get('vayu/ltp')
   @ApiOperation({
     summary:
@@ -1328,7 +1345,10 @@ export class StockController {
         );
       }
 
-      const data = await this.vortexProvider.getLTPByPairs(pairs as any);
+      const data = await this.requestBatchingService.getLtpByPairs(
+        pairs as any,
+        this.vortexProvider,
+      );
 
       // Enrich response with instrument metadata (description, tick, lot_size, etc.)
       const tokens: number[] = Array.from(
@@ -1505,7 +1525,10 @@ export class StockController {
         console.log('[Vayu LTP] instruments mode:', { count: tokens.length });
         
         try {
-          const data = await this.vortexProvider.getLTP(tokens);
+          const data = await this.requestBatchingService.getLTP(
+            tokens,
+            this.vortexProvider,
+          );
           
           // Enrich with instrument descriptions and other data
           const enrichedData: Record<string, any> = {};
@@ -1585,7 +1608,10 @@ export class StockController {
       }
 
       try {
-        const data = await this.vortexProvider.getLTPByPairs(sanitized as any);
+        const data = await this.requestBatchingService.getLtpByPairs(
+          sanitized as any,
+          this.vortexProvider,
+        );
         
         // Enrich with instrument descriptions and other data
         const enrichedData: Record<string, any> = {};
@@ -2225,7 +2251,10 @@ export class StockController {
           exchange: String(i?.exchange || '').toUpperCase(),
           token: String(i?.token),
         }));
-        pairLtp = await this.vortexProvider.getLTPByPairs(pairs as any);
+        pairLtp = await this.requestBatchingService.getLtpByPairs(
+          pairs as any,
+          this.vortexProvider,
+        );
       }
       const enriched = instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
@@ -2329,7 +2358,10 @@ export class StockController {
           exchange: String((i as any)?.exchange || '').toUpperCase(),
           token: String((i as any)?.token),
         }));
-        pairLtp = await this.vortexProvider.getLTPByPairs(pairs as any);
+        pairLtp = await this.requestBatchingService.getLtpByPairs(
+          pairs as any,
+          this.vortexProvider,
+        );
       }
       const enriched = list.map((i) => {
         const key = `${String((i as any).exchange || '').toUpperCase()}-${String((i as any).token)}`;
@@ -3285,7 +3317,10 @@ export class StockController {
         })) || [];
       let pairLtp: Record<string, { last_price: number | null }> = {};
       if (includeLtp && pairs.length) {
-        pairLtp = await this.vortexProvider.getLTPByPairs(pairs as any);
+        pairLtp = await this.requestBatchingService.getLtpByPairs(
+          pairs as any,
+          this.vortexProvider,
+        );
       }
 
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);

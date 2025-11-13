@@ -1,12 +1,34 @@
+/**
+ * @file request-batching.service.ts
+ * @module services
+ * @description Centralized batching for market data requests with a 1/sec distributed gate.
+ *              Adds pair-based LTP batching and 5s stale-fill for consistency.
+ * @author BharatERP
+ * @created 2025-11-13
+ */
 import { Injectable, Logger } from '@nestjs/common';
 import { MarketDataProvider } from '../providers/market-data.provider';
 import { ProviderQueueService } from './provider-queue.service';
+import { MarketDataStreamService } from './market-data-stream.service';
 
 interface PendingRequest {
   resolve: (value: any) => void;
   reject: (error: any) => void;
   tokens: string[];
   requestType: 'quote' | 'ltp' | 'ohlc';
+  timestamp: number;
+}
+
+interface Pair {
+  exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+  token: string | number;
+}
+
+interface PendingPairRequest {
+  resolve: (value: Record<string, { last_price: number | null }>) => void;
+  reject: (error: any) => void;
+  pairs: Pair[];
+  requestType: 'ltp_pairs';
   timestamp: number;
 }
 
@@ -23,6 +45,7 @@ interface BatchMetrics {
 export class RequestBatchingService {
   private readonly logger = new Logger(RequestBatchingService.name);
   private pendingRequests: Map<string, PendingRequest[]> = new Map();
+  private pendingPairRequests: Map<string, PendingPairRequest[]> = new Map();
   private batchTimeout = 1000; // 1 second batch window for per-second batching
   private maxBatchSize = 1000; // Maximum tokens per batch (Vortex limit)
   private batchMetrics: BatchMetrics = {
@@ -34,7 +57,10 @@ export class RequestBatchingService {
     modeBreakdown: {},
   };
 
-  constructor(private providerQueue: ProviderQueueService) {
+  constructor(
+    private providerQueue: ProviderQueueService,
+    private marketDataStream: MarketDataStreamService,
+  ) {
     // Log batching metrics every 10 seconds
     setInterval(() => {
       this.logBatchingMetrics();
@@ -51,6 +77,43 @@ export class RequestBatchingService {
 
   async getOHLC(tokens: string[], provider: MarketDataProvider): Promise<any> {
     return this.batchRequest(tokens, 'ohlc', provider);
+  }
+
+  /**
+   * Pair-based batching for LTP (EXCHANGE-TOKEN).
+   * - Coalesces within 1s window
+   * - Dedupes by pair key
+   * - Chunks to 1000 and executes via distributed 1/sec gate
+   * - Fills missing using memory/Redis last_tick (≤ 5s old) for consistency
+   */
+  async getLtpByPairs(
+    pairs: Pair[],
+    provider: any,
+  ): Promise<Record<string, { last_price: number | null }>> {
+    return new Promise((resolve, reject) => {
+      const batchWindow = Math.floor(Date.now() / this.batchTimeout);
+      const requestKey = `ltp_pairs_${batchWindow}`;
+
+      if (!this.pendingPairRequests.has(requestKey)) {
+        this.pendingPairRequests.set(requestKey, []);
+        setTimeout(() => {
+          this.processPairsBatch(requestKey, provider);
+        }, this.batchTimeout);
+      }
+
+      this.pendingPairRequests.get(requestKey)!.push({
+        resolve,
+        reject,
+        pairs,
+        requestType: 'ltp_pairs',
+        timestamp: Date.now(),
+      });
+
+      // Update metrics
+      this.batchMetrics.totalRequests++;
+      this.batchMetrics.modeBreakdown['ltp_pairs'] =
+        (this.batchMetrics.modeBreakdown['ltp_pairs'] || 0) + 1;
+    });
   }
 
   private async batchRequest(
@@ -189,7 +252,7 @@ export class RequestBatchingService {
         `[Batching] Batch completed: ${requests.length} requests → ${batchedCalls} provider calls (${reductionPercentage.toFixed(1)}% reduction) in ${totalTime}ms`,
       );
 
-      // Enrichment pass: ensure last_price present; do one provider.getLTP call for missing
+      // Enrichment pass: ensure last_price present; prefer 5s stale fill; then one provider.getLTP call for the rest (under gate)
       try {
         const missingTokens = Array.from(
           new Set<string>(
@@ -204,14 +267,34 @@ export class RequestBatchingService {
         );
         if (missingTokens.length) {
           this.logger.warn(
-            `[Batching] Missing LTP for ${missingTokens.length}/${results.size} tokens → fetching LTP fallback`,
+            `[Batching] Missing LTP for ${missingTokens.length}/${results.size} tokens → attempting 5s stale fill`,
           );
-          const ltpMap = await provider.getLTP(missingTokens);
+          // 1) Try memory + Redis last_tick (consistent up to 5s)
+          const stale = await this.marketDataStream.getRecentLTP(missingTokens);
+          const stillMissing: string[] = [];
           for (const tok of missingTokens) {
-            const lv = ltpMap?.[tok]?.last_price;
-            if (Number.isFinite(lv) && lv > 0) {
+            const lv = stale?.[tok]?.last_price;
+            if (Number.isFinite(lv as any) && (lv as any) > 0) {
               const orig = results.get(tok) || {};
               results.set(tok, { ...(orig as any), last_price: lv });
+            } else {
+              stillMissing.push(tok);
+            }
+          }
+          // 2) Optionally fetch provider fallback for any remaining under gate
+          if (stillMissing.length) {
+            this.logger.warn(
+              `[Batching] ${stillMissing.length} tokens still missing after stale fill → gated provider LTP fallback`,
+            );
+            const ltpMap = await this.providerQueue.execute('ltp' as any, async () =>
+              (provider as any).getLTP(stillMissing),
+            );
+            for (const tok of stillMissing) {
+              const lv = ltpMap?.[tok]?.last_price;
+              if (Number.isFinite(lv) && lv > 0) {
+                const orig = results.get(tok) || {};
+                results.set(tok, { ...(orig as any), last_price: lv });
+              }
             }
           }
         }
@@ -241,6 +324,142 @@ export class RequestBatchingService {
       requests.forEach((request) => {
         request.reject(error);
       });
+    }
+  }
+
+  private async processPairsBatch(requestKey: string, provider: any) {
+    const requests = this.pendingPairRequests.get(requestKey);
+    if (!requests || requests.length === 0) {
+      return;
+    }
+    this.pendingPairRequests.delete(requestKey);
+    const startTime = Date.now();
+    try {
+      // Collect and dedupe pairs by key
+      const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
+      const allPairs: Pair[] = [];
+      for (const req of requests) {
+        for (const p of req.pairs || []) {
+          const ex = String(p?.exchange || '').toUpperCase();
+          const tok = String(p?.token ?? '').trim();
+          if (allowed.has(ex) && /^\d+$/.test(tok)) {
+            allPairs.push({ exchange: ex as any, token: tok });
+          }
+        }
+      }
+      const keys = Array.from(
+        new Set(allPairs.map((p) => `${String(p.exchange)}-${String(p.token)}`)),
+      );
+      const uniquePairs: Pair[] = keys.map((k) => {
+        const [ex, tok] = k.split('-');
+        return { exchange: ex as any, token: tok };
+      });
+
+      this.batchMetrics.uniqueInstruments += uniquePairs.length;
+      this.batchMetrics.lastBatchTime = startTime;
+      this.logger.log(
+        `[Batching] Processing PAIRS batch: ${requests.length} user requests → ${uniquePairs.length} unique pairs`,
+      );
+
+      // Chunk to 1000 and call provider under distributed gate
+      const chunks = this.chunkArray(uniquePairs, this.maxBatchSize);
+      const results: Record<string, { last_price: number | null }> = {};
+      let batchedCalls = 0;
+      for (const chunk of chunks) {
+        try {
+          const chunkStart = Date.now();
+          const map = await this.providerQueue.execute('ltp' as any, async () =>
+            (provider as any).getLTPByPairs(chunk),
+          );
+          batchedCalls++;
+          const elapsed = Date.now() - chunkStart;
+          Object.assign(results, map || {});
+          this.logger.debug(
+            `[Batching] PAIRS chunk ${chunk.length} processed in ${elapsed}ms`,
+          );
+        } catch (error) {
+          this.logger.error('[Batching] Error processing PAIRS chunk', error);
+          // Reject all requests containing any of these chunk pairs
+          requests.forEach((request) => {
+            if (
+              request.pairs.some((p) =>
+                chunk.some(
+                  (c) =>
+                    String(c.exchange).toUpperCase() ===
+                      String(p.exchange).toUpperCase() &&
+                    String(c.token) === String(p.token),
+                ),
+              )
+            ) {
+              request.reject(error);
+            }
+          });
+        }
+      }
+
+      this.batchMetrics.batchedCalls += batchedCalls;
+      const totalTime = Date.now() - startTime;
+      this.logger.log(
+        `[Batching] PAIRS batch completed: ${requests.length} requests → ${batchedCalls} provider calls in ${totalTime}ms`,
+      );
+
+      // Stale fill for any pairs missing/invalid last_price using memory+Redis last_tick (≤5s)
+      try {
+        const missingKeys = keys.filter(
+          (k) =>
+            !Number.isFinite((results as any)?.[k]?.last_price) ||
+            (((results as any)?.[k]?.last_price ?? 0) <= 0),
+        );
+        if (missingKeys.length) {
+          const missingTokens = Array.from(
+            new Set(
+              missingKeys
+                .map((k) => String(k.split('-').pop() || '').trim())
+                .filter((s) => /^\d+$/.test(s)),
+            ),
+          );
+          if (missingTokens.length) {
+            const staleMap = await this.marketDataStream.getRecentLTP(
+              missingTokens,
+            );
+            for (const k of missingKeys) {
+              const tok = String(k.split('-').pop() || '').trim();
+              const lp = staleMap?.[tok]?.last_price;
+              if (Number.isFinite(lp as any) && (lp as any) > 0) {
+                results[k] = { last_price: lp as any };
+              }
+            }
+          }
+        }
+      } catch (e) {
+        this.logger.warn(
+          '[Batching] PAIRS stale fill failed (non-fatal)',
+          e as any,
+        );
+      }
+
+      // Ensure all requested keys present
+      for (const k of keys) {
+        if (!(k in results)) results[k] = { last_price: null };
+      }
+
+      // Resolve each request slice
+      requests.forEach((req) => {
+        const slice: Record<string, { last_price: number | null }> = {};
+        for (const p of req.pairs) {
+          const key = `${String(p.exchange).toUpperCase()}-${String(
+            p.token,
+          ).trim()}`;
+          slice[key] = results[key] ?? { last_price: null };
+        }
+        req.resolve(slice);
+      });
+    } catch (error) {
+      this.logger.error(
+        `[Batching] Error processing PAIRS batch for ${requestKey}`,
+        error,
+      );
+      requests.forEach((req) => req.reject(error));
     }
   }
 
