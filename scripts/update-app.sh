@@ -20,6 +20,26 @@ echo -e "${GREEN}Zero-Downtime Application Update${NC}"
 echo -e "${GREEN}================================================${NC}"
 echo ""
 
+# ---------------------------------------------------------------------------
+# Preflight: Disk space check (prevents update failures when root is full)
+# - Aborts early if available space is below threshold
+# - Prints guidance to run analysis script to generate a detailed report
+# ---------------------------------------------------------------------------
+REQUIRED_FREE_MB=3072
+AVAIL_FREE_MB=$(df --output=avail -m / | tail -1 | tr -dc '0-9')
+echo -e "${YELLOW}Preflight: Checking free disk space...${NC}"
+echo -e "Available: ${AVAIL_FREE_MB} MB, Required: ${REQUIRED_FREE_MB} MB"
+if [ -n "$AVAIL_FREE_MB" ] && [ "$AVAIL_FREE_MB" -lt "$REQUIRED_FREE_MB" ]; then
+    echo -e "${RED}✗ Low disk space detected${NC}"
+    echo "Please run the analysis script to generate a detailed report and optionally clean up:"
+    echo "  sudo ./scripts/maintenance/disk-analyze-clean.sh --analyze-only"
+    echo "If safe, re-run with --approve to prune unused Docker/cache/logs."
+    exit 1
+else
+    echo -e "${GREEN}✓ Disk space is sufficient for update${NC}"
+fi
+echo ""
+
 # Check if running as root or docker access
 if ! docker info > /dev/null 2>&1; then
     echo -e "${RED}Error: Docker is not accessible${NC}"

@@ -64,6 +64,11 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Postgres Database
   postgres:
@@ -96,6 +101,11 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Redis Cache
   redis:
@@ -122,6 +132,11 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Search API (NestJS) - exposes only to host via 3002 for Nginx proxy
   search-api:
@@ -156,6 +171,11 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Meilisearch (Search Engine) - internal only (no host port exposed)
   meilisearch:
@@ -181,6 +201,11 @@ services:
         reservations:
           cpus: '0.5'
           memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Search Indexer (read-only) - builds and syncs Meili index from Postgres
   search-indexer:
@@ -208,6 +233,11 @@ services:
     restart: unless-stopped
     networks:
       - trading-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:

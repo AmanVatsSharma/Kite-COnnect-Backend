@@ -1,0 +1,16 @@
+[Unit]
+Description=Docker prune (images, containers, networks) and builder cache
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'docker system prune -af && docker builder prune -af'
+Nice=10
+IOSchedulingClass=best-effort
+IOWeight=100
+
+[Install]
+WantedBy=multi-user.target
+
+
