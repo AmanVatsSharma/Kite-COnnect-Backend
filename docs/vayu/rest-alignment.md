@@ -81,6 +81,15 @@ Notes:
 ### ltp_only
 - When true, instruments without a finite last_price (>0) are filtered out from the response.
 
+### Fast-path for vayu listings (equities/futures/options/commodities)
+- For ltp_only=true the service uses a single-shot probe:
+  - Fetch up to min(500, max(limit×4, limit+offset)) candidate instruments from DB with skip_count to avoid expensive COUNT(*)
+  - Build authoritative EXCHANGE-TOKEN pairs from `vortex_instruments`
+  - One provider call hydrates LTP via `/data/quotes?mode=ltp` (chunked <=1000)
+  - Return the first N items with valid LTP
+- Non-ltp_only paths hydrate using pair-based LTP (no NSE_EQ fallback).
+- Responses include `performance.queryTime` in milliseconds.
+
 ### Error Handling
 - 401/403 → Auth error; check Vayu session and Authorization header
 - 429 → Rate limit; queued internally and retried after 1s + jitter

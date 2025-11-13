@@ -67,3 +67,6 @@ backups/
 # Nginx logs on host
 *.access.log
 *.error.log
+
+
+.cursor/

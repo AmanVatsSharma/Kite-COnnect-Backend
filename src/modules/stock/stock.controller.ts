@@ -2663,6 +2663,7 @@ export class StockController {
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
+      const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
@@ -2675,11 +2676,8 @@ export class StockController {
           limit: requestedLimit,
           offset: startOffset,
         });
-        const pairs = result.instruments.map((i) => ({
-          exchange: String(i.exchange || '').toUpperCase(),
-          token: String(i.token),
-        }));
-        const ltpByPair = pairs.length ? await this.vortexProvider.getLTPByPairs(pairs as any) : {};
+        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
+        const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
         const list = result.instruments.map((i) => {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
           const lp = ltpByPair?.[key]?.last_price ?? null;
@@ -2700,50 +2698,41 @@ export class StockController {
               hasMore: result.hasMore,
             },
             ltp_only: false,
+            performance: { queryTime: Date.now() - t0 },
           },
         };
       }
 
-      const collected: Array<{ token: number; symbol: string; exchange: string; description?: string | null; last_price: number | null }> = [];
-      let currentOffset = startOffset;
-      let hasMore = true;
-      const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
-
-      while (collected.length < requestedLimit && hasMore) {
-        const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q,
-          exchange: exchange ? [exchange] : undefined,
-          instrument_type: ['EQUITIES'],
-          limit: pageSize,
-          offset: currentOffset,
-        });
-        const pairs = page.instruments.map((i) => ({
-          exchange: String(i.exchange || '').toUpperCase(),
-          token: String(i.token),
-        }));
-        const ltpByPair = pairs.length ? await this.vortexProvider.getLTPByPairs(pairs as any) : {};
-        for (const i of page.instruments) {
-          const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
-          const lp = ltpByPair?.[key]?.last_price ?? null;
-          if (Number.isFinite(lp) && (lp as any) > 0) {
-            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, last_price: lp });
-            if (collected.length >= requestedLimit) break;
-          }
-        }
-        hasMore = page.hasMore;
-        currentOffset += pageSize;
-        if (!hasMore) break;
-      }
+      // Fast single-shot probe for ltp_only=true
+      const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
+      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+        query: q,
+        exchange: exchange ? [exchange] : undefined,
+        instrument_type: ['EQUITIES'],
+        limit: probeLimit,
+        offset: startOffset,
+        skip_count: true,
+      });
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
+      const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+      const enriched = page.instruments.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = ltpByPair?.[key]?.last_price ?? null;
+        return { token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, last_price: lp };
+      });
+      const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
+      const sliced = filtered.slice(0, requestedLimit);
 
       return {
         success: true,
         data: {
-          instruments: collected.slice(0, requestedLimit),
+          instruments: sliced,
           pagination: {
             total: undefined,
-            hasMore,
+            hasMore: page.hasMore,
           },
           ltp_only: true,
+          performance: { queryTime: Date.now() - t0 },
         },
       };
     } catch (error) {
@@ -2790,6 +2779,7 @@ export class StockController {
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
+      const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
@@ -2804,15 +2794,18 @@ export class StockController {
           limit: requestedLimit,
           offset: startOffset,
         });
-        const tokens = result.instruments.map((i) => i.token);
-        const ltp = tokens.length ? await this.vortexInstrumentService.getVortexLTP(tokens) : {};
+        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
+        const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
         const list = result.instruments.map((i) => ({
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
           description: (i as any)?.description || null,
           expiry_date: i.expiry_date,
-          last_price: ltp?.[i.token]?.last_price ?? null,
+          instrument_name: i.instrument_name,
+          tick: (i as any)?.tick,
+          lot_size: (i as any)?.lot_size,
+          last_price: ltpByPair?.[`${String(i.exchange || '').toUpperCase()}-${String(i.token)}`]?.last_price ?? null,
         }));
         return {
           success: true,
@@ -2823,48 +2816,53 @@ export class StockController {
               hasMore: result.hasMore,
             },
             ltp_only: false,
+            performance: { queryTime: Date.now() - t0 },
           },
         };
       }
 
-      const collected: Array<{ token: number; symbol: string; exchange: string; description?: string | null; expiry_date: any; last_price: number | null }> = [];
-      let currentOffset = startOffset;
-      let hasMore = true;
-      const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
-
-      while (collected.length < requestedLimit && hasMore) {
-        const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q,
-          exchange: exchange ? [exchange] : undefined,
-          instrument_type: ['FUTSTK', 'FUTIDX'],
-          expiry_from,
-          expiry_to,
-          limit: pageSize,
-          offset: currentOffset,
-        });
-        const tokens = page.instruments.map((i) => i.token);
-        const ltp = tokens.length ? await this.vortexInstrumentService.getVortexLTP(tokens) : {};
-        for (const i of page.instruments) {
-          const lp = ltp?.[i.token]?.last_price ?? null;
-          if (Number.isFinite(lp) && (lp as any) > 0) {
-            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, expiry_date: i.expiry_date as any, last_price: lp });
-            if (collected.length >= requestedLimit) break;
-          }
-        }
-        hasMore = page.hasMore;
-        currentOffset += pageSize;
-        if (!hasMore) break;
-      }
+      // Fast single-shot probe for ltp_only=true
+      const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
+      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+        query: q,
+        exchange: exchange ? [exchange] : undefined,
+        instrument_type: ['FUTSTK', 'FUTIDX'],
+        expiry_from,
+        expiry_to,
+        limit: probeLimit,
+        offset: startOffset,
+        skip_count: true,
+      });
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
+      const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+      const enriched = page.instruments.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = ltpByPair?.[key]?.last_price ?? null;
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          description: (i as any)?.description || null,
+          expiry_date: i.expiry_date as any,
+          instrument_name: i.instrument_name,
+          tick: (i as any)?.tick,
+          lot_size: (i as any)?.lot_size,
+          last_price: lp,
+        };
+      });
+      const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
+      const sliced = filtered.slice(0, requestedLimit);
 
       return {
         success: true,
         data: {
-          instruments: collected.slice(0, requestedLimit),
+          instruments: sliced,
           pagination: {
             total: undefined,
-            hasMore,
+            hasMore: page.hasMore,
           },
           ltp_only: true,
+          performance: { queryTime: Date.now() - t0 },
         },
       };
     } catch (error) {
@@ -2917,6 +2915,7 @@ export class StockController {
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
+      const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
@@ -2934,8 +2933,8 @@ export class StockController {
           limit: requestedLimit,
           offset: startOffset,
         });
-        const tokens = result.instruments.map((i) => i.token);
-        const ltp = tokens.length ? await this.vortexInstrumentService.getVortexLTP(tokens) : {};
+        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
+        const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
         const list = result.instruments.map((i) => ({
           token: i.token,
           symbol: i.symbol,
@@ -2944,7 +2943,7 @@ export class StockController {
           expiry_date: i.expiry_date,
           option_type: i.option_type,
           strike_price: i.strike_price,
-          last_price: ltp?.[i.token]?.last_price ?? null,
+          last_price: ltpByPair?.[`${String(i.exchange || '').toUpperCase()}-${String(i.token)}`]?.last_price ?? null,
         }));
         return {
           success: true,
@@ -2955,51 +2954,55 @@ export class StockController {
               hasMore: result.hasMore,
             },
             ltp_only: false,
+            performance: { queryTime: Date.now() - t0 },
           },
         };
       }
 
-      const collected: Array<{ token: number; symbol: string; exchange: string; description?: string | null; expiry_date: any; option_type?: string; strike_price?: number; last_price: number | null }> = [];
-      let currentOffset = startOffset;
-      let hasMore = true;
-      const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
-
-      while (collected.length < requestedLimit && hasMore) {
-        const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q,
-          exchange: exchange ? [exchange] : undefined,
-          instrument_type: ['OPTSTK', 'OPTIDX'],
-          option_type,
-          expiry_from,
-          expiry_to,
-          strike_min,
-          strike_max,
-          limit: pageSize,
-          offset: currentOffset,
-        });
-        const tokens = page.instruments.map((i) => i.token);
-        const ltp = tokens.length ? await this.vortexInstrumentService.getVortexLTP(tokens) : {};
-        for (const i of page.instruments) {
-          const lp = ltp?.[i.token]?.last_price ?? null;
-          if (Number.isFinite(lp) && (lp as any) > 0) {
-            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, expiry_date: i.expiry_date as any, option_type: i.option_type, strike_price: i.strike_price, last_price: lp });
-            if (collected.length >= requestedLimit) break;
-          }
-        }
-        hasMore = page.hasMore;
-        currentOffset += pageSize;
-        if (!hasMore) break;
-      }
+      // Fast single-shot probe for ltp_only=true
+      const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
+      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+        query: q,
+        exchange: exchange ? [exchange] : undefined,
+        instrument_type: ['OPTSTK', 'OPTIDX'],
+        option_type,
+        expiry_from,
+        expiry_to,
+        strike_min,
+        strike_max,
+        limit: probeLimit,
+        offset: startOffset,
+        skip_count: true,
+      });
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
+      const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+      const enriched = page.instruments.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = ltpByPair?.[key]?.last_price ?? null;
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          description: (i as any)?.description || null,
+          expiry_date: i.expiry_date as any,
+          option_type: i.option_type,
+          strike_price: i.strike_price,
+          last_price: lp,
+        };
+      });
+      const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
+      const sliced = filtered.slice(0, requestedLimit);
 
       return {
         success: true,
         data: {
-          instruments: collected.slice(0, requestedLimit),
+          instruments: sliced,
           pagination: {
             total: undefined,
-            hasMore,
+            hasMore: page.hasMore,
           },
           ltp_only: true,
+          performance: { queryTime: Date.now() - t0 },
         },
       };
     } catch (error) {
@@ -3040,6 +3043,7 @@ export class StockController {
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
     try {
+      const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
@@ -3053,8 +3057,8 @@ export class StockController {
           limit: requestedLimit,
           offset: startOffset,
         });
-        const tokens = result.instruments.map((i) => i.token);
-        const ltp = tokens.length ? await this.vortexInstrumentService.getVortexLTP(tokens) : {};
+        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
+        const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
         const list = result.instruments.map((i) => ({
           token: i.token,
           symbol: i.symbol,
@@ -3062,7 +3066,7 @@ export class StockController {
           instrument_name: i.instrument_name,
           expiry_date: i.expiry_date,
           description: (i as any)?.description || null,
-          last_price: ltp?.[i.token]?.last_price ?? null,
+          last_price: ltpByPair?.[`${String(i.exchange || '').toUpperCase()}-${String(i.token)}`]?.last_price ?? null,
         }));
         return {
           success: true,
@@ -3073,47 +3077,50 @@ export class StockController {
               hasMore: result.hasMore,
             },
             ltp_only: false,
+            performance: { queryTime: Date.now() - t0 },
           },
         };
       }
 
-      const collected: Array<{ token: number; symbol: string; exchange: string; description?: string | null; instrument_name: string; expiry_date: any; last_price: number | null }> = [];
-      let currentOffset = startOffset;
-      let hasMore = true;
-      const pageSize = Math.min(Math.max(requestedLimit, 1), 500);
-
-      while (collected.length < requestedLimit && hasMore) {
-        const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q,
-          exchange: ['MCX_FO'],
-          expiry_from,
-          expiry_to,
-          limit: pageSize,
-          offset: currentOffset,
-        });
-        const tokens = page.instruments.map((i) => i.token);
-        const ltp = tokens.length ? await this.vortexInstrumentService.getVortexLTP(tokens) : {};
-        for (const i of page.instruments) {
-          const lp = ltp?.[i.token]?.last_price ?? null;
-          if (Number.isFinite(lp) && (lp as any) > 0) {
-            collected.push({ token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, instrument_name: i.instrument_name, expiry_date: i.expiry_date as any, last_price: lp });
-            if (collected.length >= requestedLimit) break;
-          }
-        }
-        hasMore = page.hasMore;
-        currentOffset += pageSize;
-        if (!hasMore) break;
-      }
+      // Fast single-shot probe for ltp_only=true
+      const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
+      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+        query: q,
+        exchange: ['MCX_FO'],
+        expiry_from,
+        expiry_to,
+        limit: probeLimit,
+        offset: startOffset,
+        skip_count: true,
+      });
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
+      const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+      const enriched = page.instruments.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = ltpByPair?.[key]?.last_price ?? null;
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          description: (i as any)?.description || null,
+          instrument_name: i.instrument_name,
+          expiry_date: i.expiry_date as any,
+          last_price: lp,
+        };
+      });
+      const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
+      const sliced = filtered.slice(0, requestedLimit);
 
       return {
         success: true,
         data: {
-          instruments: collected.slice(0, requestedLimit),
+          instruments: sliced,
           pagination: {
             total: undefined,
-            hasMore,
+            hasMore: page.hasMore,
           },
           ltp_only: true,
+          performance: { queryTime: Date.now() - t0 },
         },
       };
     } catch (error) {

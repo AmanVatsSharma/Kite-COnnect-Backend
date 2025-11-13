@@ -568,6 +568,7 @@ export class VortexInstrumentService {
     sort_by?: 'symbol' | 'strike_price' | 'expiry_date';
     sort_order?: 'asc' | 'desc';
     detailed?: boolean; // Return minimal or full data
+    skip_count?: boolean; // Skip expensive count() when only probing
   }): Promise<{
     instruments: VortexInstrument[];
     total: number;
@@ -651,8 +652,11 @@ export class VortexInstrumentService {
         });
       }
 
-      // Get total count for pagination
-      const total = await qb.getCount();
+      // Get total count for pagination (optional skip for probe/ltp_only)
+      let total = 0;
+      if (!filters.skip_count) {
+        total = await qb.getCount();
+      }
 
       // Apply sorting
       switch (sortBy) {
@@ -682,7 +686,7 @@ export class VortexInstrumentService {
       const instruments = await qb.getMany();
 
       // Calculate hasMore
-      const hasMore = offset + limit < total;
+      const hasMore = filters.skip_count ? instruments.length === limit : offset + limit < total;
 
       const queryTime = Date.now() - startTime;
 
@@ -696,7 +700,7 @@ export class VortexInstrumentService {
 
       return {
         instruments,
-        total,
+        total: filters.skip_count ? -1 : total,
         hasMore,
         queryTime,
       };
@@ -706,6 +710,44 @@ export class VortexInstrumentService {
         error,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Build EXCHANGE-TOKEN pairs from instrument list (authoritative DB exchange).
+   */
+  public buildPairsFromInstruments(
+    instruments: VortexInstrument[],
+  ): Array<{ exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string }> {
+    try {
+      const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
+      const pairs: Array<{ exchange: any; token: string }> = [];
+      for (const i of instruments || []) {
+        const ex = String(i?.exchange || '').toUpperCase();
+        const tok = String(i?.token ?? '').trim();
+        if (allowed.has(ex) && /^\d+$/.test(tok)) {
+          pairs.push({ exchange: ex, token: tok });
+        }
+      }
+      return pairs as any;
+    } catch (e) {
+      this.logger.warn('[VortexInstrumentService] buildPairsFromInstruments failed', e as any);
+      return [];
+    }
+  }
+
+  /**
+   * Hydrate LTP by EXCHANGE-TOKEN pairs via provider (cache-first internally).
+   */
+  public async hydrateLtpByPairs(
+    pairs: Array<{ exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string | number }>,
+  ): Promise<Record<string, { last_price: number | null }>> {
+    try {
+      if (!pairs || pairs.length === 0) return {};
+      return await this.vortexProvider.getLTPByPairs(pairs as any);
+    } catch (e) {
+      this.logger.warn('[VortexInstrumentService] hydrateLtpByPairs failed', e as any);
+      return {};
     }
   }
 

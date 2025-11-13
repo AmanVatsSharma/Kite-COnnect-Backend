@@ -378,6 +378,12 @@ Note:
 
 These semantics ensure the backend remains consistent with Vortex API behavior and avoids accidental data mismatches due to exchange defaults.
 
+### Fast-path listings (equities/futures/options/commodities)
+- ltp_only=true: single-shot probe (DB candidates up to 500) → one `quotes?mode=ltp` call with EXCHANGE-TOKEN pairs → return first N with valid LTP.
+- ltp_only=false: single page + pair-based hydration (no NSE_EQ fallback).
+- Futures now include `instrument_name`, `expiry_date`, `tick`, `lot_size` in responses.
+- Responses include `performance.queryTime` (ms) for observability.
+
 ### LTP-only filters and enrichment (Vayu endpoints)
 - GET `/api/stock/vayu/instruments`
   - Query params:
