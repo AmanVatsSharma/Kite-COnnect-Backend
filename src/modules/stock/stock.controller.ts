@@ -2709,7 +2709,9 @@ export class StockController {
           offset: startOffset,
         });
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
-        const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+        const ltpByPair = pairs.length
+          ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
+          : {};
         const list = result.instruments.map((i) => {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
           const lp = ltpByPair?.[key]?.last_price ?? null;
@@ -2746,7 +2748,9 @@ export class StockController {
         skip_count: true,
       });
       const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
-      const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+      const ltpByPair = pairs.length
+        ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
+        : {};
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
@@ -2827,7 +2831,9 @@ export class StockController {
           offset: startOffset,
         });
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
-        const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+        const ltpByPair = pairs.length
+          ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
+          : {};
         const list = result.instruments.map((i) => ({
           token: i.token,
           symbol: i.symbol,
@@ -2866,7 +2872,9 @@ export class StockController {
         skip_count: true,
       });
       const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
-      const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+      const ltpByPair = pairs.length
+        ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
+        : {};
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
