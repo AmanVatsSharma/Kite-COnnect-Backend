@@ -7,8 +7,8 @@
  */
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddVortexInstrumentsIndexes20251113 implements MigrationInterface {
-  name = 'AddVortexInstrumentsIndexes20251113';
+export class AddVortexInstrumentsIndexes1731490000000 implements MigrationInterface {
+  name = 'AddVortexInstrumentsIndexes1731490000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Enable pg_trgm for fast ILIKE searches
