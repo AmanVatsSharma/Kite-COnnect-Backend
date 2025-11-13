@@ -56,6 +56,41 @@ export class LtpMemoryCacheService {
     return out;
   }
 
+  /**
+   * Return values even if older than ttl, as long as within staleWithinMs window.
+   * Does not delete stale entries and does not move LRU order.
+   */
+  getManyStaleWithin(
+    tokens: Array<string | number>,
+    staleWithinMs: number,
+  ): Record<string, { last_price: number | null }> {
+    const out: Record<string, { last_price: number | null }> = {};
+    const now = Date.now();
+    for (const t of tokens) {
+      const key = t.toString();
+      const entry = this.store.get(key);
+      if (entry && now - entry.updatedAt <= staleWithinMs) {
+        out[key] = { last_price: entry.value };
+      } else {
+        out[key] = { last_price: null };
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Return a single value if within staleWithinMs window.
+   */
+  getStaleWithin(token: string | number, staleWithinMs: number): number | null {
+    const key = token.toString();
+    const entry = this.store.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.updatedAt <= staleWithinMs) {
+      return entry.value;
+    }
+    return null;
+  }
+
   private touch(key: string) {
     const idx = this.order.indexOf(key);
     if (idx >= 0) this.order.splice(idx, 1);

@@ -53,6 +53,27 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 8;
   private readonly maxSubscriptionsPerSocket = 1000;
+  // SWR config
+  private readonly swrServeStaleMs = Math.max(
+    0,
+    Number(process.env.LTP_SWR_STALE_MS || 5000),
+  );
+  private ltpRefreshInFlight: Set<string> = new Set();
+  // Micro-aggregator for pair LTP to avoid 1s batching wait
+  private pairAggTimer: NodeJS.Timeout | null = null;
+  private pairAggWindowMs = Math.max(5, Number(process.env.LTP_AGG_WINDOW_MS || 25));
+  private pairAggRequests: Array<{
+    keys: string[];
+    resolve: (v: Record<string, { last_price: number | null }>) => void;
+    reject: (e: any) => void;
+    options?: { bypassCache?: boolean; backgroundRefresh?: boolean };
+  }> = [];
+  // Hotset warmer (WS) — gated by env
+  private hotsetEnabled =
+    String(process.env.VORTEX_HOTSET_WARMER || '').toLowerCase() === 'true';
+  private hotsetMax = Math.max(1, Number(process.env.VORTEX_HOTSET_SIZE || 800));
+  private hotsetRecent: Map<string, number> = new Map(); // token -> lastSeenMs
+  private hotsetTimer: NodeJS.Timeout | null = null;
   // Simple circuit breaker per REST key
   private breaker: Record<string, { state: 'closed' | 'open' | 'half_open'; failures: number; nextAttemptAt: number }> = {
     quotes: { state: 'closed', failures: 0, nextAttemptAt: 0 },
@@ -138,11 +159,14 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     return null;
   }
 
-  private async getCachedLtpForTokens(tokens: string[]): Promise<Record<string, { last_price: number | null }>> {
+  private async getCachedLtpForTokens(tokens: string[], opts?: { staleWithinMs?: number }): Promise<Record<string, { last_price: number | null }>> {
     const out: Record<string, { last_price: number | null }> = {};
     try {
       // 1) In-memory cache
-      const mem = this.ltpCache.getMany(tokens);
+      const mem =
+        opts?.staleWithinMs && opts.staleWithinMs > 0
+          ? this.ltpCache.getManyStaleWithin(tokens, opts.staleWithinMs)
+          : this.ltpCache.getMany(tokens);
       for (const t of tokens) out[String(t)] = { last_price: mem[String(t)]?.last_price ?? null } as any;
       // 2) Redis fallback for misses
       const misses = tokens.filter((t) => !Number.isFinite(out[String(t)]?.last_price as any));
@@ -164,6 +188,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       if (Number.isFinite(price) && (price as any) > 0) {
         this.ltpCache.set(token, price as any);
         await this.redisService.set(`ltp:${token}`, { last_price: price, ts: Date.now() }, 10);
+        this.noteHotset(token);
       }
     } catch {}
   }
@@ -186,6 +211,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     await this.initialize();
     // Auto-load saved access token on startup
     await this.loadSavedToken();
+    // Start WS hotset warmer if enabled
+    if (this.hotsetEnabled) {
+      this.startHotsetWarmer();
+    }
   }
 
   async initialize(): Promise<void> {
@@ -418,7 +447,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     }
   }
 
-  async getLTP(tokens: string[], options?: { bypassCache?: boolean }): Promise<Record<string, any>> {
+  async getLTP(tokens: string[], options?: { bypassCache?: boolean; backgroundRefresh?: boolean }): Promise<Record<string, any>> {
     try {
       await this.ensureTokenLoaded();
       if (!this.http) {
@@ -430,7 +459,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       await this.rateLimit('ltp');
       // Try cache first unless bypassCache=true
       const useCache = !(options && options.bypassCache === true);
-      const cache = useCache ? await this.getCachedLtpForTokens(tokens) : {};
+      const cache = useCache ? await this.getCachedLtpForTokens(tokens, { staleWithinMs: this.swrServeStaleMs }) : {};
       const missingForCache = tokens.filter((t) => {
         const lp = cache[String(t)]?.last_price;
         return !(Number.isFinite(lp as any) && (lp as any) > 0);
@@ -486,6 +515,13 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       this.logger.debug(
         `[Vortex] getLTP result coverage: total=${tokens.length}, withLTP=${Object.values(out).filter((v) => Number.isFinite((v as any)?.last_price) && (v as any).last_price > 0).length}`,
       );
+      // SWR background refresh if we served cache and didn't query provider for some/all tokens
+      if (useCache && (options?.backgroundRefresh ?? true)) {
+        const allFromCache = toQuery.length === 0;
+        if (allFromCache) {
+          this.refreshLtpInBackground(tokens.map((t) => String(t)));
+        }
+      }
       return out;
     } catch (error) {
       this.logger.error('[Vortex] getLTP failed (non-fatal)', error as any);
@@ -503,7 +539,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
       token: string | number;
     }>,
-    options?: { bypassCache?: boolean },
+    options?: { bypassCache?: boolean; backgroundRefresh?: boolean },
   ): Promise<Record<string, { last_price: number | null }>> {
     const result: Record<string, { last_price: number | null }> = {};
     try {
@@ -549,7 +585,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       const useCache = !(options && options.bypassCache === true);
       if (useCache && tokenByKey.size) {
         const cached = await this.getCachedLtpForTokens(
-          Array.from(new Set(Array.from(tokenByKey.values()).map((n) => String(n))))
+          Array.from(new Set(Array.from(tokenByKey.values()).map((n) => String(n)))),
+          { staleWithinMs: this.swrServeStaleMs },
         );
         for (const [pairKey, tok] of tokenByKey.entries()) {
           const lp = cached[String(tok)]?.last_price;
@@ -604,10 +641,81 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       this.logger.debug(
         `[Vortex] getLTPByPairs coverage: total=${keys.length}, withLTP=${Object.values(result).filter((v) => Number.isFinite((v as any)?.last_price) && (v as any).last_price > 0).length}`,
       );
+      // SWR background refresh if we served cache and didn't query provider for this batch
+      if (useCache && (options?.backgroundRefresh ?? true)) {
+        const noneFetched = remainingKeys.length === 0 && tokenByKey.size > 0;
+        if (noneFetched) {
+          const tokens = Array.from(new Set(Array.from(tokenByKey.values()).map((n) => String(n))));
+          this.refreshLtpInBackground(tokens);
+        }
+      }
       return result;
     } catch (error) {
       this.logger.error('[Vortex] getLTPByPairs failed (non-fatal)', error as any);
       return result;
+    }
+  }
+
+  /**
+   * Micro-aggregated pair-based LTP: coalesces concurrent callers within a very small window.
+   */
+  async getLTPByPairsAggregated(
+    pairs: Array<{
+      exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+      token: string | number;
+    }>,
+    options?: { bypassCache?: boolean; backgroundRefresh?: boolean },
+  ): Promise<Record<string, { last_price: number | null }>> {
+    const keys = (pairs || [])
+      .map((p) => `${String(p?.exchange || '').toUpperCase()}-${String(p?.token ?? '').trim()}`)
+      .filter((k) => !!k && /^[A-Z_]+-\d+$/.test(k));
+    if (keys.length === 0) return {};
+    return new Promise((resolve, reject) => {
+      try {
+        this.pairAggRequests.push({ keys, resolve, reject, options });
+        if (!this.pairAggTimer) {
+          this.pairAggTimer = setTimeout(() => this.flushPairAgg(), this.pairAggWindowMs);
+        }
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  private async flushPairAgg() {
+    const batch = this.pairAggRequests.splice(0, this.pairAggRequests.length);
+    if (this.pairAggTimer) {
+      clearTimeout(this.pairAggTimer);
+      this.pairAggTimer = null;
+    }
+    if (!batch.length) return;
+    try {
+      const unionKeys = Array.from(new Set(batch.flatMap((b) => b.keys)));
+      // Build pairs from keys
+      const unionPairs: Array<{ exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string | number }> = [];
+      for (const k of unionKeys) {
+        const [ex, tok] = k.split('-');
+        if (ex && tok && /^\d+$/.test(tok)) {
+          if (ex === 'NSE_EQ' || ex === 'NSE_FO' || ex === 'NSE_CUR' || ex === 'MCX_FO') {
+            unionPairs.push({ exchange: ex as any, token: tok });
+          }
+        }
+      }
+      const anyOpts = batch.find((b) => !!b.options)?.options || {};
+      const map = await this.getLTPByPairs(unionPairs, anyOpts as any);
+      for (const req of batch) {
+        const slice: Record<string, { last_price: number | null }> = {};
+        for (const k of req.keys) {
+          slice[k] = map[k] ?? { last_price: null };
+        }
+        req.resolve(slice);
+      }
+    } catch (e) {
+      for (const req of batch) {
+        try {
+          req.reject(e);
+        } catch {}
+      }
     }
   }
 
@@ -1767,13 +1875,107 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       const now = Date.now();
       const last = this.lastReqAt[key] || 0;
       const elapsed = now - last;
-      const minInterval = 1000;
+      const minInterval = 1000 + Math.floor(Math.random() * 100); // jitter up to 100ms
       if (elapsed < minInterval) {
         const sleep = minInterval - elapsed;
         await new Promise((r) => setTimeout(r, sleep));
       }
       this.lastReqAt[key] = Date.now();
     } catch {}
+  }
+
+  /**
+   * Background refresh for LTP using singleflight per-token guard.
+   */
+  private refreshLtpInBackground(tokens: string[]) {
+    try {
+      const unique = Array.from(new Set(tokens.map((t) => String(t))));
+      const pending: string[] = [];
+      for (const t of unique) {
+        if (!this.ltpRefreshInFlight.has(t)) {
+          this.ltpRefreshInFlight.add(t);
+          pending.push(t);
+          this.noteHotset(t);
+        }
+      }
+      if (!pending.length) return;
+      (async () => {
+        try {
+          await this.getLTP(pending, { bypassCache: true, backgroundRefresh: false });
+        } catch (e) {
+          this.logger.debug('[Vortex] Background LTP refresh failed (non-fatal)', e as any);
+        } finally {
+          pending.forEach((t) => this.ltpRefreshInFlight.delete(t));
+        }
+      })();
+    } catch (e) {
+      this.logger.debug('[Vortex] refreshLtpInBackground scheduling failed', e as any);
+    }
+  }
+
+  // Record tokens for potential hotset warming
+  private noteHotset(token: string | number) {
+    try {
+      const key = String(token);
+      this.hotsetRecent.set(key, Date.now());
+      // Soft cap map size to avoid unbounded growth
+      if (this.hotsetRecent.size > this.hotsetMax * 4) {
+        // Drop oldest quarter
+        const arr = Array.from(this.hotsetRecent.entries()).sort((a, b) => a[1] - b[1]);
+        const drop = Math.floor(arr.length / 4);
+        for (let i = 0; i < drop; i++) this.hotsetRecent.delete(arr[i][0]);
+      }
+    } catch {}
+  }
+
+  private startHotsetWarmer() {
+    try {
+      if (this.hotsetTimer) return;
+      // Prime WS ticker
+      const t = this.initializeTicker();
+      // Attempt connect
+      try {
+        (t as any)?.connect?.();
+      } catch {}
+      const intervalMs = Math.max(10000, Number(process.env.VORTEX_HOTSET_INTERVAL_MS || 30000));
+      this.hotsetTimer = setInterval(() => this.warmHotsetOnce(), intervalMs);
+      this.logger.log(`[Vortex] Hotset warmer started (size=${this.hotsetMax})`);
+    } catch (e) {
+      this.logger.warn('[Vortex] Hotset warmer failed to start', e as any);
+    }
+  }
+
+  private async warmHotsetOnce() {
+    try {
+      if (!this.hotsetEnabled) return;
+      const ticker = this.getTicker() as any;
+      if (!ticker || typeof ticker.subscribe !== 'function') return;
+      // Pick top-K recent tokens
+      const top = Array.from(this.hotsetRecent.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, this.hotsetMax)
+        .map((e) => Number(e[0]))
+        .filter((n) => Number.isFinite(n));
+      if (!top.length) return;
+      // Prime exchange mapping for better subscribe success
+      try {
+        const exMap = await this.getExchangesForTokens(top.map((n) => String(n)));
+        const pairs: Array<{ token: number; exchange: any }> = [];
+        for (const n of top) {
+          const ex = exMap.get(String(n));
+          if (ex) pairs.push({ token: n, exchange: ex });
+        }
+        this.primeExchangeMapping(pairs as any);
+      } catch {}
+      // Subscribe in LTP mode (ticker handles de-dup)
+      try {
+        ticker.subscribe(top, 'ltp');
+      } catch (e) {
+        this.logger.debug('[Vortex] Hotset subscribe failed (non-fatal)', e as any);
+      }
+    } catch (e) {
+      this.logger.debug('[Vortex] warmHotsetOnce failed', e as any);
+    }
   }
 
   private async loadSavedToken(): Promise<void> {

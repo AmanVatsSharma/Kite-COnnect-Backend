@@ -744,6 +744,9 @@ export class VortexInstrumentService {
   ): Promise<Record<string, { last_price: number | null }>> {
     try {
       if (!pairs || pairs.length === 0) return {};
+      if (typeof (this.vortexProvider as any)?.getLTPByPairsAggregated === 'function') {
+        return await (this.vortexProvider as any).getLTPByPairsAggregated(pairs as any);
+      }
       return await this.vortexProvider.getLTPByPairs(pairs as any);
     } catch (e) {
       this.logger.warn('[VortexInstrumentService] hydrateLtpByPairs failed', e as any);
