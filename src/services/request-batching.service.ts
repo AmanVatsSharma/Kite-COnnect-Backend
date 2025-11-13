@@ -11,6 +11,10 @@ import { MarketDataProvider } from '../providers/market-data.provider';
 import { ProviderQueueService } from './provider-queue.service';
 import { MarketDataStreamService } from './market-data-stream.service';
 
+// Ambient declarations for timers in environments lacking lib.dom types
+declare function setInterval(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): any;
+declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): any;
+
 interface PendingRequest {
   resolve: (value: any) => void;
   reject: (error: any) => void;

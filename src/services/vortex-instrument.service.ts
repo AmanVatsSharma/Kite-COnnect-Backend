@@ -7,6 +7,10 @@ import { InstrumentMapping } from '../entities/instrument-mapping.entity';
 import { VortexProviderService } from '../providers/vortex-provider.service';
 import { RedisService } from './redis.service';
 
+// Ambient declarations for environments missing DOM/lib typings
+declare const console: any;
+declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): any;
+
 /**
  * VortexInstrumentService
  *

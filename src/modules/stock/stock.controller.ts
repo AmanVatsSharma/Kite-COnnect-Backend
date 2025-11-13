@@ -37,6 +37,10 @@ import { ValidateInstrumentsDto } from './dto/validate-instruments.dto';
 import { randomUUID } from 'crypto';
 import { RequestBatchingService } from '../../services/request-batching.service';
 
+// Ambient declarations to satisfy TS in environments without DOM/lib definitions
+declare const console: any;
+declare function setImmediate(handler: (...args: any[]) => void, ...args: any[]): any;
+
 @Controller('stock')
 @UseGuards(ApiKeyGuard)
 @ApiTags('stock')
@@ -1382,8 +1386,9 @@ export class StockController {
             enrichedData[pairKey] = ltpData;
             continue;
           }
+          const baseObjPair = (ltpData && typeof ltpData === 'object') ? ltpData : {};
           enrichedData[pairKey] = {
-            ...ltpData,
+            ...baseObjPair,
             description: instrument?.description || null,
             symbol: instrument?.symbol || null,
             exchange: instrument?.exchange || null,
@@ -1539,8 +1544,9 @@ export class StockController {
             for (const [token, ltpData] of Object.entries(data)) {
               try {
                 const instrument = instruments.instruments[parseInt(token)];
+                const baseObj = (ltpData && typeof ltpData === 'object') ? ltpData : {};
                 enrichedData[token] = {
-                  ...ltpData,
+                  ...baseObj,
                   description: instrument?.description || null,
                   symbol: instrument?.symbol || null,
                   exchange: instrument?.exchange || null,
@@ -1623,8 +1629,9 @@ export class StockController {
             try {
               const token = parseInt(pairKey.split('-').pop() || '0');
               const instrument = instruments.instruments[token];
+              const baseObj2 = (ltpData && typeof ltpData === 'object') ? ltpData : {};
               enrichedData[pairKey] = {
-                ...ltpData,
+                ...baseObj2,
                 description: instrument?.description || null,
                 symbol: instrument?.symbol || null,
                 exchange: instrument?.exchange || null,
