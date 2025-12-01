@@ -42,6 +42,7 @@ import {
   validateSetModePayload,
 } from '../utils/ws-validation';
 import { OriginAuditService } from '../services/origin-audit.service';
+import { MetricsService } from '../services/metrics.service';
 
 const PROTOCOL_VERSION = '2.0';
 
@@ -80,6 +81,7 @@ export class MarketDataGateway
     @Inject(forwardRef(() => MarketDataStreamService))
     private streamService: MarketDataStreamService,
     private originAudit: OriginAuditService,
+    private metrics: MetricsService,
   ) {}
 
   /**
@@ -160,6 +162,13 @@ export class MarketDataGateway
           .catch(() => {
             // Swallow errors; they are logged inside the service.
           });
+
+        // Metrics: track active WS connections per API key
+        try {
+          this.metrics.wsConnectionsByApiKey.labels(apiKey).inc();
+        } catch {
+          // Metrics must never impact connection handling
+        }
       } catch (e) {
         this.logger.warn('WS origin audit (connect) failed', e as any);
       }
@@ -275,6 +284,11 @@ export class MarketDataGateway
       const apiKey = (client.data as any)?.apiKey;
       if (apiKey) {
         await this.apiKeyService.untrackWsConnection(apiKey);
+        try {
+          this.metrics.wsConnectionsByApiKey.labels(apiKey).dec();
+        } catch {
+          // Ignore metrics failures
+        }
       }
     } catch (e) {
       this.logger.warn(`Failed to untrack ws connection for ${client.id}`);
@@ -581,6 +595,17 @@ export class MarketDataGateway
         timestamp: new Date().toISOString(),
       });
 
+      // Metrics: count successful subscribe events per API key
+      try {
+        const apiKey: string =
+          ((client.data as any)?.apiKey as string) || 'anonymous';
+        this.metrics.wsEventsByApiKeyTotal
+          .labels(apiKey, 'subscribe')
+          .inc();
+      } catch {
+        // Ignore metrics failures
+      }
+
       // For unresolved, emit guidance errors per token
       for (const t of unresolved) {
         client.emit('error', {
@@ -751,6 +776,17 @@ export class MarketDataGateway
       this.logger.log(
         `Client ${client.id} unsubscribed from ${instruments.length} instruments`,
       );
+
+      // Metrics: count successful unsubscribe events per API key
+      try {
+        const apiKey: string =
+          ((client.data as any)?.apiKey as string) || 'anonymous';
+        this.metrics.wsEventsByApiKeyTotal
+          .labels(apiKey, 'unsubscribe')
+          .inc();
+      } catch {
+        // Ignore metrics failures
+      }
     } catch (error) {
       this.logger.error('Error handling instrument unsubscription', error);
       client.emit('error', {
@@ -1065,6 +1101,15 @@ export class MarketDataGateway
         mode,
         timestamp: new Date().toISOString(),
       });
+
+      // Metrics: count successful set_mode events per API key
+      try {
+        const apiKey: string =
+          ((client.data as any)?.apiKey as string) || 'anonymous';
+        this.metrics.wsEventsByApiKeyTotal.labels(apiKey, 'set_mode').inc();
+      } catch {
+        // Ignore metrics failures
+      }
     } catch (e) {
       this.logger.error('Error handling set_mode', e);
       client.emit('error', { code: 'set_mode_failed', message: 'Failed to set mode' });
