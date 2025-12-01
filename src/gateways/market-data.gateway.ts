@@ -1197,6 +1197,30 @@ export class MarketDataGateway
 
   // Method to get connection statistics
   getConnectionStats() {
+    const byApiKeyMap = new Map<
+      string,
+      { connections: number; totalSubscribedInstruments: number }
+    >();
+
+    for (const sub of this.clientSubscriptions.values()) {
+      const apiKey = sub.apiKey || 'anonymous';
+      const current = byApiKeyMap.get(apiKey) || {
+        connections: 0,
+        totalSubscribedInstruments: 0,
+      };
+      current.connections += 1;
+      current.totalSubscribedInstruments += sub.instruments.length;
+      byApiKeyMap.set(apiKey, current);
+    }
+
+    const byApiKey = Array.from(byApiKeyMap.entries()).map(
+      ([apiKey, stats]) => ({
+        apiKey,
+        connections: stats.connections,
+        totalSubscribedInstruments: stats.totalSubscribedInstruments,
+      }),
+    );
+
     return {
       totalConnections: this.clientSubscriptions.size,
       subscriptions: Array.from(this.clientSubscriptions.values()).map(
@@ -1204,8 +1228,10 @@ export class MarketDataGateway
           userId: sub.userId,
           instrumentCount: sub.instruments.length,
           subscriptionType: sub.subscriptionType,
+          apiKey: sub.apiKey || 'anonymous',
         }),
       ),
+      byApiKey,
     };
   }
 }

@@ -1,10 +1,20 @@
-import { Body, Controller, Get, Post, UseGuards, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  UseGuards,
+  Query,
+  Param,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiSecurity,
   ApiQuery,
   ApiBody,
+  ApiParam,
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -43,6 +53,24 @@ export class AdminController {
         tenant_id: { type: 'string', example: 'tenant-1' },
         rate_limit_per_minute: { type: 'number', example: 600 },
         connection_limit: { type: 'number', example: 2000 },
+        ws_subscribe_rps: {
+          type: 'number',
+          example: 10,
+          description:
+            'Optional per-API-key subscribe RPS limit (falls back to WS_SUBSCRIBE_RPS when omitted)',
+        },
+        ws_unsubscribe_rps: {
+          type: 'number',
+          example: 10,
+          description:
+            'Optional per-API-key unsubscribe RPS limit (falls back to WS_UNSUBSCRIBE_RPS when omitted)',
+        },
+        ws_mode_rps: {
+          type: 'number',
+          example: 20,
+          description:
+            'Optional per-API-key set_mode RPS limit (falls back to WS_MODE_RPS when omitted)',
+        },
       },
     },
   })
@@ -54,6 +82,9 @@ export class AdminController {
       name?: string;
       rate_limit_per_minute?: number;
       connection_limit?: number;
+      ws_subscribe_rps?: number;
+      ws_unsubscribe_rps?: number;
+      ws_mode_rps?: number;
     },
   ) {
     const entity = this.apiKeyRepo.create({
@@ -62,8 +93,32 @@ export class AdminController {
       name: body.name,
       rate_limit_per_minute: body.rate_limit_per_minute ?? 600,
       connection_limit: body.connection_limit ?? 2000,
+      ws_subscribe_rps:
+        typeof body.ws_subscribe_rps === 'number'
+          ? body.ws_subscribe_rps
+          : null,
+      ws_unsubscribe_rps:
+        typeof body.ws_unsubscribe_rps === 'number'
+          ? body.ws_unsubscribe_rps
+          : null,
+      ws_mode_rps:
+        typeof body.ws_mode_rps === 'number' ? body.ws_mode_rps : null,
     });
-    return await this.apiKeyRepo.save(entity);
+    const saved = await this.apiKeyRepo.save(entity);
+    // Console for easy later debugging of admin-created keys
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Created API key', {
+      key: saved.key,
+      tenant_id: saved.tenant_id,
+      limits: {
+        rate_limit_per_minute: saved.rate_limit_per_minute,
+        connection_limit: saved.connection_limit,
+        ws_subscribe_rps: saved.ws_subscribe_rps,
+        ws_unsubscribe_rps: saved.ws_unsubscribe_rps,
+        ws_mode_rps: saved.ws_mode_rps,
+      },
+    });
+    return saved;
   }
 
   @Get('apikeys')
@@ -79,12 +134,222 @@ export class AdminController {
     return { success: true };
   }
 
+  @Post('apikeys/limits')
+  @ApiOperation({
+    summary: 'Update API key limits (HTTP per-minute + WebSocket limits)',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string' },
+        rate_limit_per_minute: { type: 'number' },
+        connection_limit: { type: 'number' },
+        ws_subscribe_rps: { type: 'number' },
+        ws_unsubscribe_rps: { type: 'number' },
+        ws_mode_rps: { type: 'number' },
+      },
+      required: ['key'],
+    },
+  })
+  async updateApiKeyLimits(
+    @Body()
+    body: {
+      key: string;
+      rate_limit_per_minute?: number;
+      connection_limit?: number;
+      ws_subscribe_rps?: number | null;
+      ws_unsubscribe_rps?: number | null;
+      ws_mode_rps?: number | null;
+    },
+  ) {
+    const patch: Partial<ApiKey> = {};
+    if (body.rate_limit_per_minute !== undefined) {
+      patch.rate_limit_per_minute = body.rate_limit_per_minute;
+    }
+    if (body.connection_limit !== undefined) {
+      patch.connection_limit = body.connection_limit;
+    }
+    if (body.ws_subscribe_rps !== undefined) {
+      patch.ws_subscribe_rps = body.ws_subscribe_rps;
+    }
+    if (body.ws_unsubscribe_rps !== undefined) {
+      patch.ws_unsubscribe_rps = body.ws_unsubscribe_rps;
+    }
+    if (body.ws_mode_rps !== undefined) {
+      patch.ws_mode_rps = body.ws_mode_rps;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return {
+        success: true,
+        message: 'No limit fields provided – nothing to update',
+        key: body.key,
+      };
+    }
+
+    const result = await this.apiKeyRepo.update({ key: body.key }, patch);
+    if (!result.affected) {
+      throw new NotFoundException(`API key not found: ${body.key}`);
+    }
+
+    const entity = await this.apiKeyRepo.findOne({
+      where: { key: body.key },
+    });
+    const limits = entity
+      ? {
+          rate_limit_per_minute: entity.rate_limit_per_minute,
+          connection_limit: entity.connection_limit,
+          ws_subscribe_rps: entity.ws_subscribe_rps,
+          ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
+          ws_mode_rps: entity.ws_mode_rps,
+        }
+      : patch;
+
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Updated API key limits', {
+      key: body.key,
+      limits,
+    });
+
+    return {
+      success: true,
+      key: body.key,
+      limits,
+    };
+  }
+
+  @Get('apikeys/:key/limits')
+  @ApiOperation({
+    summary: 'Get configured limits for a single API key',
+  })
+  @ApiParam({ name: 'key', required: true })
+  async getApiKeyLimits(@Param('key') key: string) {
+    const entity = await this.apiKeyRepo.findOne({ where: { key } });
+    if (!entity) {
+      throw new NotFoundException(`API key not found: ${key}`);
+    }
+
+    const limits = {
+      rate_limit_per_minute: entity.rate_limit_per_minute,
+      connection_limit: entity.connection_limit,
+      ws_subscribe_rps: entity.ws_subscribe_rps,
+      ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
+      ws_mode_rps: entity.ws_mode_rps,
+    };
+
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Read API key limits', {
+      key,
+      limits,
+    });
+
+    return {
+      key: entity.key,
+      tenant_id: entity.tenant_id,
+      is_active: entity.is_active,
+      limits,
+    };
+  }
+
   @Get('usage')
   @ApiOperation({ summary: 'Get usage report for an API key' })
   @ApiQuery({ name: 'key', required: true })
   async usageReport(@Query('key') key: string) {
     const result = await this.apiKeyService.getUsageReport(key);
     return result;
+  }
+
+  @Get('apikeys/:key/usage')
+  @ApiOperation({
+    summary: 'Get usage metrics and limits for a single API key',
+  })
+  @ApiParam({ name: 'key', required: true })
+  async apiKeyUsage(@Param('key') key: string) {
+    const entity = await this.apiKeyRepo.findOne({ where: { key } });
+    if (!entity) {
+      throw new NotFoundException(`API key not found: ${key}`);
+    }
+    const usage = await this.apiKeyService.getUsageReport(key);
+    const limits = {
+      rate_limit_per_minute: entity.rate_limit_per_minute,
+      connection_limit: entity.connection_limit,
+      ws_subscribe_rps: entity.ws_subscribe_rps,
+      ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
+      ws_mode_rps: entity.ws_mode_rps,
+    };
+
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Read API key usage', {
+      key,
+      usage,
+      limits,
+    });
+
+    return {
+      key: entity.key,
+      tenant_id: entity.tenant_id,
+      is_active: entity.is_active,
+      limits,
+      usage,
+    };
+  }
+
+  @Get('apikeys/usage')
+  @ApiOperation({
+    summary: 'List usage metrics and limits for all API keys (paginated)',
+  })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'pageSize', required: false, example: 50 })
+  async listApiKeysUsage(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const pageSizeNum = Math.min(
+      200,
+      Math.max(1, Number(pageSize) || 50),
+    );
+
+    const [entities, total] = await this.apiKeyRepo.findAndCount({
+      order: { created_at: 'DESC' },
+      skip: (pageNum - 1) * pageSizeNum,
+      take: pageSizeNum,
+    });
+
+    const items = await Promise.all(
+      entities.map(async (entity) => {
+        const usage = await this.apiKeyService.getUsageReport(entity.key);
+        return {
+          key: entity.key,
+          tenant_id: entity.tenant_id,
+          is_active: entity.is_active,
+          limits: {
+            rate_limit_per_minute: entity.rate_limit_per_minute,
+            connection_limit: entity.connection_limit,
+            ws_subscribe_rps: entity.ws_subscribe_rps,
+            ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
+            ws_mode_rps: entity.ws_mode_rps,
+          },
+          usage,
+        };
+      }),
+    );
+
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Listed API key usage', {
+      page: pageNum,
+      pageSize: pageSizeNum,
+      count: items.length,
+      total,
+    });
+
+    return {
+      page: pageNum,
+      pageSize: pageSizeNum,
+      total,
+      items,
+    };
   }
 
   @Post('apikeys/provider')
@@ -193,6 +458,7 @@ export class AdminController {
       namespace: '/market-data',
       connections: stats?.totalConnections ?? 0,
       subscriptions: stats?.subscriptions ?? [],
+      byApiKey: stats?.byApiKey ?? [],
       provider: streaming,
       redis_ok: true,
     };
