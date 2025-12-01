@@ -34,6 +34,8 @@ import { RequestAuditLog } from '../../entities/request-audit-log.entity';
 import { OriginAuditService } from '../../services/origin-audit.service';
 import { OriginAuditInterceptor } from '../../interceptors/origin-audit.interceptor';
 import { AuditCleanupCronService } from '../../services/audit-cleanup.cron';
+import { ApiKeyAbuseFlag } from '../../entities/api-key-abuse-flag.entity';
+import { AbuseDetectionService } from '../../services/abuse-detection.service';
 import { NativeWsService } from '../../services/native-ws.service';
 import { ProviderQueueService } from '../../services/provider-queue.service';
 import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
@@ -52,6 +54,7 @@ import { FnoQueryParserService } from '../../services/fno-query-parser.service';
       VortexSession,
       VortexInstrument,
       RequestAuditLog,
+      ApiKeyAbuseFlag,
     ]),
     ScheduleModule.forRoot(),
   ],
@@ -83,6 +86,7 @@ import { FnoQueryParserService } from '../../services/fno-query-parser.service';
     OriginAuditService,
     OriginAuditInterceptor,
     AuditCleanupCronService,
+    AbuseDetectionService,
     VortexValidationCronService,
     FnoQueryParserService,
   ],

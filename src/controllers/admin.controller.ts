@@ -27,6 +27,9 @@ import { MarketDataStreamService } from '../services/market-data-stream.service'
 import { VortexProviderService } from '../providers/vortex-provider.service';
 import { RedisService } from '../services/redis.service';
 import { MarketDataGateway } from '../gateways/market-data.gateway';
+import { InjectRepository } from '@nestjs/typeorm';
+import { ApiKeyAbuseFlag } from '../entities/api-key-abuse-flag.entity';
+import { AbuseDetectionService } from '../services/abuse-detection.service';
 
 @Controller('admin')
 @ApiTags('admin', 'admin-ws')
@@ -35,6 +38,8 @@ import { MarketDataGateway } from '../gateways/market-data.gateway';
 export class AdminController {
   constructor(
     @InjectRepository(ApiKey) private apiKeyRepo: Repository<ApiKey>,
+    @InjectRepository(ApiKeyAbuseFlag)
+    private abuseRepo: Repository<ApiKeyAbuseFlag>,
     private apiKeyService: ApiKeyService,
     private resolver: MarketDataProviderResolverService,
     private kiteProvider: KiteProviderService,
@@ -42,6 +47,7 @@ export class AdminController {
     private vortexProvider: VortexProviderService,
     private redis: RedisService,
     private gateway: MarketDataGateway,
+    private abuseDetection: AbuseDetectionService,
   ) {}
 
   @Post('apikeys')
@@ -555,5 +561,168 @@ export class AdminController {
   @ApiOperation({ summary: 'Get debug status for Vayu provider/ticker' })
   async vortexDebug() {
     return this.vortexProvider.getDebugStatus?.() || {};
+  }
+
+  // ===== Abuse / Resell Monitoring =====
+
+  @Get('abuse/flags')
+  @ApiOperation({
+    summary: 'List abuse flags for API keys (potential resell/abuse detection)',
+  })
+  @ApiQuery({ name: 'blocked', required: false, example: true })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'pageSize', required: false, example: 50 })
+  async listAbuseFlags(
+    @Query('blocked') blocked?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const pageSizeNum = Math.min(
+      200,
+      Math.max(1, Number(pageSize) || 50),
+    );
+
+    const where: any = {};
+    if (blocked === 'true') where.blocked = true;
+    if (blocked === 'false') where.blocked = false;
+
+    const [items, total] = await this.abuseRepo.findAndCount({
+      where,
+      order: { risk_score: 'DESC', detected_at: 'DESC' },
+      skip: (pageNum - 1) * pageSizeNum,
+      take: pageSizeNum,
+    });
+
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Listed abuse flags', {
+      page: pageNum,
+      pageSize: pageSizeNum,
+      count: items.length,
+      total,
+      blockedFilter: blocked,
+    });
+
+    return {
+      page: pageNum,
+      pageSize: pageSizeNum,
+      total,
+      items,
+    };
+  }
+
+  @Get('abuse/flags/:key')
+  @ApiOperation({
+    summary: 'Get abuse flag status for a specific API key',
+  })
+  @ApiParam({ name: 'key', required: true })
+  async getAbuseFlag(@Param('key') key: string) {
+    const flag = await this.abuseRepo.findOne({
+      where: { api_key: key },
+    });
+    if (!flag) {
+      throw new NotFoundException(`No abuse flag found for API key: ${key}`);
+    }
+    const status = await this.abuseDetection.getStatusForApiKey(key);
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Read abuse flag', { key, flag });
+    return {
+      flag,
+      status,
+    };
+  }
+
+  @Post('abuse/flags/block')
+  @ApiOperation({
+    summary:
+      'Manually block an API key for abuse (strict resell / misuse enforcement)',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string' },
+        reason: { type: 'string' },
+      },
+      required: ['api_key'],
+    },
+  })
+  async manualBlock(@Body() body: { api_key: string; reason?: string }) {
+    const apiKey = body.api_key;
+    const existing =
+      (await this.abuseRepo.findOne({ where: { api_key: apiKey } })) ||
+      this.abuseRepo.create({
+        api_key: apiKey,
+        tenant_id: null,
+        risk_score: this.abuseDetection.getBlockScoreThreshold(),
+        reason_codes: [],
+        blocked: true,
+        last_seen_at: new Date(),
+      });
+
+    const reasons = Array.isArray(existing.reason_codes)
+      ? [...existing.reason_codes]
+      : [];
+    reasons.push('manual_block');
+    if (body.reason) reasons.push(body.reason);
+
+    existing.blocked = true;
+    existing.risk_score = Math.max(
+      existing.risk_score,
+      this.abuseDetection.getBlockScoreThreshold(),
+    );
+    existing.reason_codes = reasons;
+    existing.last_seen_at = new Date();
+
+    const saved = await this.abuseRepo.save(existing);
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Manually blocked API key', {
+      api_key: apiKey,
+      reason: body.reason,
+    });
+    return {
+      success: true,
+      flag: saved,
+    };
+  }
+
+  @Post('abuse/flags/unblock')
+  @ApiOperation({
+    summary: 'Manually unblock an API key that was previously blocked',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        api_key: { type: 'string' },
+      },
+      required: ['api_key'],
+    },
+  })
+  async manualUnblock(@Body() body: { api_key: string }) {
+    const apiKey = body.api_key;
+    const existing = await this.abuseRepo.findOne({
+      where: { api_key: apiKey },
+    });
+    if (!existing) {
+      throw new NotFoundException(`No abuse flag found for API key: ${apiKey}`);
+    }
+    existing.blocked = false;
+    existing.risk_score = 0;
+    existing.reason_codes = [
+      ...(existing.reason_codes || []),
+      'manual_unblock',
+    ];
+    existing.last_seen_at = new Date();
+
+    const saved = await this.abuseRepo.save(existing);
+    // eslint-disable-next-line no-console
+    console.log('[AdminController] Manually unblocked API key', {
+      api_key: apiKey,
+    });
+    return {
+      success: true,
+      flag: saved,
+    };
   }
 }

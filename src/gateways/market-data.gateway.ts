@@ -43,6 +43,7 @@ import {
 } from '../utils/ws-validation';
 import { OriginAuditService } from '../services/origin-audit.service';
 import { MetricsService } from '../services/metrics.service';
+import { AbuseDetectionService } from '../services/abuse-detection.service';
 
 const PROTOCOL_VERSION = '2.0';
 
@@ -82,6 +83,7 @@ export class MarketDataGateway
     private streamService: MarketDataStreamService,
     private originAudit: OriginAuditService,
     private metrics: MetricsService,
+    private abuseDetection: AbuseDetectionService,
   ) {}
 
   /**
@@ -130,6 +132,46 @@ export class MarketDataGateway
         client.emit('error', { code: 'invalid_api_key', message: 'Invalid API key' });
         client.disconnect(true);
         return;
+      }
+
+      // Strict abuse / resell enforcement for WS: block keys marked as abusive.
+      try {
+        const status = await this.abuseDetection.getStatusForApiKey(apiKey);
+        if (status?.blocked) {
+          this.logger.warn(
+            `Blocked API key used on WS connect; key=${apiKey} risk_score=${status.risk_score}`,
+          );
+          client.emit('error', {
+            code: 'key_blocked_for_abuse',
+            message:
+              'This API key has been blocked due to suspected reselling or abusive usage. Contact support for review.',
+            risk_score: status.risk_score,
+            reasons: status.reason_codes,
+          });
+          // eslint-disable-next-line no-console
+          console.log('[MarketDataGateway] Blocked API key WS connect rejected', {
+            apiKey,
+            tenant_id: (record as any)?.tenant_id,
+            risk_score: status.risk_score,
+            reasons: status.reason_codes,
+          });
+          client.disconnect(true);
+          return;
+        }
+      } catch (e) {
+        this.logger.warn(
+          `Abuse detection check failed for WS key=${apiKey}; continuing`,
+          e as any,
+        );
+        // eslint-disable-next-line no-console
+        console.error(
+          '[MarketDataGateway] Abuse detection check failed – continuing',
+          {
+            apiKey,
+            tenant_id: (record as any)?.tenant_id,
+            error: (e as any)?.message ?? e,
+          },
+        );
       }
       await this.apiKeyService.trackWsConnection(
         apiKey,

@@ -4,12 +4,14 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiKey } from '../entities/api-key.entity';
 import { ApiKeyService } from '../services/api-key.service';
+import { AbuseDetectionService } from '../services/abuse-detection.service';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
@@ -18,6 +20,7 @@ export class ApiKeyGuard implements CanActivate {
   constructor(
     @InjectRepository(ApiKey) private apiKeyRepo: Repository<ApiKey>,
     private apiKeyService: ApiKeyService,
+    private abuseDetection: AbuseDetectionService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -32,6 +35,48 @@ export class ApiKeyGuard implements CanActivate {
     });
     if (!keyRecord) {
       throw new UnauthorizedException('Invalid API key');
+    }
+
+    // Strict abuse / resell enforcement: block keys marked as abusive.
+    try {
+      const status = await this.abuseDetection.getStatusForApiKey(apiKey);
+      if (status?.blocked) {
+        this.logger.warn(
+          `Blocked API key used on REST route; key=${apiKey} risk_score=${status.risk_score}`,
+        );
+        // eslint-disable-next-line no-console
+        console.log('[ApiKeyGuard] Blocked API key rejected', {
+          apiKey,
+          tenant_id: keyRecord.tenant_id,
+          risk_score: status.risk_score,
+          reasons: status.reason_codes,
+        });
+        throw new ForbiddenException({
+          success: false,
+          code: 'key_blocked_for_abuse',
+          message:
+            'This API key has been blocked due to suspected reselling or abusive usage. Contact support for review.',
+          risk_score: status.risk_score,
+          reasons: status.reason_codes,
+        });
+      }
+    } catch (e) {
+      if (e instanceof ForbiddenException) {
+        throw e;
+      }
+      this.logger.warn(
+        `Abuse detection check failed for key=${apiKey}; continuing request`,
+        e as any,
+      );
+      // eslint-disable-next-line no-console
+      console.error(
+        '[ApiKeyGuard] Abuse detection check failed – continuing',
+        {
+          apiKey,
+          tenant_id: keyRecord.tenant_id,
+          error: (e as any)?.message ?? e,
+        },
+      );
     }
 
     // Per-API-key HTTP rate limiting via ApiKeyService (Redis-backed).
