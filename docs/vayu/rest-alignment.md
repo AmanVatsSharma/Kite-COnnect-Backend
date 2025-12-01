@@ -90,6 +90,32 @@ Notes:
 - Non-ltp_only paths hydrate using pair-based LTP (no NSE_EQ fallback).
 - Responses include `performance.queryTime` in milliseconds.
 
+### Active vs inactive instruments
+- The advanced Vortex search (`searchVortexInstrumentsAdvanced`) now accepts an `only_active` flag:
+  - When `only_active=true`, queries are restricted to `vortex_instruments.is_active = true`.
+  - When omitted/false, queries include both active and inactive instruments.
+- F&O endpoints behave as follows:
+  - `/vayu/futures`, `/vayu/options`, `/vayu/mcx-options` with `ltp_only=false`:
+    - Use `only_active=false` so the full DB universe (matching stats such as `byInstrumentType`) is visible.
+    - LTP hydration sets `last_price=null` when the provider does not return a usable price.
+  - The same endpoints with `ltp_only=true`:
+    - Use `only_active=true` for the probe queries, so the \"ltp_only\" view reflects the validated, tradable subset.
+
+### Trading-style parsing and fallback search
+- F&O endpoints use `FnoQueryParserService` to turn human queries like `\"nifty 26000 ce\"` or `\"gold 62000 ce\"` into structured hints:
+  - `underlying_symbol` (mapped to `v.symbol`)
+  - `expiry_from`, `expiry_to` (YYYYMMDD windows)
+  - `strike_min`, `strike_max`
+  - `option_type` (CE/PE)
+- These hints are **best-effort** and never override explicit query parameters.
+- Two-step behaviour:
+  1. **Primary attempt**: exact `underlying_symbol` + parsed filters + exchange/instrument_type constraints.
+  2. **Fallback** (when primary returns zero rows and a `q` was provided):
+     - Retry with `query=q` (symbol fuzzy search via `ILIKE`/FTS) and `underlying_symbol` cleared, while keeping the same exchange/instrument_type and range filters.
+- This ensures that:
+  - Well-formed trading-style queries are fast and precise.
+  - Misaligned symbols or unexpected DB naming do not result in empty responses; users still see reasonable matches.
+
 ### Error Handling
 - 401/403 → Auth error; check Vayu session and Authorization header
 - 429 → Rate limit; queued internally and retried after 1s + jitter
