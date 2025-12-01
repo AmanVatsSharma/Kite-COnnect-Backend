@@ -49,6 +49,7 @@ interface ClientSubscription {
   instruments: number[];
   subscriptionType: 'live' | 'historical' | 'both';
   modeByInstrument: Map<number, 'ltp' | 'ohlcv' | 'full'>;
+  apiKey?: string;
 }
 
 @WebSocketGateway({
@@ -143,6 +144,7 @@ export class MarketDataGateway
       instruments: [],
       subscriptionType: 'live',
       modeByInstrument: new Map(),
+      apiKey: (client.data as any)?.apiKey,
     });
 
     // Send connection confirmation
@@ -314,16 +316,38 @@ export class MarketDataGateway
         return;
       }
 
-      // Rate limit per event
+      // Rate limit per event (per API key, with optional per-key overrides)
       try {
-        const limit = Number(process.env.WS_SUBSCRIBE_RPS || 10);
+        const record: any = (client.data as any)?.apiKeyRecord;
+        const apiKey: string =
+          ((client.data as any)?.apiKey as string) || client.id;
+        const globalLimit = Number(process.env.WS_SUBSCRIBE_RPS || 10);
+        const perKeyLimit = Number(record?.ws_subscribe_rps);
+        const limit =
+          Number.isFinite(perKeyLimit) && perKeyLimit > 0
+            ? perKeyLimit
+            : globalLimit;
         const rl = await this.apiKeyService.checkWsRateLimit(
-          client.id,
+          apiKey,
           'subscribe',
           limit,
         );
         if (rl) {
-          client.emit('error', { code: 'rate_limited', message: 'Subscribe rate limit exceeded', ...rl });
+          client.emit('error', {
+            code: 'rate_limited',
+            message: 'Subscribe rate limit exceeded for this API key',
+            limit,
+            retry_after_ms: rl.retry_after_ms,
+          });
+          // eslint-disable-next-line no-console
+          console.log(
+            '[MarketDataGateway] Subscribe rate limit exceeded',
+            JSON.stringify({
+              apiKey,
+              limit,
+              retry_after_ms: rl.retry_after_ms,
+            }),
+          );
           return;
         }
       } catch {}
@@ -575,16 +599,38 @@ export class MarketDataGateway
         return;
       }
 
-      // Rate limit per event
+      // Rate limit per event (per API key, with optional per-key overrides)
       try {
-        const limit = Number(process.env.WS_UNSUBSCRIBE_RPS || 10);
+        const record: any = (client.data as any)?.apiKeyRecord;
+        const apiKey: string =
+          ((client.data as any)?.apiKey as string) || client.id;
+        const globalLimit = Number(process.env.WS_UNSUBSCRIBE_RPS || 10);
+        const perKeyLimit = Number(record?.ws_unsubscribe_rps);
+        const limit =
+          Number.isFinite(perKeyLimit) && perKeyLimit > 0
+            ? perKeyLimit
+            : globalLimit;
         const rl = await this.apiKeyService.checkWsRateLimit(
-          client.id,
+          apiKey,
           'unsubscribe',
           limit,
         );
         if (rl) {
-          client.emit('error', { code: 'rate_limited', message: 'Unsubscribe rate limit exceeded', ...rl });
+          client.emit('error', {
+            code: 'rate_limited',
+            message: 'Unsubscribe rate limit exceeded for this API key',
+            limit,
+            retry_after_ms: rl.retry_after_ms,
+          });
+          // eslint-disable-next-line no-console
+          console.log(
+            '[MarketDataGateway] Unsubscribe rate limit exceeded',
+            JSON.stringify({
+              apiKey,
+              limit,
+              retry_after_ms: rl.retry_after_ms,
+            }),
+          );
           return;
         }
       } catch {}
@@ -868,16 +914,38 @@ export class MarketDataGateway
         return;
       }
 
-      // Rate limit per event
+      // Rate limit per event (per API key, with optional per-key overrides)
       try {
-        const limit = Number(process.env.WS_MODE_RPS || 20);
+        const record: any = (client.data as any)?.apiKeyRecord;
+        const apiKey: string =
+          ((client.data as any)?.apiKey as string) || client.id;
+        const globalLimit = Number(process.env.WS_MODE_RPS || 20);
+        const perKeyLimit = Number(record?.ws_mode_rps);
+        const limit =
+          Number.isFinite(perKeyLimit) && perKeyLimit > 0
+            ? perKeyLimit
+            : globalLimit;
         const rl = await this.apiKeyService.checkWsRateLimit(
-          client.id,
+          apiKey,
           'set_mode',
           limit,
         );
         if (rl) {
-          client.emit('error', { code: 'rate_limited', message: 'Set mode rate limit exceeded', ...rl });
+          client.emit('error', {
+            code: 'rate_limited',
+            message: 'Set mode rate limit exceeded for this API key',
+            limit,
+            retry_after_ms: rl.retry_after_ms,
+          });
+          // eslint-disable-next-line no-console
+          console.log(
+            '[MarketDataGateway] Set mode rate limit exceeded',
+            JSON.stringify({
+              apiKey,
+              limit,
+              retry_after_ms: rl.retry_after_ms,
+            }),
+          );
           return;
         }
       } catch {}
