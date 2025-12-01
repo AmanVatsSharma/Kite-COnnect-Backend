@@ -12,6 +12,7 @@ import { RequestIdInterceptor } from './interceptors/request-id.interceptor';
 import { RateLimitInterceptor } from './interceptors/rate-limit.interceptor';
 import { RedisService } from './services/redis.service';
 import { MetricsInterceptor } from './interceptors/metrics.interceptor';
+import { OriginAuditInterceptor } from './interceptors/origin-audit.interceptor';
 import { NativeWsService } from './services/native-ws.service';
 import { initSentry } from './observability/sentry';
 import { initOpenTelemetry } from './observability/otel';
@@ -91,7 +92,17 @@ async function bootstrap() {
 
     // Global filters & interceptors
     app.useGlobalFilters(new HttpExceptionFilter());
+    // Metrics (Prometheus)
     app.useGlobalInterceptors(app.get(MetricsInterceptor));
+    // Per-request origin audit (API key, IP, UA, etc.)
+    try {
+      app.useGlobalInterceptors(app.get(OriginAuditInterceptor));
+    } catch (e) {
+      logger.warn(
+        'OriginAuditInterceptor not initialized; continuing without origin auditing',
+        e as any,
+      );
+    }
     app.useGlobalInterceptors(new RequestIdInterceptor());
     app.useGlobalInterceptors(new ResponseInterceptor());
     // Rate limiting (per API key and IP)

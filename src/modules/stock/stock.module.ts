@@ -30,6 +30,9 @@ import { InstrumentMapping } from '../../entities/instrument-mapping.entity';
 import { VortexSession } from '../../entities/vortex-session.entity';
 import { VortexInstrument } from '../../entities/vortex-instrument.entity';
 import { VortexInstrumentService } from '../../services/vortex-instrument.service';
+import { RequestAuditLog } from '../../entities/request-audit-log.entity';
+import { OriginAuditService } from '../../services/origin-audit.service';
+import { OriginAuditInterceptor } from '../../interceptors/origin-audit.interceptor';
 import { NativeWsService } from '../../services/native-ws.service';
 import { ProviderQueueService } from '../../services/provider-queue.service';
 import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
@@ -47,6 +50,7 @@ import { FnoQueryParserService } from '../../services/fno-query-parser.service';
       InstrumentMapping,
       VortexSession,
       VortexInstrument,
+      RequestAuditLog,
     ]),
     ScheduleModule.forRoot(),
   ],
@@ -75,6 +79,8 @@ import { FnoQueryParserService } from '../../services/fno-query-parser.service';
     MetricsService,
     AdminGuard,
     MetricsInterceptor,
+    OriginAuditService,
+    OriginAuditInterceptor,
     VortexValidationCronService,
     FnoQueryParserService,
   ],

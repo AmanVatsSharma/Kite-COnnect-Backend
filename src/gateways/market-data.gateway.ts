@@ -36,7 +36,12 @@ import { MarketDataProviderResolverService } from '../services/market-data-provi
 import { ApiKeyService } from '../services/api-key.service';
 import { MarketDataStreamService } from '../services/market-data-stream.service';
 import { Inject, forwardRef } from '@nestjs/common';
-import { validateSubscribePayload, validateUnsubscribePayload, validateSetModePayload } from '../utils/ws-validation';
+import {
+  validateSubscribePayload,
+  validateUnsubscribePayload,
+  validateSetModePayload,
+} from '../utils/ws-validation';
+import { OriginAuditService } from '../services/origin-audit.service';
 
 const PROTOCOL_VERSION = '2.0';
 
@@ -74,6 +79,7 @@ export class MarketDataGateway
     private apiKeyService: ApiKeyService,
     @Inject(forwardRef(() => MarketDataStreamService))
     private streamService: MarketDataStreamService,
+    private originAudit: OriginAuditService,
   ) {}
 
   /**
@@ -129,6 +135,34 @@ export class MarketDataGateway
       );
       (client.data as any).apiKey = apiKey;
       (client.data as any).apiKeyRecord = record;
+
+      // Best-effort origin audit for WS connection
+      try {
+        const { ip, userAgent, origin } = this.extractWsOriginContext(client);
+        this.originAudit
+          .recordWsEvent({
+            apiKey,
+            apiKeyId: (record as any)?.id ?? null,
+            tenantId: (record as any)?.tenant_id ?? null,
+            event: 'connect',
+            status: 101,
+            ip,
+            userAgent,
+            origin,
+            durationMs: null,
+            country: null,
+            asn: null,
+            meta: {
+              socketId: client.id,
+              namespace: client.nsp?.name,
+            },
+          })
+          .catch(() => {
+            // Swallow errors; they are logged inside the service.
+          });
+      } catch (e) {
+        this.logger.warn('WS origin audit (connect) failed', e as any);
+      }
     } catch (err) {
       this.logger.warn(
         `Connection rejected for ${client.id}: ${err?.message || err}`,
@@ -244,6 +278,36 @@ export class MarketDataGateway
       }
     } catch (e) {
       this.logger.warn(`Failed to untrack ws connection for ${client.id}`);
+    }
+
+    // Best-effort origin audit for WS disconnect
+    try {
+      const record: any = (client.data as any)?.apiKeyRecord;
+      const apiKey: string = (client.data as any)?.apiKey;
+      const { ip, userAgent, origin } = this.extractWsOriginContext(client);
+      this.originAudit
+        .recordWsEvent({
+          apiKey: apiKey || null,
+          apiKeyId: (record as any)?.id ?? null,
+          tenantId: (record as any)?.tenant_id ?? null,
+          event: 'disconnect',
+          status: 499,
+          ip,
+          userAgent,
+          origin,
+          durationMs: null,
+          country: null,
+          asn: null,
+          meta: {
+            socketId: client.id,
+            namespace: client.nsp?.name,
+          },
+        })
+        .catch(() => {
+          // Errors already logged inside the service.
+        });
+    } catch (e) {
+      this.logger.warn('WS origin audit (disconnect) failed', e as any);
     }
   }
 
@@ -1233,5 +1297,50 @@ export class MarketDataGateway
       ),
       byApiKey,
     };
+  }
+
+  /**
+   * Extract origin context (IP, UA, Origin) from a Socket.IO client handshake.
+   */
+  private extractWsOriginContext(client: Socket): {
+    ip: string | null;
+    userAgent: string | null;
+    origin: string | null;
+  } {
+    try {
+      const headers = (client.handshake && client.handshake.headers) || {};
+      const xfwd = headers['x-forwarded-for'] as string | string[] | undefined;
+      let ip: string | null = null;
+      if (Array.isArray(xfwd)) {
+        ip = xfwd[0];
+      } else if (typeof xfwd === 'string' && xfwd.length > 0) {
+        ip = xfwd.split(',')[0]?.trim() || null;
+      }
+      if (!ip) {
+        ip =
+          (client.handshake && (client.handshake.address as string)) ||
+          (client.conn && (client.conn.remoteAddress as string)) ||
+          null;
+      }
+
+      const userAgent =
+        (headers['user-agent'] as string) ||
+        (headers['User-Agent'] as string) ||
+        null;
+      const originHeader =
+        (headers['origin'] as string) ||
+        (headers['Origin'] as string) ||
+        (headers['referer'] as string) ||
+        (headers['Referer'] as string) ||
+        null;
+
+      return {
+        ip: ip || null,
+        userAgent: userAgent || null,
+        origin: originHeader || null,
+      };
+    } catch {
+      return { ip: null, userAgent: null, origin: null };
+    }
   }
 }
