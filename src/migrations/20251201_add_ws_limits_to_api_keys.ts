@@ -1,6 +1,12 @@
 import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm';
 
-export class AddWsLimitsToApiKeys20251201 implements MigrationInterface {
+// NOTE:
+// TypeORM in this project expects migration class names to end with a
+// JavaScript timestamp (ms since epoch), e.g. AddXxxYYYYMMDDHHMMSSms.
+// The exact value is not critical, but it must be a 13‑digit number.
+export class AddWsLimitsToApiKeys1764547200000 implements MigrationInterface {
+  // Explicit name field keeps TypeORM happy when reading metadata.
+  name = 'AddWsLimitsToApiKeys1764547200000';
   public async up(queryRunner: QueryRunner): Promise<void> {
     const hasSubscribe = await queryRunner.hasColumn(
       'api_keys',
