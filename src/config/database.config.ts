@@ -9,6 +9,7 @@ import { InstrumentMapping } from '../entities/instrument-mapping.entity';
 import { VortexSession } from '../entities/vortex-session.entity';
 import { VortexInstrument } from '../entities/vortex-instrument.entity';
 import { FalconInstrument } from '../modules/falcon/entities/falcon-instrument.entity';
+import { RequestAuditLog } from '../entities/request-audit-log.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -29,6 +30,7 @@ export const getDatabaseConfig = (
     VortexSession,
     VortexInstrument,
     FalconInstrument,
+    RequestAuditLog,
   ],
   // In production, prefer running migrations over synchronize
   // Override with DB_SYNCHRONIZE=true only for development
