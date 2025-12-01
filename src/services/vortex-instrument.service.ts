@@ -575,6 +575,7 @@ export class VortexInstrumentService {
     sort_order?: 'asc' | 'desc';
     detailed?: boolean; // Return minimal or full data (reserved for future use)
     skip_count?: boolean; // Skip expensive count() when only probing
+    only_active?: boolean; // When true, restrict to v.is_active = true; otherwise include all
   }): Promise<{
     instruments: VortexInstrument[];
     total: number;
@@ -591,9 +592,15 @@ export class VortexInstrumentService {
       const sortOrder = filters.sort_order || 'asc';
 
       // Build query with optimized indexes
-      const qb = this.vortexInstrumentRepo
-        .createQueryBuilder('v')
-        .where('v.is_active = :active', { active: true });
+      const qb = this.vortexInstrumentRepo.createQueryBuilder('v');
+
+      // Control whether we restrict to active instruments or not.
+      // By default, we do NOT filter by is_active, so callers see the full universe
+      // (matching vortex_instruments stats). Callers that require only active rows
+      // (e.g., validation/cleanup or strict ltp_only listings) should pass only_active=true.
+      if (filters.only_active) {
+        qb.where('v.is_active = :active', { active: true });
+      }
 
       // Symbol search with full-text search for better performance
       if (filters.query && filters.query.trim()) {
