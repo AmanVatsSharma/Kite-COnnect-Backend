@@ -3384,6 +3384,48 @@ export class StockController {
         ltp_only: ltpOnly,
       });
 
+      const parsedLabel =
+        parsed && (parsed.underlying || parsed.strike || parsed.optionType || parsed.expiryFrom)
+          ? 'yes'
+          : 'no';
+      this.metrics.foSearchRequestsTotal.inc({
+        endpoint: 'vayu_mcx_options',
+        ltp_only: String(ltpOnly),
+        parsed: parsedLabel,
+      });
+      const latencyTimer = this.metrics.foSearchLatencySeconds.startTimer({
+        endpoint: 'vayu_mcx_options',
+        ltp_only: String(ltpOnly),
+      });
+
+      const cacheKeyBase = [
+        'vayu:fno:mcx_options',
+        `under=${underlyingSymbol || 'ANY'}`,
+        `of=${effectiveOptionType || 'ANY'}`,
+        `ef=${effectiveExpiryFrom || 'ANY'}`,
+        `et=${effectiveExpiryTo || 'ANY'}`,
+        `sm=${effectiveStrikeMin ?? 'ANY'}`,
+        `sx=${effectiveStrikeMax ?? 'ANY'}`,
+        `ltp=${ltpOnly ? '1' : '0'}`,
+        `lim=${requestedLimit}`,
+        `off=${startOffset}`,
+      ].join('|');
+      const cacheKey = cacheKeyBase;
+      const foCacheTtlSec = Number(process.env.FO_CACHE_TTL_SECONDS || 2);
+
+      try {
+        const cached = await this.redisService.get<any>(cacheKey);
+        if (cached && cached.success === true) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu MCX Options Search] Cache HIT', { cacheKey });
+          latencyTimer();
+          return cached;
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[Vayu MCX Options Search] Cache READ failed (non-fatal)', (e as any)?.message);
+      }
+
       if (!ltpOnly) {
         const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
           {
@@ -3410,23 +3452,27 @@ export class StockController {
         const ltpByPair = pairs.length
           ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any)
           : {};
-        const list = result.instruments.map((i) => ({
-          token: i.token,
-          symbol: i.symbol,
-          exchange: i.exchange,
-          description: (i as any)?.description || null,
-          expiry_date: i.expiry_date,
-          option_type: i.option_type,
-          strike_price: i.strike_price,
-          last_price:
-            ltpByPair?.[
-              `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`
-            ]?.last_price ?? null,
-        }));
-        return {
+        const list = result.instruments.map((i) => {
+          const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+          const lp = ltpByPair?.[key]?.last_price ?? null;
+          const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
+          return {
+            token: i.token,
+            symbol: i.symbol,
+            exchange: i.exchange,
+            description: (i as any)?.description || null,
+            expiry_date: i.expiry_date,
+            option_type: i.option_type,
+            strike_price: i.strike_price,
+            days_to_expiry: daysToExpiry,
+            last_price: lp,
+          };
+        });
+        const ranked = this.rankFoInstruments(list, 'relevance', parsed?.strike);
+        const response = {
           success: true,
           data: {
-            instruments: list,
+            instruments: ranked,
             pagination: {
               total: result.total,
               hasMore: result.hasMore,
@@ -3435,6 +3481,19 @@ export class StockController {
             performance: { queryTime: Date.now() - t0 },
           },
         };
+        try {
+          await this.redisService.set(cacheKey, response, foCacheTtlSec);
+          // eslint-disable-next-line no-console
+          console.log('[Vayu MCX Options Search] Cache SET', {
+            cacheKey,
+            ttl: foCacheTtlSec,
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[Vayu MCX Options Search] Cache WRITE failed (non-fatal)', (e as any)?.message);
+        }
+        latencyTimer();
+        return response;
       }
 
       // Fast-path probe for ltp_only=true with single-shot LTP hydration
@@ -3478,6 +3537,7 @@ export class StockController {
           exchange: i.exchange,
           description: (i as any)?.description || null,
           expiry_date: i.expiry_date as any,
+          days_to_expiry: this.computeDaysToExpiry(i.expiry_date as any),
           option_type: i.option_type,
           strike_price: i.strike_price,
           last_price: lp,
@@ -3487,9 +3547,10 @@ export class StockController {
         (v: any) =>
           Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0),
       );
-      const sliced = filtered.slice(0, requestedLimit);
+      const ranked = this.rankFoInstruments(filtered, 'relevance', parsed?.strike);
+      const sliced = ranked.slice(0, requestedLimit);
 
-      return {
+      const response = {
         success: true,
         data: {
           instruments: sliced,
@@ -3501,6 +3562,19 @@ export class StockController {
           performance: { queryTime: Date.now() - t0 },
         },
       };
+      try {
+        await this.redisService.set(cacheKey, response, foCacheTtlSec);
+        // eslint-disable-next-line no-console
+        console.log('[Vayu MCX Options Search] Cache SET (ltp_only)', {
+          cacheKey,
+          ttl: foCacheTtlSec,
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[Vayu MCX Options Search] Cache WRITE failed (ltp_only, non-fatal)', (e as any)?.message);
+      }
+      latencyTimer();
+      return response;
     } catch (error) {
       throw new HttpException(
         {
@@ -3511,6 +3585,99 @@ export class StockController {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  /**
+   * Compute days to expiry from a Vortex expiry_date (YYYYMMDD) string.
+   * Returns null when the expiry is missing or invalid.
+   */
+  private computeDaysToExpiry(expiry?: string | null): number | null {
+    if (!expiry || typeof expiry !== 'string' || expiry.length !== 8) {
+      return null;
+    }
+    try {
+      const year = Number(expiry.substring(0, 4));
+      const month = Number(expiry.substring(4, 6));
+      const day = Number(expiry.substring(6, 8));
+      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+        return null;
+      }
+      const expDate = new Date(Date.UTC(year, month - 1, day));
+      const now = new Date();
+      const diffMs = expDate.getTime() - now.getTime();
+      const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+      return diffDays;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Simple ranking function for F&O instruments.
+   * - Primary: nearest expiry (days_to_expiry ascending; nulls last)
+   * - Secondary (options): distance of strike from targetStrike (when provided)
+   * - Tertiary: symbol then token for stability
+   */
+  private rankFoInstruments(
+    items: Array<{
+      token: number;
+      symbol: string;
+      days_to_expiry?: number | null;
+      strike_price?: number | null;
+      [key: string]: any;
+    }>,
+    sortMode: string,
+    targetStrike?: number,
+  ) {
+    const mode = (sortMode || 'relevance').toLowerCase();
+    const copy = [...items];
+
+    const strikeRef = Number.isFinite(targetStrike as any)
+      ? (targetStrike as number)
+      : undefined;
+
+    const cmpDays = (a: any, b: any) => {
+      const da = typeof a.days_to_expiry === 'number' ? a.days_to_expiry : Infinity;
+      const db = typeof b.days_to_expiry === 'number' ? b.days_to_expiry : Infinity;
+      return da - db;
+    };
+
+    const cmpStrike = (a: any, b: any) => {
+      const sa = Number(a.strike_price ?? 0);
+      const sb = Number(b.strike_price ?? 0);
+      return sa - sb;
+    };
+
+    const cmpStrikeDistance = (a: any, b: any) => {
+      if (!Number.isFinite(strikeRef as any)) return 0;
+      const da = Math.abs(Number(a.strike_price ?? 0) - (strikeRef as number));
+      const db = Math.abs(Number(b.strike_price ?? 0) - (strikeRef as number));
+      return da - db;
+    };
+
+    copy.sort((a, b) => {
+      if (mode === 'expiry') {
+        const d = cmpDays(a, b);
+        if (d !== 0) return d;
+        return cmpStrike(a, b);
+      }
+      if (mode === 'strike') {
+        const d = cmpStrike(a, b);
+        if (d !== 0) return d;
+        return cmpDays(a, b);
+      }
+      // relevance (default): nearest expiry + (when available) closest strike to target
+      let d = cmpDays(a, b);
+      if (d !== 0) return d;
+      d = cmpStrikeDistance(a, b);
+      if (d !== 0) return d;
+      // stable tie-breakers
+      const symCmp = String(a.symbol || '').localeCompare(String(b.symbol || ''));
+      if (symCmp !== 0) return symCmp;
+      return Number(a.token) - Number(b.token);
+    });
+
+    return copy;
   }
 
   @ApiTags('vayu')
