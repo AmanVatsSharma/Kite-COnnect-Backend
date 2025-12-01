@@ -2900,7 +2900,8 @@ export class StockController {
       }
 
       if (!ltpOnly) {
-        const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+        // First attempt: use parsed underlying_symbol + filters
+        let result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
           // Use exact underlying_symbol when parsed to keep DB filters index-friendly
           query: effectiveQuery,
           underlying_symbol: underlyingSymbol,
@@ -2912,7 +2913,28 @@ export class StockController {
           offset: startOffset,
           sort_by: 'expiry_date',
           sort_order: 'asc',
+          only_active: false,
         });
+
+        // Graceful fallback: if no instruments found and we had a query,
+        // retry with a looser fuzzy symbol search (query=q) and no underlying_symbol.
+        if ((!result.instruments || result.instruments.length === 0) && q && q.trim()) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu Futures Search] No rows for parsed filters, falling back to fuzzy symbol search');
+          result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+            query: q.trim(),
+            underlying_symbol: undefined,
+            exchange: exchange ? [exchange] : undefined,
+            instrument_type: ['FUTSTK', 'FUTIDX'],
+            expiry_from: effectiveExpiryFrom,
+            expiry_to: effectiveExpiryTo,
+            limit: requestedLimit,
+            offset: startOffset,
+            sort_by: 'expiry_date',
+            sort_order: 'asc',
+            only_active: false,
+          });
+        }
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
         const ltpByPair = pairs.length
           ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
@@ -2961,7 +2983,8 @@ export class StockController {
 
       // Fast single-shot probe for ltp_only=true
       const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
-      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+      // First attempt: parsed filters + only_active=true for tradable subset
+      let page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
         query: effectiveQuery,
         underlying_symbol: underlyingSymbol,
         exchange: exchange ? [exchange] : undefined,
@@ -2973,7 +2996,27 @@ export class StockController {
         skip_count: true,
         sort_by: 'expiry_date',
         sort_order: 'asc',
+        only_active: true,
       });
+
+      if ((!page.instruments || page.instruments.length === 0) && q && q.trim()) {
+        // eslint-disable-next-line no-console
+        console.log('[Vayu Futures Search] ltp_only probe empty, falling back to fuzzy symbol search');
+        page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+          query: q.trim(),
+          underlying_symbol: undefined,
+          exchange: exchange ? [exchange] : undefined,
+          instrument_type: ['FUTSTK', 'FUTIDX'],
+          expiry_from: effectiveExpiryFrom,
+          expiry_to: effectiveExpiryTo,
+          limit: probeLimit,
+          offset: startOffset,
+          skip_count: true,
+          sort_by: 'expiry_date',
+          sort_order: 'asc',
+          only_active: true,
+        });
+      }
       const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
       const ltpByPair = pairs.length
         ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
@@ -3168,7 +3211,8 @@ export class StockController {
       }
 
       if (!ltpOnly) {
-        const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+        // First attempt: parsed filters with exact underlying_symbol
+        let result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
           // Use exact underlying_symbol when parsed to keep DB filters tight and index-friendly
           query: effectiveQuery,
           underlying_symbol: underlyingSymbol,
@@ -3184,7 +3228,30 @@ export class StockController {
           offset: startOffset,
           sort_by: 'expiry_date',
           sort_order: 'asc',
+          only_active: false,
         });
+
+        if ((!result.instruments || result.instruments.length === 0) && q && q.trim()) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu Options Search] No rows for parsed filters, falling back to fuzzy symbol search');
+          result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+            query: q.trim(),
+            underlying_symbol: undefined,
+            exchange: exchange ? [exchange] : undefined,
+            instrument_type: ['OPTSTK', 'OPTIDX'],
+            option_type: effectiveOptionType,
+            expiry_from: effectiveExpiryFrom,
+            expiry_to: effectiveExpiryTo,
+            strike_min: effectiveStrikeMin,
+            strike_max: effectiveStrikeMax,
+            options_only: true,
+            limit: requestedLimit,
+            offset: startOffset,
+            sort_by: 'expiry_date',
+            sort_order: 'asc',
+            only_active: false,
+          });
+        }
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
         const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
         const parsedStrikeHint = parsed?.strike;
@@ -3231,7 +3298,8 @@ export class StockController {
 
       // Fast single-shot probe for ltp_only=true
       const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
-      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+      // First attempt: parsed filters with only_active=true for tradable subset
+      let page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
         query: effectiveQuery,
         underlying_symbol: underlyingSymbol,
         exchange: exchange ? [exchange] : undefined,
@@ -3247,7 +3315,31 @@ export class StockController {
         skip_count: true,
         sort_by: 'expiry_date',
         sort_order: 'asc',
+        only_active: true,
       });
+
+      if ((!page.instruments || page.instruments.length === 0) && q && q.trim()) {
+        // eslint-disable-next-line no-console
+        console.log('[Vayu Options Search] ltp_only probe empty, falling back to fuzzy symbol search');
+        page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+          query: q.trim(),
+          underlying_symbol: undefined,
+          exchange: exchange ? [exchange] : undefined,
+          instrument_type: ['OPTSTK', 'OPTIDX'],
+          option_type: effectiveOptionType,
+          expiry_from: effectiveExpiryFrom,
+          expiry_to: effectiveExpiryTo,
+          strike_min: effectiveStrikeMin,
+          strike_max: effectiveStrikeMax,
+          options_only: true,
+          limit: probeLimit,
+          offset: startOffset,
+          skip_count: true,
+          sort_by: 'expiry_date',
+          sort_order: 'asc',
+          only_active: true,
+        });
+      }
       const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
       const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
       const enriched = page.instruments.map((i) => {
@@ -3427,7 +3519,7 @@ export class StockController {
       }
 
       if (!ltpOnly) {
-        const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
+        let result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
           {
             query: effectiveQuery,
             underlying_symbol: underlyingSymbol,
@@ -3444,8 +3536,33 @@ export class StockController {
             offset: startOffset,
             sort_by: 'expiry_date',
             sort_order: 'asc',
+            only_active: false,
           },
         );
+
+        if ((!result.instruments || result.instruments.length === 0) && q && q.trim()) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu MCX Options Search] No rows for parsed filters, falling back to fuzzy symbol search');
+          result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
+            {
+              query: q.trim(),
+              underlying_symbol: undefined,
+              exchange: ['MCX_FO'],
+              instrument_type: undefined,
+              option_type: effectiveOptionType,
+              options_only: true,
+              expiry_from: effectiveExpiryFrom,
+              expiry_to: effectiveExpiryTo,
+              strike_min: effectiveStrikeMin,
+              strike_max: effectiveStrikeMax,
+              limit: requestedLimit,
+              offset: startOffset,
+              sort_by: 'expiry_date',
+              sort_order: 'asc',
+              only_active: false,
+            },
+          );
+        }
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
           result.instruments as any,
         );
@@ -3501,7 +3618,7 @@ export class StockController {
         500,
         Math.max(requestedLimit * 4, requestedLimit + startOffset),
       );
-      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
+      let page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
         {
           query: effectiveQuery,
           underlying_symbol: underlyingSymbol,
@@ -3518,8 +3635,34 @@ export class StockController {
           skip_count: true,
           sort_by: 'expiry_date',
           sort_order: 'asc',
+          only_active: true,
         },
       );
+
+      if ((!page.instruments || page.instruments.length === 0) && q && q.trim()) {
+        // eslint-disable-next-line no-console
+        console.log('[Vayu MCX Options Search] ltp_only probe empty, falling back to fuzzy symbol search');
+        page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
+          {
+            query: q.trim(),
+            underlying_symbol: undefined,
+            exchange: ['MCX_FO'],
+            instrument_type: undefined,
+            option_type: effectiveOptionType,
+            options_only: true,
+            expiry_from: effectiveExpiryFrom,
+            expiry_to: effectiveExpiryTo,
+            strike_min: effectiveStrikeMin,
+            strike_max: effectiveStrikeMax,
+            limit: probeLimit,
+            offset: startOffset,
+            skip_count: true,
+            sort_by: 'expiry_date',
+            sort_order: 'asc',
+            only_active: true,
+          },
+        );
+      }
       const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
         page.instruments as any,
       );
