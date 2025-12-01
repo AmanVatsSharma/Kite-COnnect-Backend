@@ -34,6 +34,7 @@ import { NativeWsService } from '../../services/native-ws.service';
 import { ProviderQueueService } from '../../services/provider-queue.service';
 import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
 import { VortexValidationCronService } from '../../services/vortex-validation.cron';
+import { FnoQueryParserService } from '../../services/fno-query-parser.service';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { VortexValidationCronService } from '../../services/vortex-validation.cr
     AdminGuard,
     MetricsInterceptor,
     VortexValidationCronService,
+    FnoQueryParserService,
   ],
   exports: [
     StockService,

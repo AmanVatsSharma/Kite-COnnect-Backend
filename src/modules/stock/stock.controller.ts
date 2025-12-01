@@ -36,6 +36,7 @@ import { ClearCacheDto } from './dto/clear-cache.dto';
 import { ValidateInstrumentsDto } from './dto/validate-instruments.dto';
 import { randomUUID } from 'crypto';
 import { RequestBatchingService } from '../../services/request-batching.service';
+import { FnoQueryParserService } from '../../services/fno-query-parser.service';
 
 // Ambient declarations to satisfy TS in environments without DOM/lib definitions
 declare const console: any;
@@ -52,6 +53,7 @@ export class StockController {
     private readonly vortexProvider: VortexProviderService,
     private readonly redisService: RedisService,
     private readonly requestBatchingService: RequestBatchingService,
+    private readonly fnoQueryParser: FnoQueryParserService,
   ) {}
 
   @Post('instruments/sync')
@@ -2827,15 +2829,38 @@ export class StockController {
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
 
+      // Parse trading-style F&O queries like "nifty 28mar 26000" or "banknifty 25jan".
+      // The parser only provides hints; explicit query params always win.
+      const parsed = q && q.trim() ? this.fnoQueryParser.parse(q) : undefined;
+      const underlyingSymbol = parsed?.underlying;
+      const effectiveQuery = underlyingSymbol ? undefined : q;
+      const effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
+      const effectiveExpiryTo = parsed?.expiryTo || expiry_to;
+
+      // Console log for easy debugging and later tuning of parsing behaviour
+      // eslint-disable-next-line no-console
+      console.log('[Vayu Futures Search]', {
+        q,
+        underlying: underlyingSymbol,
+        expiry_from: effectiveExpiryFrom,
+        expiry_to: effectiveExpiryTo,
+        exchange,
+        ltp_only: ltpOnly,
+      });
+
       if (!ltpOnly) {
         const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q,
+          // Use exact underlying_symbol when parsed to keep DB filters index-friendly
+          query: effectiveQuery,
+          underlying_symbol: underlyingSymbol,
           exchange: exchange ? [exchange] : undefined,
           instrument_type: ['FUTSTK', 'FUTIDX'],
-          expiry_from,
-          expiry_to,
+          expiry_from: effectiveExpiryFrom,
+          expiry_to: effectiveExpiryTo,
           limit: requestedLimit,
           offset: startOffset,
+          sort_by: 'expiry_date',
+          sort_order: 'asc',
         });
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
         const ltpByPair = pairs.length
@@ -2869,14 +2894,17 @@ export class StockController {
       // Fast single-shot probe for ltp_only=true
       const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
       const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-        query: q,
+        query: effectiveQuery,
+        underlying_symbol: underlyingSymbol,
         exchange: exchange ? [exchange] : undefined,
         instrument_type: ['FUTSTK', 'FUTIDX'],
-        expiry_from,
-        expiry_to,
+        expiry_from: effectiveExpiryFrom,
+        expiry_to: effectiveExpiryTo,
         limit: probeLimit,
         offset: startOffset,
         skip_count: true,
+        sort_by: 'expiry_date',
+        sort_order: 'asc',
       });
       const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
       const ltpByPair = pairs.length
@@ -2967,18 +2995,60 @@ export class StockController {
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
 
+      // Parse trading-style options queries like "nifty 26000 ce" or "banknifty 45000 pe".
+      const parsed = q && q.trim() ? this.fnoQueryParser.parse(q) : undefined;
+      const underlyingSymbol = parsed?.underlying;
+
+      let effectiveQuery = underlyingSymbol ? undefined : q;
+      let effectiveOptionType: 'CE' | 'PE' | undefined = option_type;
+      let effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
+      let effectiveExpiryTo = parsed?.expiryTo || expiry_to;
+      let effectiveStrikeMin = strike_min;
+      let effectiveStrikeMax = strike_max;
+
+      // Only use parsed hints when explicit query params are not provided
+      if (!effectiveOptionType && parsed?.optionType) {
+        effectiveOptionType = parsed.optionType;
+      }
+      if (
+        parsed?.strike !== undefined &&
+        effectiveStrikeMin === undefined &&
+        effectiveStrikeMax === undefined
+      ) {
+        effectiveStrikeMin = parsed.strike;
+        effectiveStrikeMax = parsed.strike;
+      }
+
+      // Console log for easy debugging of parsing behaviour and downstream filters
+      // eslint-disable-next-line no-console
+      console.log('[Vayu Options Search]', {
+        q,
+        underlying: underlyingSymbol,
+        strike: parsed?.strike,
+        option_type: effectiveOptionType,
+        expiry_from: effectiveExpiryFrom,
+        expiry_to: effectiveExpiryTo,
+        exchange,
+        ltp_only: ltpOnly,
+      });
+
       if (!ltpOnly) {
         const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q,
+          // Use exact underlying_symbol when parsed to keep DB filters tight and index-friendly
+          query: effectiveQuery,
+          underlying_symbol: underlyingSymbol,
           exchange: exchange ? [exchange] : undefined,
           instrument_type: ['OPTSTK', 'OPTIDX'],
-          option_type,
-          expiry_from,
-          expiry_to,
-          strike_min,
-          strike_max,
+          option_type: effectiveOptionType,
+          expiry_from: effectiveExpiryFrom,
+          expiry_to: effectiveExpiryTo,
+          strike_min: effectiveStrikeMin,
+          strike_max: effectiveStrikeMax,
+          options_only: true,
           limit: requestedLimit,
           offset: startOffset,
+          sort_by: 'expiry_date',
+          sort_order: 'asc',
         });
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
         const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
@@ -3009,17 +3079,21 @@ export class StockController {
       // Fast single-shot probe for ltp_only=true
       const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
       const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-        query: q,
+        query: effectiveQuery,
+        underlying_symbol: underlyingSymbol,
         exchange: exchange ? [exchange] : undefined,
         instrument_type: ['OPTSTK', 'OPTIDX'],
-        option_type,
-        expiry_from,
-        expiry_to,
-        strike_min,
-        strike_max,
+        option_type: effectiveOptionType,
+        expiry_from: effectiveExpiryFrom,
+        expiry_to: effectiveExpiryTo,
+        strike_min: effectiveStrikeMin,
+        strike_max: effectiveStrikeMax,
+        options_only: true,
         limit: probeLimit,
         offset: startOffset,
         skip_count: true,
+        sort_by: 'expiry_date',
+        sort_order: 'asc',
       });
       const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
       const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
@@ -3058,6 +3132,213 @@ export class StockController {
           success: false,
           message: 'Failed to get options',
           error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @ApiTags('vayu')
+  @Get('vayu/mcx-options')
+  @ApiOperation({ summary: 'Get Vayu MCX options with trading-style search' })
+  @ApiQuery({ name: 'q', required: false, description: 'Trading-style search (e.g., \"gold 62000 ce\")' })
+  @ApiQuery({ name: 'option_type', required: false, enum: ['CE', 'PE'] })
+  @ApiQuery({
+    name: 'expiry_from',
+    required: false,
+    description: 'Expiry date from (YYYYMMDD)',
+  })
+  @ApiQuery({
+    name: 'expiry_to',
+    required: false,
+    description: 'Expiry date to (YYYYMMDD)',
+  })
+  @ApiQuery({ name: 'strike_min', required: false, type: Number })
+  @ApiQuery({ name: 'strike_max', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: true,
+    description: 'If true, only instruments with a valid last_price are returned',
+  })
+  async getVortexMcxOptions(
+    @Query('q') q?: string,
+    @Query('option_type') option_type?: 'CE' | 'PE',
+    @Query('expiry_from') expiry_from?: string,
+    @Query('expiry_to') expiry_to?: string,
+    @Query('strike_min') strike_min?: number,
+    @Query('strike_max') strike_max?: number,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+  ) {
+    try {
+      const t0 = Date.now();
+      const requestedLimit = limit ? parseInt(limit.toString()) : 50;
+      const startOffset = offset ? parseInt(offset.toString()) : 0;
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+
+      // Parse trading-style MCX options queries like "gold 62000 ce"
+      const parsed = q && q.trim() ? this.fnoQueryParser.parse(q) : undefined;
+      const underlyingSymbol = parsed?.underlying;
+
+      let effectiveQuery = underlyingSymbol ? undefined : q;
+      let effectiveOptionType: 'CE' | 'PE' | undefined = option_type;
+      let effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
+      let effectiveExpiryTo = parsed?.expiryTo || expiry_to;
+      let effectiveStrikeMin = strike_min;
+      let effectiveStrikeMax = strike_max;
+
+      if (!effectiveOptionType && parsed?.optionType) {
+        effectiveOptionType = parsed.optionType;
+      }
+      if (
+        parsed?.strike !== undefined &&
+        effectiveStrikeMin === undefined &&
+        effectiveStrikeMax === undefined
+      ) {
+        effectiveStrikeMin = parsed.strike;
+        effectiveStrikeMax = parsed.strike;
+      }
+
+      // Console log for debugging MCX options parsing and filters
+      // eslint-disable-next-line no-console
+      console.log('[Vayu MCX Options Search]', {
+        q,
+        underlying: underlyingSymbol,
+        strike: parsed?.strike,
+        option_type: effectiveOptionType,
+        expiry_from: effectiveExpiryFrom,
+        expiry_to: effectiveExpiryTo,
+        ltp_only: ltpOnly,
+      });
+
+      if (!ltpOnly) {
+        const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
+          {
+            query: effectiveQuery,
+            underlying_symbol: underlyingSymbol,
+            exchange: ['MCX_FO'],
+            // Do not constrain instrument_name: rely on option_type / options_only to distinguish from futures
+            instrument_type: undefined,
+            option_type: effectiveOptionType,
+            options_only: true,
+            expiry_from: effectiveExpiryFrom,
+            expiry_to: effectiveExpiryTo,
+            strike_min: effectiveStrikeMin,
+            strike_max: effectiveStrikeMax,
+            limit: requestedLimit,
+            offset: startOffset,
+            sort_by: 'expiry_date',
+            sort_order: 'asc',
+          },
+        );
+        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+          result.instruments as any,
+        );
+        const ltpByPair = pairs.length
+          ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any)
+          : {};
+        const list = result.instruments.map((i) => ({
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          description: (i as any)?.description || null,
+          expiry_date: i.expiry_date,
+          option_type: i.option_type,
+          strike_price: i.strike_price,
+          last_price:
+            ltpByPair?.[
+              `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`
+            ]?.last_price ?? null,
+        }));
+        return {
+          success: true,
+          data: {
+            instruments: list,
+            pagination: {
+              total: result.total,
+              hasMore: result.hasMore,
+            },
+            ltp_only: false,
+            performance: { queryTime: Date.now() - t0 },
+          },
+        };
+      }
+
+      // Fast-path probe for ltp_only=true with single-shot LTP hydration
+      const probeLimit = Math.min(
+        500,
+        Math.max(requestedLimit * 4, requestedLimit + startOffset),
+      );
+      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
+        {
+          query: effectiveQuery,
+          underlying_symbol: underlyingSymbol,
+          exchange: ['MCX_FO'],
+          instrument_type: undefined,
+          option_type: effectiveOptionType,
+          options_only: true,
+          expiry_from: effectiveExpiryFrom,
+          expiry_to: effectiveExpiryTo,
+          strike_min: effectiveStrikeMin,
+          strike_max: effectiveStrikeMax,
+          limit: probeLimit,
+          offset: startOffset,
+          skip_count: true,
+          sort_by: 'expiry_date',
+          sort_order: 'asc',
+        },
+      );
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+        page.instruments as any,
+      );
+      const ltpByPair = pairs.length
+        ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any)
+        : {};
+      const enriched = page.instruments.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(
+          i.token,
+        )}`;
+        const lp = ltpByPair?.[key]?.last_price ?? null;
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          description: (i as any)?.description || null,
+          expiry_date: i.expiry_date as any,
+          option_type: i.option_type,
+          strike_price: i.strike_price,
+          last_price: lp,
+        };
+      });
+      const filtered = enriched.filter(
+        (v: any) =>
+          Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0),
+      );
+      const sliced = filtered.slice(0, requestedLimit);
+
+      return {
+        success: true,
+        data: {
+          instruments: sliced,
+          pagination: {
+            total: undefined,
+            hasMore: page.hasMore,
+          },
+          ltp_only: true,
+          performance: { queryTime: Date.now() - t0 },
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to get MCX options',
+          error: (error as any)?.message || error,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );

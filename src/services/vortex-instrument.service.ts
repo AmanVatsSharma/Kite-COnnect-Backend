@@ -559,10 +559,12 @@ export class VortexInstrumentService {
    * Optimized for handling 200K+ instruments efficiently
    */
   async searchVortexInstrumentsAdvanced(filters: {
-    query?: string; // Symbol search
+    query?: string; // Free-text symbol search (matches v.symbol via ILIKE / FTS)
+    underlying_symbol?: string; // Exact underlying symbol (e.g., NIFTY, BANKNIFTY, GOLD)
     exchange?: string[]; // Multiple exchanges
     instrument_type?: string[]; // EQUITIES, OPTSTK, OPTIDX, etc.
     option_type?: 'CE' | 'PE'; // For options
+    options_only?: boolean; // If true, restrict to rows with option_type IS NOT NULL
     expiry_from?: string; // YYYYMMDD
     expiry_to?: string; // YYYYMMDD
     strike_min?: number;
@@ -571,7 +573,7 @@ export class VortexInstrumentService {
     offset?: number;
     sort_by?: 'symbol' | 'strike_price' | 'expiry_date';
     sort_order?: 'asc' | 'desc';
-    detailed?: boolean; // Return minimal or full data
+    detailed?: boolean; // Return minimal or full data (reserved for future use)
     skip_count?: boolean; // Skip expensive count() when only probing
   }): Promise<{
     instruments: VortexInstrument[];
@@ -611,6 +613,14 @@ export class VortexInstrumentService {
         }
       }
 
+      // Exact underlying symbol filter (used by trading-style F&O search)
+      if (filters.underlying_symbol && filters.underlying_symbol.trim()) {
+        const underlying = filters.underlying_symbol.trim().toUpperCase();
+        qb.andWhere('v.symbol = :underlyingSymbol', {
+          underlyingSymbol: underlying,
+        });
+      }
+
       // Exchange filtering
       if (filters.exchange && filters.exchange.length > 0) {
         qb.andWhere('v.exchange IN (:...exchanges)', {
@@ -630,6 +640,9 @@ export class VortexInstrumentService {
         qb.andWhere('v.option_type = :optionType', {
           optionType: filters.option_type,
         });
+      }
+      if (filters.options_only) {
+        qb.andWhere('v.option_type IS NOT NULL');
       }
 
       // Expiry date range filtering
