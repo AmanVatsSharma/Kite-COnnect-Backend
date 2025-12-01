@@ -3587,6 +3587,337 @@ export class StockController {
     }
   }
 
+  @ApiTags('vayu')
+  @Get('vayu/fno/autocomplete')
+  @ApiOperation({ summary: 'Autocomplete for NSE/MCX F&O underlyings' })
+  @ApiQuery({
+    name: 'q',
+    required: true,
+    description: 'Partial underlying / symbol (e.g., NIFTY, BANK, GOLD)',
+  })
+  @ApiQuery({
+    name: 'scope',
+    required: false,
+    enum: ['nse', 'mcx', 'all'],
+    description: 'Limit results to NSE, MCX, or all F&O underlyings',
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async autocompleteFo(
+    @Query('q') q: string,
+    @Query('scope') scope?: 'nse' | 'mcx' | 'all',
+    @Query('limit') limitRaw?: number,
+  ) {
+    try {
+      const limit = Math.min(Number(limitRaw || 10), 50);
+      const trimmed = String(q || '').trim();
+      if (!trimmed) {
+        return {
+          success: true,
+          data: { suggestions: [], performance: { queryTime: 0 } },
+        };
+      }
+      const parsed = this.fnoQueryParser.parse(trimmed);
+      const baseQuery = parsed.underlying || trimmed.toUpperCase();
+      const scopeNorm = (scope || 'all').toLowerCase();
+      const t0 = Date.now();
+
+      const timer = this.metrics.foSearchLatencySeconds.startTimer({
+        endpoint: 'vayu_fno_autocomplete',
+        ltp_only: 'false',
+      });
+      this.metrics.foSearchRequestsTotal.inc({
+        endpoint: 'vayu_fno_autocomplete',
+        ltp_only: 'false',
+        parsed:
+          parsed && (parsed.underlying || parsed.strike || parsed.optionType || parsed.expiryFrom)
+            ? 'yes'
+            : 'no',
+      });
+
+      const cacheKey = [
+        'vayu:fno:autocomplete',
+        `q=${baseQuery}`,
+        `scope=${scopeNorm}`,
+        `lim=${limit}`,
+      ].join('|');
+      const cacheTtl = Number(process.env.FO_CACHE_TTL_SECONDS || 2);
+
+      try {
+        const cached = await this.redisService.get<any>(cacheKey);
+        if (cached && cached.success === true) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu F&O Autocomplete] Cache HIT', { cacheKey });
+          timer();
+          return cached;
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[Vayu F&O Autocomplete] Cache READ failed (non-fatal)',
+          (e as any)?.message,
+        );
+      }
+
+      const { suggestions, queryTime } =
+        await this.vortexInstrumentService.getVortexAutocompleteCached(
+          baseQuery,
+          limit * 4,
+        );
+
+      const foTypes = new Set([
+        'FUTSTK',
+        'FUTIDX',
+        'FUTCUR',
+        'FUTCOM',
+        'OPTSTK',
+        'OPTIDX',
+        'OPTCUR',
+      ]);
+
+      const scoped = (suggestions || []).filter((s: any) => {
+        if (!foTypes.has(String(s.instrument_name || '').toUpperCase())) return false;
+        const ex = String(s.exchange || '').toUpperCase();
+        if (scopeNorm === 'nse') return ex.startsWith('NSE');
+        if (scopeNorm === 'mcx') return ex === 'MCX_FO';
+        return true;
+      });
+
+      // Deduplicate by symbol, keep first occurrence
+      const seen = new Set<string>();
+      const deduped: Array<{
+        token: number;
+        symbol: string;
+        exchange: string;
+        instrument_name: string;
+      }> = [];
+      for (const s of scoped) {
+        const sym = String(s.symbol || '').toUpperCase();
+        if (!sym || seen.has(sym)) continue;
+        seen.add(sym);
+        deduped.push({
+          token: s.token,
+          symbol: sym,
+          exchange: s.exchange,
+          instrument_name: s.instrument_name,
+        });
+        if (deduped.length >= limit) break;
+      }
+
+      const response = {
+        success: true,
+        data: {
+          suggestions: deduped,
+          performance: { queryTime: queryTime ?? Date.now() - t0 },
+        },
+      };
+      try {
+        await this.redisService.set(cacheKey, response, cacheTtl);
+        // eslint-disable-next-line no-console
+        console.log('[Vayu F&O Autocomplete] Cache SET', {
+          cacheKey,
+          ttl: cacheTtl,
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[Vayu F&O Autocomplete] Cache WRITE failed (non-fatal)',
+          (e as any)?.message,
+        );
+      }
+      timer();
+      return response;
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to autocomplete F&O underlyings',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @ApiTags('vayu')
+  @Get('vayu/underlyings/:symbol/futures')
+  @ApiOperation({
+    summary: 'List futures for a given underlying, grouped by expiry',
+  })
+  @ApiQuery({
+    name: 'exchange',
+    required: false,
+    description: 'Optional exchange filter (e.g., NSE_FO)',
+  })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: true,
+    description: 'If true, only contracts with valid last_price are returned',
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  async getUnderlyingFutures(
+    @Param('symbol') symbol: string,
+    @Query('exchange') exchange?: string,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+    @Query('limit') limitRaw?: number,
+    @Query('offset') offsetRaw?: number,
+  ) {
+    try {
+      const baseSymbol = String(symbol || '').trim().toUpperCase();
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+      const limit = Math.min(Number(limitRaw || 100), 500);
+      const offset = Number(offsetRaw || 0);
+      const t0 = Date.now();
+
+      const timer = this.metrics.foSearchLatencySeconds.startTimer({
+        endpoint: 'vayu_underlyings_futures',
+        ltp_only: String(ltpOnly),
+      });
+      this.metrics.foSearchRequestsTotal.inc({
+        endpoint: 'vayu_underlyings_futures',
+        ltp_only: String(ltpOnly),
+        parsed: 'no',
+      });
+
+      const cacheKey = [
+        'vayu:fno:underlying:futures',
+        `sym=${baseSymbol}`,
+        `ex=${exchange || 'ANY'}`,
+        `ltp=${ltpOnly ? '1' : '0'}`,
+        `lim=${limit}`,
+        `off=${offset}`,
+      ].join('|');
+      const ttl = Number(process.env.FO_CACHE_TTL_SECONDS || 2);
+
+      try {
+        const cached = await this.redisService.get<any>(cacheKey);
+        if (cached && cached.success === true) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu Underlying Futures] Cache HIT', { cacheKey });
+          timer();
+          return cached;
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[Vayu Underlying Futures] Cache READ failed (non-fatal)',
+          (e as any)?.message,
+        );
+      }
+
+      const result =
+        await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+          query: undefined,
+          underlying_symbol: baseSymbol,
+          exchange: exchange ? [exchange] : undefined,
+          instrument_type: ['FUTSTK', 'FUTIDX'],
+          limit,
+          offset,
+          sort_by: 'expiry_date',
+          sort_order: 'asc',
+        });
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+        result.instruments as any,
+      );
+      const ltpByPair = pairs.length
+        ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any)
+        : {};
+
+      const contracts = result.instruments.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = ltpByPair?.[key]?.last_price ?? null;
+        const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          description: (i as any)?.description || null,
+          expiry_date: i.expiry_date,
+          instrument_name: i.instrument_name,
+          tick: (i as any)?.tick,
+          lot_size: (i as any)?.lot_size,
+          days_to_expiry: daysToExpiry,
+          last_price: lp,
+        };
+      });
+
+      const filtered = ltpOnly
+        ? contracts.filter(
+            (c: any) =>
+              Number.isFinite(c?.last_price) && ((c?.last_price ?? 0) > 0),
+          )
+        : contracts;
+
+      // Group by expiry date for easy options-chain style UIs
+      const groups: Record<string, any[]> = {};
+      for (const c of filtered) {
+        const exp = String(c.expiry_date || 'NA');
+        if (!groups[exp]) groups[exp] = [];
+        groups[exp].push(c);
+      }
+      const expiries = Object.keys(groups).sort();
+
+      const response = {
+        success: true,
+        data: {
+          symbol: baseSymbol,
+          expiries,
+          groups,
+          pagination: {
+            total: result.total,
+            hasMore: result.hasMore,
+          },
+          ltp_only: ltpOnly,
+          performance: { queryTime: Date.now() - t0 },
+        },
+      };
+      try {
+        await this.redisService.set(cacheKey, response, ttl);
+        // eslint-disable-next-line no-console
+        console.log('[Vayu Underlying Futures] Cache SET', { cacheKey, ttl });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[Vayu Underlying Futures] Cache WRITE failed (non-fatal)',
+          (e as any)?.message,
+        );
+      }
+      timer();
+      return response;
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to get underlying futures',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @ApiTags('vayu')
+  @Get('vayu/underlyings/:symbol/options')
+  @ApiOperation({
+    summary: 'List options for a given underlying (options chain view)',
+  })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: true,
+    description: 'If true, only strikes with valid LTP are kept in the chain',
+  })
+  async getUnderlyingOptions(
+    @Param('symbol') symbol: string,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+  ) {
+    // This endpoint is a thin alias over the existing options chain endpoint,
+    // keeping the same semantics while providing a more discoverable path.
+    return this.getVortexOptionsChain(symbol, ltpOnlyRaw);
+  }
+
   /**
    * Compute days to expiry from a Vortex expiry_date (YYYYMMDD) string.
    * Returns null when the expiry is missing or invalid.
