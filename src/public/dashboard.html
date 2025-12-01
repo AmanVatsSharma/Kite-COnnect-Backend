@@ -1454,20 +1454,98 @@
       console.log(`Toggle API key ${key} to ${activate ? 'active' : 'inactive'}`);
     }
 
-    // Initialize dashboard
-    refreshStatus();
-    updateCharts();
-    loadSessions();
-
-    // Auto-refresh every 5 seconds
-    setInterval(() => {
-      if (!logPaused) {
-        refreshStatus();
+    // Dashboard helpers
+    async function refreshStatus() {
+      try {
+        await Promise.all([fetchSystemStats(), fetchHealthStatus()]);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[Dashboard] refreshStatus failed', error);
       }
-    }, 5000);
+    }
 
-    // Auto-refresh charts every 30 seconds
-    setInterval(updateCharts, 30000);
+    function updateCharts() {
+      try {
+        const nowLabel = new Date().toLocaleTimeString();
+        // Simple demo: reuse current connection count in charts if available
+        const connectionsEl = document.getElementById('total-connections');
+        const currentConnections = connectionsEl
+          ? Number(connectionsEl.textContent || '0') || 0
+          : 0;
+
+        if (charts.connections) {
+          const ds = charts.connections.data.datasets[0].data;
+          const labels = charts.connections.data.labels;
+          labels.push(nowLabel);
+          ds.push(currentConnections);
+          if (labels.length > 30) {
+            labels.shift();
+            ds.shift();
+          }
+          charts.connections.update('none');
+        }
+
+        if (charts.tickRate) {
+          const ds = charts.tickRate.data.datasets[0].data;
+          const labels = charts.tickRate.data.labels;
+          labels.push(nowLabel);
+          // Placeholder: tick rate not wired yet – keep as 0 for now
+          ds.push(0);
+          if (labels.length > 30) {
+            labels.shift();
+            ds.shift();
+          }
+          charts.tickRate.update('none');
+        }
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[Dashboard] updateCharts failed', error);
+      }
+    }
+
+    async function loadSessions() {
+      // Placeholder implementation:
+      // In the future, this can call a dedicated admin endpoint to list sessions.
+      // For now, we just log once so the function exists and does not break the UI.
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[Dashboard] loadSessions placeholder invoked');
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[Dashboard] loadSessions failed', error);
+      }
+    }
+
+    // Initialize dashboard once DOM is ready
+    window.addEventListener('DOMContentLoaded', () => {
+      try {
+        initCharts();
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[Dashboard] initCharts failed', error);
+      }
+
+      refreshStatus();
+      loadSessions();
+      updateCharts();
+
+      // Auto-refresh every 5 seconds
+      setInterval(() => {
+        if (!logPaused) {
+          refreshStatus();
+        }
+      }, 5000);
+
+      // Auto-refresh charts every 30 seconds
+      setInterval(() => {
+        try {
+          updateCharts();
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error('[Dashboard] periodic updateCharts failed', error);
+        }
+      }, 30000);
+    });
 
   </script>
 </body>
