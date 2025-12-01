@@ -84,6 +84,7 @@ import { FnoQueryParserService } from '../../services/fno-query-parser.service';
     MarketDataStreamService,
     VortexInstrumentService,
     KiteProviderService,
+    ApiKeyService,
   ],
 })
 export class StockModule {}
