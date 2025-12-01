@@ -98,14 +98,13 @@ export class FnoQueryParserService {
       }
     }
 
-    // 2) Detect strike as the first reasonably sized numeric token
+    // 2) Detect strike as the first reasonably sized numeric token.
+    //    Supports relaxed formats like \"26k\" (→ 26000) in addition to plain numbers.
     for (const token of tokens) {
-      const n = Number(token.replace(/[^\d.]/g, ''));
-      if (!Number.isFinite(n)) continue;
-      // Ignore obviously tiny or unrealistic values (defensive guard)
-      if (n <= 1) continue;
+      const parsedStrike = this.parseStrikeToken(token);
+      if (parsedStrike === null) continue;
       // Only take the first candidate; callers can always override via query params
-      strike = n;
+      strike = parsedStrike;
       break;
     }
 
@@ -124,7 +123,8 @@ export class FnoQueryParserService {
       const alpha = t.replace(/[^A-Z]/g, '');
       if (!alpha) continue;
 
-      underlying = alpha;
+      // Normalize common aliases to their canonical underlying (e.g., NIFTY50 -> NIFTY).
+      underlying = this.normalizeUnderlying(alpha);
       break;
     }
 
@@ -164,8 +164,13 @@ export class FnoQueryParserService {
   private parseExpiryToken(
     rawToken: string,
   ): { from: string; to: string } | null {
-    const token = rawToken.replace(/[^A-Z0-9]/g, '').toUpperCase();
+    // Normalize token and strip separator noise
+    let token = rawToken.replace(/[^A-Z0-9]/g, '').toUpperCase();
     if (!token) return null;
+
+    // Weekly expiries sometimes carry a trailing W and digit (e.g., 28MAR24W4).
+    // Strip the W-suffix before pattern matching; expiry window is still based on date only.
+    token = token.replace(/W\d+$/i, '');
 
     // YYYYMMDD
     if (/^\d{8}$/.test(token)) {
@@ -267,6 +272,50 @@ export class FnoQueryParserService {
     if (year >= 0 && year <= 79) return 2000 + year;
     if (year >= 80 && year <= 99) return 1900 + year;
     return year;
+  }
+
+  /**
+   * Parse a potential strike token into a numeric strike, handling relaxed formats.
+   *
+   * Supported examples:
+   * - \"26000\"      → 26000
+   * - \"26K\" / \"26k\"   → 26000
+   * - \"26.5K\"      → 26500
+   *
+   * Returns null when the token does not look like a reasonable strike.
+   */
+  private parseStrikeToken(token: string): number | null {
+    const raw = String(token || '').toUpperCase();
+    if (!raw) return null;
+
+    // 26K / 26.5K style shorthand
+    const kMatch = raw.match(/^(\d+(?:\.\d+)?)[K]$/);
+    if (kMatch) {
+      const base = Number(kMatch[1]);
+      if (!Number.isFinite(base)) return null;
+      const value = base * 1000;
+      return value > 1 ? value : null;
+    }
+
+    // Fallback: strip non-digits (and dot) and parse as plain number
+    const n = Number(raw.replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(n)) return null;
+    if (n <= 1) return null;
+    return n;
+  }
+
+  /**
+   * Normalize underlying aliases to canonical symbols.
+   * This is intentionally conservative to avoid surprising remaps.
+   */
+  private normalizeUnderlying(symbol: string): string {
+    const s = (symbol || '').toUpperCase();
+    const aliases: Record<string, string> = {
+      // NIFTY index
+      NIFTY50: 'NIFTY',
+      // Other well-known underlyings can be added here as we see real-world usage
+    };
+    return aliases[s] || s;
   }
 }
 
