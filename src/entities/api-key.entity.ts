@@ -32,6 +32,17 @@ export class ApiKey {
   @Column({ type: 'int', default: 2000 })
   connection_limit: number;
 
+  // Optional per-API-key WebSocket event rate limits (requests per second).
+  // When null, global process.env-based defaults are used.
+  @Column({ type: 'int', nullable: true })
+  ws_subscribe_rps: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  ws_unsubscribe_rps: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  ws_mode_rps: number | null;
+
   @Column({ type: 'json', nullable: true })
   metadata: any;
 

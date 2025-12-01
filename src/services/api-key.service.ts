@@ -131,25 +131,57 @@ export class ApiKeyService {
     }
   }
 
-  // Simple per-event rate limiter (RPS) using 1-second buckets in Redis
-  // Returns null if allowed; otherwise returns { retry_after_ms }
+  // Simple per-event rate limiter (RPS) using 1-second buckets in Redis.
+  // - Scope is per logical owner (API key), not per socket.
+  // - Returns null if allowed; otherwise returns { retry_after_ms }.
   async checkWsRateLimit(
-    socketId: string,
+    scopeId: string,
     event: string,
     rpsLimit: number,
   ): Promise<{ retry_after_ms: number } | null> {
     if (!rpsLimit || rpsLimit <= 0) return null;
+    if (!scopeId) return null;
+
     const now = Math.floor(Date.now() / 1000);
-    const bucketKey = `ws:rate:${socketId}:${event}:${now}`;
-    const count = await this.redisService.incr(bucketKey);
-    if (count === 1) {
-      await this.redisService.expire(bucketKey, 2);
+    const bucketKey = `ws:rate:${scopeId}:${event}:${now}`;
+
+    try {
+      const count = await this.redisService.incr(bucketKey);
+      if (count === 1) {
+        await this.redisService.expire(bucketKey, 2);
+      }
+      if (count > rpsLimit) {
+        const retry_after_ms = 1000 - (Date.now() % 1000);
+        // eslint-disable-next-line no-console
+        console.log(
+          '[ApiKeyService] WS rate limit exceeded',
+          JSON.stringify({
+            scopeId,
+            event,
+            rpsLimit,
+            bucketKey,
+            count,
+            retry_after_ms,
+          }),
+        );
+        return { retry_after_ms };
+      }
+      return null;
+    } catch (err) {
+      // Infra failure – do not block the WS event; just log.
+      // eslint-disable-next-line no-console
+      console.error(
+        '[ApiKeyService] Failed to evaluate WS rate limit – continuing without throttling',
+        {
+          scopeId,
+          event,
+          rpsLimit,
+          bucketKey,
+          error: (err as any)?.message ?? err,
+        },
+      );
+      return null;
     }
-    if (count > rpsLimit) {
-      const retry_after_ms = 1000 - (Date.now() % 1000);
-      return { retry_after_ms };
-    }
-    return null;
   }
 
   private buildMinuteBucketKey(prefix: string, key: string): string {
