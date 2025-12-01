@@ -16,7 +16,6 @@ import {
   ApiBody,
   ApiParam,
 } from '@nestjs/swagger';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiKey } from '../entities/api-key.entity';
 import { AdminGuard } from '../guards/admin.guard';
