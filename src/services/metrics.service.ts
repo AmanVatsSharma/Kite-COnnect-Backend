@@ -17,6 +17,8 @@ export class MetricsService {
   readonly ltpCacheHitTotal: Counter;
   readonly ltpCacheMissTotal: Counter;
   readonly providerQueueDepth: Gauge;
+  readonly foSearchRequestsTotal: Counter;
+  readonly foSearchLatencySeconds: Histogram;
 
   constructor() {
     collectDefaultMetrics({ register });
@@ -72,6 +74,21 @@ export class MetricsService {
       name: 'ltp_cache_miss_total',
       help: 'LTP cache misses by layer',
       labelNames: ['layer'],
+      registers: [register],
+    });
+
+    // F&O search metrics
+    this.foSearchRequestsTotal = new Counter({
+      name: 'fo_search_requests_total',
+      help: 'Total F&O search requests',
+      labelNames: ['endpoint', 'ltp_only', 'parsed'],
+      registers: [register],
+    });
+    this.foSearchLatencySeconds = new Histogram({
+      name: 'fo_search_latency_seconds',
+      help: 'F&O search latency in seconds',
+      labelNames: ['endpoint', 'ltp_only'],
+      buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
       registers: [register],
     });
   }

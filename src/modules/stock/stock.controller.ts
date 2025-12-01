@@ -55,6 +55,7 @@ export class StockController {
     private readonly redisService: RedisService,
     private readonly requestBatchingService: RequestBatchingService,
     private readonly fnoQueryParser: FnoQueryParserService,
+    private readonly metrics: MetricsService,
   ) {}
 
   @Post('instruments/sync')
