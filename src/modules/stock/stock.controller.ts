@@ -36,6 +36,7 @@ import { ClearCacheDto } from './dto/clear-cache.dto';
 import { ValidateInstrumentsDto } from './dto/validate-instruments.dto';
 import { randomUUID } from 'crypto';
 import { RequestBatchingService } from '../../services/request-batching.service';
+import { MetricsService } from '../../services/metrics.service';
 import { FnoQueryParserService } from '../../services/fno-query-parser.service';
 
 // Ambient declarations to satisfy TS in environments without DOM/lib definitions
