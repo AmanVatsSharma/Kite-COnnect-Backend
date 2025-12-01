@@ -2816,6 +2816,12 @@ export class StockController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: ['relevance', 'expiry', 'strike'],
+    description: 'Sort mode: relevance (default), expiry, or strike',
+  })
   async getVortexFutures(
     @Query('q') q?: string,
     @Query('exchange') exchange?: string,
@@ -2824,12 +2830,14 @@ export class StockController {
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+    @Query('sort') sort?: 'relevance' | 'expiry' | 'strike',
   ) {
     try {
       const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const sortMode = (sort || 'relevance').toString().toLowerCase();
 
       // Parse trading-style F&O queries like "nifty 28mar 26000" or "banknifty 25jan".
       // The parser only provides hints; explicit query params always win.
@@ -2850,6 +2858,47 @@ export class StockController {
         ltp_only: ltpOnly,
       });
 
+      const parsedLabel =
+        parsed && (parsed.underlying || parsed.strike || parsed.optionType || parsed.expiryFrom)
+          ? 'yes'
+          : 'no';
+      this.metrics.foSearchRequestsTotal.inc({
+        endpoint: 'vayu_futures',
+        ltp_only: String(ltpOnly),
+        parsed: parsedLabel,
+      });
+      const latencyTimer = this.metrics.foSearchLatencySeconds.startTimer({
+        endpoint: 'vayu_futures',
+        ltp_only: String(ltpOnly),
+      });
+
+      const cacheKeyBase = [
+        'vayu:fno:futures',
+        `under=${underlyingSymbol || 'ANY'}`,
+        `ex=${exchange || 'ANY'}`,
+        `ef=${effectiveExpiryFrom || 'ANY'}`,
+        `et=${effectiveExpiryTo || 'ANY'}`,
+        `ltp=${ltpOnly ? '1' : '0'}`,
+        `lim=${requestedLimit}`,
+        `off=${startOffset}`,
+        `sort=${sortMode}`,
+      ].join('|');
+      const cacheKey = cacheKeyBase;
+      const foCacheTtlSec = Number(process.env.FO_CACHE_TTL_SECONDS || 2);
+
+      try {
+        const cached = await this.redisService.get<any>(cacheKey);
+        if (cached && cached.success === true) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu Futures Search] Cache HIT', { cacheKey });
+          latencyTimer();
+          return cached;
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[Vayu Futures Search] Cache READ failed (non-fatal)', (e as any)?.message);
+      }
+
       if (!ltpOnly) {
         const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
           // Use exact underlying_symbol when parsed to keep DB filters index-friendly
@@ -2868,21 +2917,28 @@ export class StockController {
         const ltpByPair = pairs.length
           ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
           : {};
-        const list = result.instruments.map((i) => ({
-          token: i.token,
-          symbol: i.symbol,
-          exchange: i.exchange,
-          description: (i as any)?.description || null,
-          expiry_date: i.expiry_date,
-          instrument_name: i.instrument_name,
-          tick: (i as any)?.tick,
-          lot_size: (i as any)?.lot_size,
-          last_price: ltpByPair?.[`${String(i.exchange || '').toUpperCase()}-${String(i.token)}`]?.last_price ?? null,
-        }));
-        return {
+        const list = result.instruments.map((i) => {
+          const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+          const lp = ltpByPair?.[key]?.last_price ?? null;
+          const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
+          return {
+            token: i.token,
+            symbol: i.symbol,
+            exchange: i.exchange,
+            description: (i as any)?.description || null,
+            expiry_date: i.expiry_date,
+            instrument_name: i.instrument_name,
+            tick: (i as any)?.tick,
+            lot_size: (i as any)?.lot_size,
+            days_to_expiry: daysToExpiry,
+            last_price: lp,
+          };
+        });
+        const ranked = this.rankFoInstruments(list, sortMode, undefined);
+        const response = {
           success: true,
           data: {
-            instruments: list,
+            instruments: ranked,
             pagination: {
               total: result.total,
               hasMore: result.hasMore,
@@ -2891,6 +2947,16 @@ export class StockController {
             performance: { queryTime: Date.now() - t0 },
           },
         };
+        try {
+          await this.redisService.set(cacheKey, response, foCacheTtlSec);
+          // eslint-disable-next-line no-console
+          console.log('[Vayu Futures Search] Cache SET', { cacheKey, ttl: foCacheTtlSec });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[Vayu Futures Search] Cache WRITE failed (non-fatal)', (e as any)?.message);
+        }
+        latencyTimer();
+        return response;
       }
 
       // Fast single-shot probe for ltp_only=true
@@ -2924,13 +2990,15 @@ export class StockController {
           instrument_name: i.instrument_name,
           tick: (i as any)?.tick,
           lot_size: (i as any)?.lot_size,
+          days_to_expiry: this.computeDaysToExpiry(i.expiry_date as any),
           last_price: lp,
         };
       });
       const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
-      const sliced = filtered.slice(0, requestedLimit);
+      const ranked = this.rankFoInstruments(filtered, sortMode, undefined);
+      const sliced = ranked.slice(0, requestedLimit);
 
-      return {
+      const response = {
         success: true,
         data: {
           instruments: sliced,
@@ -2942,6 +3010,19 @@ export class StockController {
           performance: { queryTime: Date.now() - t0 },
         },
       };
+      try {
+        await this.redisService.set(cacheKey, response, foCacheTtlSec);
+        // eslint-disable-next-line no-console
+        console.log('[Vayu Futures Search] Cache SET (ltp_only)', {
+          cacheKey,
+          ttl: foCacheTtlSec,
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[Vayu Futures Search] Cache WRITE failed (ltp_only, non-fatal)', (e as any)?.message);
+      }
+      latencyTimer();
+      return response;
     } catch (error) {
       throw new HttpException(
         {
@@ -2979,6 +3060,12 @@ export class StockController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   @ApiQuery({ name: 'ltp_only', required: false, example: true, description: 'If true, only instruments with a valid last_price are returned' })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: ['relevance', 'expiry', 'strike'],
+    description: 'Sort mode: relevance (default), expiry, or strike',
+  })
   async getVortexOptions(
     @Query('q') q?: string,
     @Query('exchange') exchange?: string,
@@ -2990,12 +3077,14 @@ export class StockController {
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+    @Query('sort') sort?: 'relevance' | 'expiry' | 'strike',
   ) {
     try {
       const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+       const sortMode = (sort || 'relevance').toString().toLowerCase();
 
       // Parse trading-style options queries like "nifty 26000 ce" or "banknifty 45000 pe".
       const parsed = q && q.trim() ? this.fnoQueryParser.parse(q) : undefined;
@@ -3034,6 +3123,50 @@ export class StockController {
         ltp_only: ltpOnly,
       });
 
+      const parsedLabel =
+        parsed && (parsed.underlying || parsed.strike || parsed.optionType || parsed.expiryFrom)
+          ? 'yes'
+          : 'no';
+      this.metrics.foSearchRequestsTotal.inc({
+        endpoint: 'vayu_options',
+        ltp_only: String(ltpOnly),
+        parsed: parsedLabel,
+      });
+      const latencyTimer = this.metrics.foSearchLatencySeconds.startTimer({
+        endpoint: 'vayu_options',
+        ltp_only: String(ltpOnly),
+      });
+
+      const cacheKeyBase = [
+        'vayu:fno:options',
+        `under=${underlyingSymbol || 'ANY'}`,
+        `ex=${exchange || 'ANY'}`,
+        `of=${effectiveOptionType || 'ANY'}`,
+        `ef=${effectiveExpiryFrom || 'ANY'}`,
+        `et=${effectiveExpiryTo || 'ANY'}`,
+        `sm=${effectiveStrikeMin ?? 'ANY'}`,
+        `sx=${effectiveStrikeMax ?? 'ANY'}`,
+        `ltp=${ltpOnly ? '1' : '0'}`,
+        `lim=${requestedLimit}`,
+        `off=${startOffset}`,
+        `sort=${sortMode}`,
+      ].join('|');
+      const cacheKey = cacheKeyBase;
+      const foCacheTtlSec = Number(process.env.FO_CACHE_TTL_SECONDS || 2);
+
+      try {
+        const cached = await this.redisService.get<any>(cacheKey);
+        if (cached && cached.success === true) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu Options Search] Cache HIT', { cacheKey });
+          latencyTimer();
+          return cached;
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[Vayu Options Search] Cache READ failed (non-fatal)', (e as any)?.message);
+      }
+
       if (!ltpOnly) {
         const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
           // Use exact underlying_symbol when parsed to keep DB filters tight and index-friendly
@@ -3054,20 +3187,28 @@ export class StockController {
         });
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
         const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
-        const list = result.instruments.map((i) => ({
-          token: i.token,
-          symbol: i.symbol,
-          exchange: i.exchange,
-          description: (i as any)?.description || null,
-          expiry_date: i.expiry_date,
-          option_type: i.option_type,
-          strike_price: i.strike_price,
-          last_price: ltpByPair?.[`${String(i.exchange || '').toUpperCase()}-${String(i.token)}`]?.last_price ?? null,
-        }));
-        return {
+        const parsedStrikeHint = parsed?.strike;
+        const list = result.instruments.map((i) => {
+          const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+          const lp = ltpByPair?.[key]?.last_price ?? null;
+          const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
+          return {
+            token: i.token,
+            symbol: i.symbol,
+            exchange: i.exchange,
+            description: (i as any)?.description || null,
+            expiry_date: i.expiry_date,
+            option_type: i.option_type,
+            strike_price: i.strike_price,
+            days_to_expiry: daysToExpiry,
+            last_price: lp,
+          };
+        });
+        const ranked = this.rankFoInstruments(list, sortMode, parsedStrikeHint);
+        const response = {
           success: true,
           data: {
-            instruments: list,
+            instruments: ranked,
             pagination: {
               total: result.total,
               hasMore: result.hasMore,
@@ -3076,6 +3217,16 @@ export class StockController {
             performance: { queryTime: Date.now() - t0 },
           },
         };
+        try {
+          await this.redisService.set(cacheKey, response, foCacheTtlSec);
+          // eslint-disable-next-line no-console
+          console.log('[Vayu Options Search] Cache SET', { cacheKey, ttl: foCacheTtlSec });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[Vayu Options Search] Cache WRITE failed (non-fatal)', (e as any)?.message);
+        }
+        latencyTimer();
+        return response;
       }
 
       // Fast single-shot probe for ltp_only=true
@@ -3110,13 +3261,15 @@ export class StockController {
           expiry_date: i.expiry_date as any,
           option_type: i.option_type,
           strike_price: i.strike_price,
+          days_to_expiry: this.computeDaysToExpiry(i.expiry_date as any),
           last_price: lp,
         };
       });
       const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
-      const sliced = filtered.slice(0, requestedLimit);
+      const ranked = this.rankFoInstruments(filtered, sortMode, parsed?.strike);
+      const sliced = ranked.slice(0, requestedLimit);
 
-      return {
+      const response = {
         success: true,
         data: {
           instruments: sliced,
@@ -3128,6 +3281,19 @@ export class StockController {
           performance: { queryTime: Date.now() - t0 },
         },
       };
+      try {
+        await this.redisService.set(cacheKey, response, foCacheTtlSec);
+        // eslint-disable-next-line no-console
+        console.log('[Vayu Options Search] Cache SET (ltp_only)', {
+          cacheKey,
+          ttl: foCacheTtlSec,
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[Vayu Options Search] Cache WRITE failed (ltp_only, non-fatal)', (e as any)?.message);
+      }
+      latencyTimer();
+      return response;
     } catch (error) {
       throw new HttpException(
         {
