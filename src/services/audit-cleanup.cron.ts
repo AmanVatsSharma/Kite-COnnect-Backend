@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config';
  * AuditCleanupCronService
  *
  * Periodically purges old rows from request_audit_logs based on a retention
- * window (in days) controlled via AUDIT_LOG_RETENTION_DAYS env (default: 90).
+ * window (in days) controlled via AUDIT_LOG_RETENTION_DAYS env (default: 7).
  *
  * This keeps the audit table bounded while still providing enough history
  * for abuse detection and forensic analysis.
@@ -26,9 +26,9 @@ export class AuditCleanupCronService {
     private readonly configService: ConfigService,
   ) {
     const raw = Number(
-      this.configService.get('AUDIT_LOG_RETENTION_DAYS', '90'),
+      this.configService.get('AUDIT_LOG_RETENTION_DAYS', '7'),
     );
-    this.retentionDays = Number.isFinite(raw) && raw > 0 ? raw : 90;
+    this.retentionDays = Number.isFinite(raw) && raw > 0 ? raw : 7;
     // eslint-disable-next-line no-console
     console.log(
       '[AuditCleanupCronService] Initialized with retentionDays=',
