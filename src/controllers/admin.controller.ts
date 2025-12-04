@@ -29,6 +29,7 @@ import { MarketDataGateway } from '../gateways/market-data.gateway';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ApiKeyAbuseFlag } from '../entities/api-key-abuse-flag.entity';
 import { AbuseDetectionService } from '../services/abuse-detection.service';
+import { ConfigService } from '@nestjs/config';
 
 @Controller('admin')
 @ApiTags('admin', 'admin-ws')
@@ -47,6 +48,7 @@ export class AdminController {
     private redis: RedisService,
     private gateway: MarketDataGateway,
     private abuseDetection: AbuseDetectionService,
+    private configService: ConfigService,
   ) {}
 
   @Post('apikeys')
@@ -560,6 +562,34 @@ export class AdminController {
   @ApiOperation({ summary: 'Get debug status for Vayu provider/ticker' })
   async vortexDebug() {
     return this.vortexProvider.getDebugStatus?.() || {};
+  }
+
+  // ===== Audit / Sampling Config =====
+
+  @Get('audit/config')
+  @ApiOperation({
+    summary: 'Get current audit log sampling configuration',
+  })
+  async getAuditConfig() {
+    const httpSampleRate = Number(
+      this.configService.get('AUDIT_HTTP_SAMPLE_RATE', '0.01'),
+    );
+    const httpAlwaysLogErrors =
+      this.configService.get('AUDIT_HTTP_ALWAYS_LOG_ERRORS', 'true') ===
+      'true';
+    const wsSubSampleRate = Number(
+      this.configService.get('AUDIT_WS_SUB_SAMPLE_RATE', '0'),
+    );
+
+    return {
+      http_sample_rate: Number.isFinite(httpSampleRate)
+        ? httpSampleRate
+        : 0.01,
+      http_always_log_errors: httpAlwaysLogErrors,
+      ws_sub_sample_rate: Number.isFinite(wsSubSampleRate)
+        ? wsSubSampleRate
+        : 0,
+    };
   }
 
   // ===== Abuse / Resell Monitoring =====

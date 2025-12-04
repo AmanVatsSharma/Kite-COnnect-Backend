@@ -648,6 +648,36 @@ export class MarketDataGateway
         // Ignore metrics failures
       }
 
+      // Optional sampled WS audit for subscribe events
+      try {
+        const record: any = (client.data as any)?.apiKeyRecord;
+        const apiKey: string = (client.data as any)?.apiKey;
+        const { ip, userAgent, origin } = this.extractWsOriginContext(client);
+        this.originAudit
+          .recordWsEvent({
+            apiKey: apiKey || null,
+            apiKeyId: (record as any)?.id ?? null,
+            tenantId: (record as any)?.tenant_id ?? null,
+            event: 'subscribe',
+            status: null,
+            ip,
+            userAgent,
+            origin,
+            durationMs: null,
+            country: null,
+            asn: null,
+            meta: {
+              socketId: client.id,
+              namespace: client.nsp?.name,
+              requested: requestedRaw,
+              included: includedTokens,
+            },
+          })
+          .catch(() => {});
+      } catch {
+        // ignore audit failures
+      }
+
       // For unresolved, emit guidance errors per token
       for (const t of unresolved) {
         client.emit('error', {
@@ -818,7 +848,6 @@ export class MarketDataGateway
       this.logger.log(
         `Client ${client.id} unsubscribed from ${instruments.length} instruments`,
       );
-
       // Metrics: count successful unsubscribe events per API key
       try {
         const apiKey: string =
@@ -828,6 +857,36 @@ export class MarketDataGateway
           .inc();
       } catch {
         // Ignore metrics failures
+      }
+
+      // Optional sampled WS audit for unsubscribe events
+      try {
+        const record: any = (client.data as any)?.apiKeyRecord;
+        const apiKey: string = (client.data as any)?.apiKey;
+        const { ip, userAgent, origin } = this.extractWsOriginContext(client);
+        this.originAudit
+          .recordWsEvent({
+            apiKey: apiKey || null,
+            apiKeyId: (record as any)?.id ?? null,
+            tenantId: (record as any)?.tenant_id ?? null,
+            event: 'unsubscribe',
+            status: null,
+            ip,
+            userAgent,
+            origin,
+            durationMs: null,
+            country: null,
+            asn: null,
+            meta: {
+              socketId: client.id,
+              namespace: client.nsp?.name,
+              requested: requestedTokens,
+              remaining: subscription.instruments,
+            },
+          })
+          .catch(() => {});
+      } catch {
+        // ignore audit failures
       }
     } catch (error) {
       this.logger.error('Error handling instrument unsubscription', error);

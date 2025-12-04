@@ -222,4 +222,37 @@ Together with Prometheus metrics and audit logs, this gives a **full view** of:
 - How heavily each key is used.
 - Which keys look like they are being shared / resold.
 
+---
+
+## 6. Sampling & Tuning (Keeping Logs High-Signal)
+
+To avoid flooding `request_audit_logs`, the system uses **sampling**:
+
+- **HTTP sampling**
+  - Env vars:
+    - `AUDIT_HTTP_SAMPLE_RATE` (default: `0.01` → ~1% of non-error requests).
+    - `AUDIT_HTTP_ALWAYS_LOG_ERRORS` (default: `true`).
+  - Behaviour:
+    - If `status >= 400` and `AUDIT_HTTP_ALWAYS_LOG_ERRORS=true` → **always logged**.
+    - Otherwise → logged only when `Math.random() < AUDIT_HTTP_SAMPLE_RATE`.
+
+- **WebSocket sampling**
+  - Env var:
+    - `AUDIT_WS_SUB_SAMPLE_RATE` (default: `0` → no subscribe/unsubscribe logging).
+  - Behaviour inside `OriginAuditService.recordWsEvent`:
+    - `connect` / `disconnect` → **always logged**.
+    - `subscribe` / `unsubscribe` → logged only when `Math.random() < AUDIT_WS_SUB_SAMPLE_RATE`.
+
+- **Admin visibility**
+  - `GET /api/admin/audit/config` returns the effective audit config:
+    - `http_sample_rate`
+    - `http_always_log_errors`
+    - `ws_sub_sample_rate`
+
+Recommended starting values:
+
+- Production: `AUDIT_HTTP_SAMPLE_RATE=0.01`, `AUDIT_WS_SUB_SAMPLE_RATE=0.01`.
+- Staging/testing: higher sample rates (e.g. `0.1` or `1`) while you’re validating behaviour.
+
+
 
