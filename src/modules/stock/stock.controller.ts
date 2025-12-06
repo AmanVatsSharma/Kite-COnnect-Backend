@@ -59,6 +59,9 @@ export class StockController {
     private readonly requestBatchingService: RequestBatchingService,
     private readonly fnoQueryParser: FnoQueryParserService,
     private readonly metrics: MetricsService,
+    private readonly vayuEquityService: VayuEquityService,
+    private readonly vayuFutureService: VayuFutureService,
+    private readonly vayuOptionService: VayuOptionService,
   ) {}
 
   @Post('instruments/sync')
@@ -2708,10 +2711,15 @@ export class StockController {
     @Query('offset') offset?: number,
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
-    try {
-      const t0 = Date.now();
-      const requestedLimit = limit ? parseInt(limit.toString()) : 50;
-      const startOffset = offset ? parseInt(offset.toString()) : 0;
+    return this.vayuEquityService.getVortexEquities(
+      q,
+      exchange,
+      limit,
+      offset,
+      ltpOnlyRaw,
+    );
+  }
+  /*
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
 
       if (!ltpOnly) {
@@ -2785,17 +2793,7 @@ export class StockController {
           performance: { queryTime: Date.now() - t0 },
         },
       };
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Failed to get equities',
-          error: error.message,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
+  */
 
   @ApiTags('vayu')
   @Get('vayu/futures')
@@ -2835,10 +2833,18 @@ export class StockController {
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
     @Query('sort') sort?: 'relevance' | 'expiry' | 'strike',
   ) {
-    try {
-      const t0 = Date.now();
-      const requestedLimit = limit ? parseInt(limit.toString()) : 50;
-      const startOffset = offset ? parseInt(offset.toString()) : 0;
+    return this.vayuFutureService.getVortexFutures(
+      q,
+      exchange,
+      expiry_from,
+      expiry_to,
+      limit,
+      offset,
+      ltpOnlyRaw,
+      sort,
+    );
+  }
+  /*
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
       const sortMode = (sort || 'relevance').toString().toLowerCase();
 
@@ -3069,17 +3075,7 @@ export class StockController {
       }
       latencyTimer();
       return response;
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Failed to get futures',
-          error: error.message,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
+  */
 
   @ApiTags('vayu')
   @Get('vayu/options')
@@ -3125,10 +3121,21 @@ export class StockController {
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
     @Query('sort') sort?: 'relevance' | 'expiry' | 'strike',
   ) {
-    try {
-      const t0 = Date.now();
-      const requestedLimit = limit ? parseInt(limit.toString()) : 50;
-      const startOffset = offset ? parseInt(offset.toString()) : 0;
+    return this.vayuOptionService.getVortexOptions(
+      q,
+      exchange,
+      option_type,
+      expiry_from,
+      expiry_to,
+      strike_min,
+      strike_max,
+      limit,
+      offset,
+      ltpOnlyRaw,
+      sort,
+    );
+  }
+  /*
       const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
        const sortMode = (sort || 'relevance').toString().toLowerCase();
 
@@ -3389,17 +3396,7 @@ export class StockController {
       }
       latencyTimer();
       return response;
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Failed to get options',
-          error: error.message,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
+  */
 
   @ApiTags('vayu')
   @Get('vayu/mcx-options')
@@ -3437,10 +3434,19 @@ export class StockController {
     @Query('offset') offset?: number,
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
   ) {
-    try {
-      const t0 = Date.now();
-      const requestedLimit = limit ? parseInt(limit.toString()) : 50;
-      const startOffset = offset ? parseInt(offset.toString()) : 0;
+    return this.vayuOptionService.getVortexMcxOptions(
+      q,
+      option_type,
+      expiry_from,
+      expiry_to,
+      strike_min,
+      strike_max,
+      limit,
+      offset,
+      ltpOnlyRaw,
+    );
+  }
+  /*
       const ltpOnly =
         String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
 
@@ -3721,17 +3727,7 @@ export class StockController {
       }
       latencyTimer();
       return response;
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Failed to get MCX options',
-          error: (error as any)?.message || error,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
+  */
 
   @ApiTags('vayu')
   @Get('vayu/fno/autocomplete')
