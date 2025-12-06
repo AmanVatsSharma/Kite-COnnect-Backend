@@ -38,6 +38,9 @@ import { randomUUID } from 'crypto';
 import { RequestBatchingService } from '../../services/request-batching.service';
 import { MetricsService } from '../../services/metrics.service';
 import { FnoQueryParserService } from '../../services/fno-query-parser.service';
+import { VayuEquityService } from './services/vayu-equity.service';
+import { VayuFutureService } from './services/vayu-future.service';
+import { VayuOptionService } from './services/vayu-option.service';
 
 // Ambient declarations to satisfy TS in environments without DOM/lib definitions
 declare const console: any;

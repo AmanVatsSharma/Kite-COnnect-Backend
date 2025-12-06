@@ -1,20 +1,18 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { VortexInstrumentService } from '../../services/vortex-instrument.service';
-import { RequestBatchingService } from '../request-batching.service';
-import { VortexProviderService } from '../../providers/vortex-provider.service';
-import { RedisService } from '../../services/redis.service';
-import { FnoQueryParserService } from '../../services/fno-query-parser.service';
-import { MetricsService } from '../../services/metrics.service';
+import { VortexInstrumentService } from '../../../services/vortex-instrument.service';
+import { VortexProviderService } from '../../../providers/vortex-provider.service';
+import { RedisService } from '../../../services/redis.service';
+import { MetricsService } from '../../../services/metrics.service';
+import { FnoQueryParserService } from '../../../services/fno-query-parser.service';
 
 @Injectable()
 export class VayuOptionService {
   constructor(
     private readonly vortexInstrumentService: VortexInstrumentService,
-    private readonly requestBatchingService: RequestBatchingService,
     private readonly vortexProvider: VortexProviderService,
     private readonly redisService: RedisService,
-    private readonly fnoQueryParser: FnoQueryParserService,
     private readonly metrics: MetricsService,
+    private readonly fnoQueryParser: FnoQueryParserService,
   ) {}
 
   async getVortexOptions(
@@ -34,7 +32,9 @@ export class VayuOptionService {
       const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
-      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
       const sortMode = (sort || 'relevance').toString().toLowerCase();
 
       // Parse trading-style options queries like "nifty 26000 ce" or "banknifty 45000 pe".
@@ -71,11 +71,15 @@ export class VayuOptionService {
         expiry_from: effectiveExpiryFrom,
         expiry_to: effectiveExpiryTo,
         exchange,
-        ltpOnly,
+        ltp_only: ltpOnly,
       });
 
       const parsedLabel =
-        parsed && (parsed.underlying || parsed.strike || parsed.optionType || parsed.expiryFrom)
+        parsed &&
+        (parsed.underlying ||
+          parsed.strike ||
+          parsed.optionType ||
+          parsed.expiryFrom)
           ? 'yes'
           : 'no';
       this.metrics.foSearchRequestsTotal.inc({
@@ -115,41 +119,21 @@ export class VayuOptionService {
         }
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn('[Vayu Options Search] Cache READ failed (non-fatal)', (e as any)?.message);
+        console.warn(
+          '[Vayu Options Search] Cache READ failed (non-fatal)',
+          (e as any)?.message,
+        );
       }
-
-      // Updated instrument types to include OPTFUT and OPTCUR
-      const instrumentTypes = ['OPTSTK', 'OPTIDX', 'OPTFUT', 'OPTCUR'];
 
       if (!ltpOnly) {
         // First attempt: parsed filters with exact underlying_symbol
-        let result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          // Use exact underlying_symbol when parsed to keep DB filters tight and index-friendly
-          query: effectiveQuery,
-          underlying_symbol: underlyingSymbol,
-          exchange: exchange ? [exchange] : undefined,
-          instrument_type: instrumentTypes,
-          option_type: effectiveOptionType,
-          expiry_from: effectiveExpiryFrom,
-          expiry_to: effectiveExpiryTo,
-          strike_min: effectiveStrikeMin,
-          strike_max: effectiveStrikeMax,
-          options_only: true,
-          limit: requestedLimit,
-          offset: startOffset,
-          sort_by: 'expiry_date',
-          sort_order: 'asc',
-          only_active: false,
-        });
-
-        if ((!result.instruments || result.instruments.length === 0) && q && q.trim()) {
-          // eslint-disable-next-line no-console
-          console.log('[Vayu Options Search] No rows for parsed filters, falling back to fuzzy symbol search');
-          result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-            query: q.trim(),
-            underlying_symbol: undefined,
+        let result =
+          await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+            // Use exact underlying_symbol when parsed to keep DB filters tight and index-friendly
+            query: effectiveQuery,
+            underlying_symbol: underlyingSymbol,
             exchange: exchange ? [exchange] : undefined,
-            instrument_type: instrumentTypes,
+            instrument_type: ['OPTSTK', 'OPTIDX', 'OPTFUT', 'OPTCUR'], // Added OPTFUT, OPTCUR
             option_type: effectiveOptionType,
             expiry_from: effectiveExpiryFrom,
             expiry_to: effectiveExpiryTo,
@@ -162,9 +146,41 @@ export class VayuOptionService {
             sort_order: 'asc',
             only_active: false,
           });
+
+        if (
+          (!result.instruments || result.instruments.length === 0) &&
+          q &&
+          q.trim()
+        ) {
+          // eslint-disable-next-line no-console
+          console.log(
+            '[Vayu Options Search] No rows for parsed filters, falling back to fuzzy symbol search',
+          );
+          result =
+            await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+              query: q.trim(),
+              underlying_symbol: undefined,
+              exchange: exchange ? [exchange] : undefined,
+              instrument_type: ['OPTSTK', 'OPTIDX', 'OPTFUT', 'OPTCUR'], // Added OPTFUT, OPTCUR
+              option_type: effectiveOptionType,
+              expiry_from: effectiveExpiryFrom,
+              expiry_to: effectiveExpiryTo,
+              strike_min: effectiveStrikeMin,
+              strike_max: effectiveStrikeMax,
+              options_only: true,
+              limit: requestedLimit,
+              offset: startOffset,
+              sort_by: 'expiry_date',
+              sort_order: 'asc',
+              only_active: false,
+            });
         }
-        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
-        const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+          result.instruments as any,
+        );
+        const ltpByPair = pairs.length
+          ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any)
+          : {};
         const parsedStrikeHint = parsed?.strike;
         const list = result.instruments.map((i) => {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
@@ -182,7 +198,11 @@ export class VayuOptionService {
             last_price: lp,
           };
         });
-        const ranked = this.rankFoInstruments(list, sortMode, parsedStrikeHint);
+        const ranked = this.rankFoInstruments(
+          list,
+          sortMode,
+          parsedStrikeHint,
+        );
         const response = {
           success: true,
           data: {
@@ -198,45 +218,33 @@ export class VayuOptionService {
         try {
           await this.redisService.set(cacheKey, response, foCacheTtlSec);
           // eslint-disable-next-line no-console
-          console.log('[Vayu Options Search] Cache SET', { cacheKey, ttl: foCacheTtlSec });
+          console.log('[Vayu Options Search] Cache SET', {
+            cacheKey,
+            ttl: foCacheTtlSec,
+          });
         } catch (e) {
           // eslint-disable-next-line no-console
-          console.warn('[Vayu Options Search] Cache WRITE failed (non-fatal)', (e as any)?.message);
+          console.warn(
+            '[Vayu Options Search] Cache WRITE failed (non-fatal)',
+            (e as any)?.message,
+          );
         }
         latencyTimer();
         return response;
       }
 
       // Fast single-shot probe for ltp_only=true
-      const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
+      const probeLimit = Math.min(
+        500,
+        Math.max(requestedLimit * 4, requestedLimit + startOffset),
+      );
       // First attempt: parsed filters with only_active=true for tradable subset
-      let page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-        query: effectiveQuery,
-        underlying_symbol: underlyingSymbol,
-        exchange: exchange ? [exchange] : undefined,
-        instrument_type: instrumentTypes,
-        option_type: effectiveOptionType,
-        expiry_from: effectiveExpiryFrom,
-        expiry_to: effectiveExpiryTo,
-        strike_min: effectiveStrikeMin,
-        strike_max: effectiveStrikeMax,
-        options_only: true,
-        limit: probeLimit,
-        offset: startOffset,
-        skip_count: true,
-        sort_by: 'expiry_date',
-        sort_order: 'asc',
-        only_active: true,
-      });
-
-      if ((!page.instruments || page.instruments.length === 0) && q && q.trim()) {
-        // eslint-disable-next-line no-console
-        console.log('[Vayu Options Search] ltp_only probe empty, falling back to fuzzy symbol search');
-        page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q.trim(),
-          underlying_symbol: undefined,
+      let page =
+        await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+          query: effectiveQuery,
+          underlying_symbol: underlyingSymbol,
           exchange: exchange ? [exchange] : undefined,
-          instrument_type: instrumentTypes,
+          instrument_type: ['OPTSTK', 'OPTIDX', 'OPTFUT', 'OPTCUR'], // Added OPTFUT, OPTCUR
           option_type: effectiveOptionType,
           expiry_from: effectiveExpiryFrom,
           expiry_to: effectiveExpiryTo,
@@ -250,9 +258,42 @@ export class VayuOptionService {
           sort_order: 'asc',
           only_active: true,
         });
+
+      if (
+        (!page.instruments || page.instruments.length === 0) &&
+        q &&
+        q.trim()
+      ) {
+        // eslint-disable-next-line no-console
+        console.log(
+          '[Vayu Options Search] ltp_only probe empty, falling back to fuzzy symbol search',
+        );
+        page =
+          await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+            query: q.trim(),
+            underlying_symbol: undefined,
+            exchange: exchange ? [exchange] : undefined,
+            instrument_type: ['OPTSTK', 'OPTIDX', 'OPTFUT', 'OPTCUR'], // Added OPTFUT, OPTCUR
+            option_type: effectiveOptionType,
+            expiry_from: effectiveExpiryFrom,
+            expiry_to: effectiveExpiryTo,
+            strike_min: effectiveStrikeMin,
+            strike_max: effectiveStrikeMax,
+            options_only: true,
+            limit: probeLimit,
+            offset: startOffset,
+            skip_count: true,
+            sort_by: 'expiry_date',
+            sort_order: 'asc',
+            only_active: true,
+          });
       }
-      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
-      const ltpByPair = pairs.length ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any) : {};
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+        page.instruments as any,
+      );
+      const ltpByPair = pairs.length
+        ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any)
+        : {};
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
@@ -268,8 +309,15 @@ export class VayuOptionService {
           last_price: lp,
         };
       });
-      const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
-      const ranked = this.rankFoInstruments(filtered, sortMode, parsed?.strike);
+      const filtered = enriched.filter(
+        (v: any) =>
+          Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
+      );
+      const ranked = this.rankFoInstruments(
+        filtered,
+        sortMode,
+        parsed?.strike,
+      );
       const sliced = ranked.slice(0, requestedLimit);
 
       const response = {
@@ -293,7 +341,10 @@ export class VayuOptionService {
         });
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn('[Vayu Options Search] Cache WRITE failed (ltp_only, non-fatal)', (e as any)?.message);
+        console.warn(
+          '[Vayu Options Search] Cache WRITE failed (ltp_only, non-fatal)',
+          (e as any)?.message,
+        );
       }
       latencyTimer();
       return response;
@@ -325,7 +376,8 @@ export class VayuOptionService {
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly =
-        String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
 
       // Parse trading-style MCX options queries like "gold 62000 ce"
       const parsed = q && q.trim() ? this.fnoQueryParser.parse(q) : undefined;
@@ -359,11 +411,15 @@ export class VayuOptionService {
         option_type: effectiveOptionType,
         expiry_from: effectiveExpiryFrom,
         expiry_to: effectiveExpiryTo,
-        ltpOnly,
+        ltp_only: ltpOnly,
       });
 
       const parsedLabel =
-        parsed && (parsed.underlying || parsed.strike || parsed.optionType || parsed.expiryFrom)
+        parsed &&
+        (parsed.underlying ||
+          parsed.strike ||
+          parsed.optionType ||
+          parsed.expiryFrom)
           ? 'yes'
           : 'no';
       this.metrics.foSearchRequestsTotal.inc({
@@ -401,21 +457,20 @@ export class VayuOptionService {
         }
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn('[Vayu MCX Options Search] Cache READ failed (non-fatal)', (e as any)?.message);
+        console.warn(
+          '[Vayu MCX Options Search] Cache READ failed (non-fatal)',
+          (e as any)?.message,
+        );
       }
 
-      // Explicitly include relevant instrument types for MCX options if needed, but MCX_FO exchange filter is primary.
-      // However, we can be more specific if we know they are mostly OPTFUT.
-      const instrumentTypes = undefined; // Keeping undefined to rely on exchange and options_only flag
-
       if (!ltpOnly) {
-        let result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
-          {
+        let result =
+          await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
             query: effectiveQuery,
             underlying_symbol: underlyingSymbol,
             exchange: ['MCX_FO'],
             // Do not constrain instrument_name: rely on option_type / options_only to distinguish from futures
-            instrument_type: instrumentTypes,
+            instrument_type: ['OPTFUT', 'FUTCOM'], // Added types
             option_type: effectiveOptionType,
             options_only: true,
             expiry_from: effectiveExpiryFrom,
@@ -427,18 +482,23 @@ export class VayuOptionService {
             sort_by: 'expiry_date',
             sort_order: 'asc',
             only_active: false,
-          },
-        );
+          });
 
-        if ((!result.instruments || result.instruments.length === 0) && q && q.trim()) {
+        if (
+          (!result.instruments || result.instruments.length === 0) &&
+          q &&
+          q.trim()
+        ) {
           // eslint-disable-next-line no-console
-          console.log('[Vayu MCX Options Search] No rows for parsed filters, falling back to fuzzy symbol search');
-          result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
-            {
+          console.log(
+            '[Vayu MCX Options Search] No rows for parsed filters, falling back to fuzzy symbol search',
+          );
+          result =
+            await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
               query: q.trim(),
               underlying_symbol: undefined,
               exchange: ['MCX_FO'],
-              instrument_type: instrumentTypes,
+              instrument_type: ['OPTFUT', 'FUTCOM'], // Added types
               option_type: effectiveOptionType,
               options_only: true,
               expiry_from: effectiveExpiryFrom,
@@ -450,8 +510,7 @@ export class VayuOptionService {
               sort_by: 'expiry_date',
               sort_order: 'asc',
               only_active: false,
-            },
-          );
+            });
         }
         const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
           result.instruments as any,
@@ -475,7 +534,11 @@ export class VayuOptionService {
             last_price: lp,
           };
         });
-        const ranked = this.rankFoInstruments(list, 'relevance', parsed?.strike);
+        const ranked = this.rankFoInstruments(
+          list,
+          'relevance',
+          parsed?.strike,
+        );
         const response = {
           success: true,
           data: {
@@ -497,23 +560,26 @@ export class VayuOptionService {
           });
         } catch (e) {
           // eslint-disable-next-line no-console
-          console.warn('[Vayu MCX Options Search] Cache WRITE failed (non-fatal)', (e as any)?.message);
+          console.warn(
+            '[Vayu MCX Options Search] Cache WRITE failed (non-fatal)',
+            (e as any)?.message,
+          );
         }
         latencyTimer();
         return response;
       }
 
-      // Fast-path probe for ltp_only=true with single-shot LTP hydration
+      // Fast single-shot probe for ltp_only=true
       const probeLimit = Math.min(
         500,
         Math.max(requestedLimit * 4, requestedLimit + startOffset),
       );
-      let page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
-        {
+      let page =
+        await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
           query: effectiveQuery,
           underlying_symbol: underlyingSymbol,
           exchange: ['MCX_FO'],
-          instrument_type: instrumentTypes,
+          instrument_type: ['OPTFUT', 'FUTCOM'], // Added types
           option_type: effectiveOptionType,
           options_only: true,
           expiry_from: effectiveExpiryFrom,
@@ -526,18 +592,23 @@ export class VayuOptionService {
           sort_by: 'expiry_date',
           sort_order: 'asc',
           only_active: true,
-        },
-      );
+        });
 
-      if ((!page.instruments || page.instruments.length === 0) && q && q.trim()) {
+      if (
+        (!page.instruments || page.instruments.length === 0) &&
+        q &&
+        q.trim()
+      ) {
         // eslint-disable-next-line no-console
-        console.log('[Vayu MCX Options Search] ltp_only probe empty, falling back to fuzzy symbol search');
-        page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced(
-          {
+        console.log(
+          '[Vayu MCX Options Search] ltp_only probe empty, falling back to fuzzy symbol search',
+        );
+        page =
+          await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
             query: q.trim(),
             underlying_symbol: undefined,
             exchange: ['MCX_FO'],
-            instrument_type: instrumentTypes,
+            instrument_type: ['OPTFUT', 'FUTCOM'], // Added types
             option_type: effectiveOptionType,
             options_only: true,
             expiry_from: effectiveExpiryFrom,
@@ -550,8 +621,7 @@ export class VayuOptionService {
             sort_by: 'expiry_date',
             sort_order: 'asc',
             only_active: true,
-          },
-        );
+          });
       }
       const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
         page.instruments as any,
@@ -560,9 +630,7 @@ export class VayuOptionService {
         ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any)
         : {};
       const enriched = page.instruments.map((i) => {
-        const key = `${String(i.exchange || '').toUpperCase()}-${String(
-          i.token,
-        )}`;
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
         return {
           token: i.token,
@@ -570,17 +638,21 @@ export class VayuOptionService {
           exchange: i.exchange,
           description: (i as any)?.description || null,
           expiry_date: i.expiry_date as any,
-          days_to_expiry: this.computeDaysToExpiry(i.expiry_date as any),
           option_type: i.option_type,
           strike_price: i.strike_price,
+          days_to_expiry: this.computeDaysToExpiry(i.expiry_date as any),
           last_price: lp,
         };
       });
       const filtered = enriched.filter(
         (v: any) =>
-          Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0),
+          Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
       );
-      const ranked = this.rankFoInstruments(filtered, 'relevance', parsed?.strike);
+      const ranked = this.rankFoInstruments(
+        filtered,
+        'relevance',
+        parsed?.strike,
+      );
       const sliced = ranked.slice(0, requestedLimit);
 
       const response = {
@@ -604,7 +676,10 @@ export class VayuOptionService {
         });
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn('[Vayu MCX Options Search] Cache WRITE failed (ltp_only, non-fatal)', (e as any)?.message);
+        console.warn(
+          '[Vayu MCX Options Search] Cache WRITE failed (ltp_only, non-fatal)',
+          (e as any)?.message,
+        );
       }
       latencyTimer();
       return response;
@@ -613,7 +688,7 @@ export class VayuOptionService {
         {
           success: false,
           message: 'Failed to get MCX options',
-          error: (error as any)?.message || error,
+          error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -628,7 +703,11 @@ export class VayuOptionService {
       const year = Number(expiry.substring(0, 4));
       const month = Number(expiry.substring(4, 6));
       const day = Number(expiry.substring(6, 8));
-      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+      if (
+        !Number.isFinite(year) ||
+        !Number.isFinite(month) ||
+        !Number.isFinite(day)
+      ) {
         return null;
       }
       const expDate = new Date(Date.UTC(year, month - 1, day));
@@ -660,8 +739,10 @@ export class VayuOptionService {
       : undefined;
 
     const cmpDays = (a: any, b: any) => {
-      const da = typeof a.days_to_expiry === 'number' ? a.days_to_expiry : Infinity;
-      const db = typeof b.days_to_expiry === 'number' ? b.days_to_expiry : Infinity;
+      const da =
+        typeof a.days_to_expiry === 'number' ? a.days_to_expiry : Infinity;
+      const db =
+        typeof b.days_to_expiry === 'number' ? b.days_to_expiry : Infinity;
       return da - db;
     };
 
@@ -695,7 +776,9 @@ export class VayuOptionService {
       d = cmpStrikeDistance(a, b);
       if (d !== 0) return d;
       // stable tie-breakers
-      const symCmp = String(a.symbol || '').localeCompare(String(b.symbol || ''));
+      const symCmp = String(a.symbol || '').localeCompare(
+        String(b.symbol || ''),
+      );
       if (symCmp !== 0) return symCmp;
       return Number(a.token) - Number(b.token);
     });
@@ -703,4 +786,3 @@ export class VayuOptionService {
     return copy;
   }
 }
-

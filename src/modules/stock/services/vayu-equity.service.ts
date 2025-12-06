@@ -1,7 +1,7 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { VortexProviderService } from 'src/providers/vortex-provider.service';
-import { RequestBatchingService } from 'src/services/request-batching.service';
-import { VortexInstrumentService } from 'src/services/vortex-instrument.service';
+import { VortexInstrumentService } from '../../../services/vortex-instrument.service';
+import { RequestBatchingService } from '../../../services/request-batching.service';
+import { VortexProviderService } from '../../../providers/vortex-provider.service';
 
 @Injectable()
 export class VayuEquityService {
@@ -22,22 +22,26 @@ export class VayuEquityService {
       const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
-      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
-
-      // Updated instrument types to include EQIDX
-      const instrumentTypes = ['EQUITIES', 'EQIDX'];
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
 
       if (!ltpOnly) {
-        const result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q,
-          exchange: exchange ? [exchange] : undefined,
-          instrument_type: instrumentTypes,
-          limit: requestedLimit,
-          offset: startOffset,
-        });
-        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
+        const result =
+          await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+            query: q,
+            exchange: exchange ? [exchange] : undefined,
+            instrument_type: ['EQUITIES', 'EQIDX'], // Added EQIDX
+            limit: requestedLimit,
+            offset: startOffset,
+          });
+        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+          result.instruments as any,
+        );
         const ltpByPair = pairs.length
-          ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
+          ? await this.requestBatchingService.getLtpByPairs(
+              pairs as any,
+              this.vortexProvider,
+            )
           : {};
         const list = result.instruments.map((i) => {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
@@ -65,25 +69,43 @@ export class VayuEquityService {
       }
 
       // Fast single-shot probe for ltp_only=true
-      const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
-      const page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-        query: q,
-        exchange: exchange ? [exchange] : undefined,
-        instrument_type: instrumentTypes,
-        limit: probeLimit,
-        offset: startOffset,
-        skip_count: true,
-      });
-      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
+      const probeLimit = Math.min(
+        500,
+        Math.max(requestedLimit * 4, requestedLimit + startOffset),
+      );
+      const page =
+        await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+          query: q,
+          exchange: exchange ? [exchange] : undefined,
+          instrument_type: ['EQUITIES', 'EQIDX'], // Added EQIDX
+          limit: probeLimit,
+          offset: startOffset,
+          skip_count: true,
+        });
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+        page.instruments as any,
+      );
       const ltpByPair = pairs.length
-        ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
+        ? await this.requestBatchingService.getLtpByPairs(
+            pairs as any,
+            this.vortexProvider,
+          )
         : {};
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
-        return { token: i.token, symbol: i.symbol, exchange: i.exchange, description: (i as any)?.description || null, last_price: lp };
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          description: (i as any)?.description || null,
+          last_price: lp,
+        };
       });
-      const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
+      const filtered = enriched.filter(
+        (v: any) =>
+          Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
+      );
       const sliced = filtered.slice(0, requestedLimit);
 
       return {
@@ -110,4 +132,3 @@ export class VayuEquityService {
     }
   }
 }
-

@@ -1,10 +1,10 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { VortexInstrumentService } from 'src/services/vortex-instrument.service';
-import { RequestBatchingService } from 'src/services/request-batching.service';
-import { VortexProviderService } from 'src/providers/vortex-provider.service';
-import { RedisService } from 'src/services/redis.service';
-import { FnoQueryParserService } from 'src/services/fno-query-parser.service';
-import { MetricsService } from 'src/services/metrics.service';
+import { VortexInstrumentService } from '../../../services/vortex-instrument.service';
+import { RequestBatchingService } from '../../../services/request-batching.service';
+import { VortexProviderService } from '../../../providers/vortex-provider.service';
+import { RedisService } from '../../../services/redis.service';
+import { MetricsService } from '../../../services/metrics.service';
+import { FnoQueryParserService } from '../../../services/fno-query-parser.service';
 
 @Injectable()
 export class VayuFutureService {
@@ -13,8 +13,8 @@ export class VayuFutureService {
     private readonly requestBatchingService: RequestBatchingService,
     private readonly vortexProvider: VortexProviderService,
     private readonly redisService: RedisService,
-    private readonly fnoQueryParser: FnoQueryParserService,
     private readonly metrics: MetricsService,
+    private readonly fnoQueryParser: FnoQueryParserService,
   ) {}
 
   async getVortexFutures(
@@ -31,7 +31,9 @@ export class VayuFutureService {
       const t0 = Date.now();
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
-      const ltpOnly = (String(ltpOnlyRaw || '').toLowerCase() === 'true') || (ltpOnlyRaw === true);
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
       const sortMode = (sort || 'relevance').toString().toLowerCase();
 
       // Parse trading-style F&O queries like "nifty 28mar 26000" or "banknifty 25jan".
@@ -42,7 +44,7 @@ export class VayuFutureService {
       const effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
       const effectiveExpiryTo = parsed?.expiryTo || expiry_to;
 
-      // Console log for easy debugging
+      // Console log for easy debugging and later tuning of parsing behaviour
       // eslint-disable-next-line no-console
       console.log('[Vayu Futures Search]', {
         q,
@@ -50,11 +52,15 @@ export class VayuFutureService {
         expiry_from: effectiveExpiryFrom,
         expiry_to: effectiveExpiryTo,
         exchange,
-        ltpOnly,
+        ltp_only: ltpOnly,
       });
 
       const parsedLabel =
-        parsed && (parsed.underlying || parsed.strike || parsed.optionType || parsed.expiryFrom)
+        parsed &&
+        (parsed.underlying ||
+          parsed.strike ||
+          parsed.optionType ||
+          parsed.expiryFrom)
           ? 'yes'
           : 'no';
       this.metrics.foSearchRequestsTotal.inc({
@@ -91,39 +97,21 @@ export class VayuFutureService {
         }
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn('[Vayu Futures Search] Cache READ failed (non-fatal)', (e as any)?.message);
+        console.warn(
+          '[Vayu Futures Search] Cache READ failed (non-fatal)',
+          (e as any)?.message,
+        );
       }
-
-      // Updated instrument types to include FUTCOM and FUTCUR
-      const instrumentTypes = ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'];
 
       if (!ltpOnly) {
         // First attempt: use parsed underlying_symbol + filters
-        let result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          // Use exact underlying_symbol when parsed to keep DB filters index-friendly
-          query: effectiveQuery,
-          underlying_symbol: underlyingSymbol,
-          exchange: exchange ? [exchange] : undefined,
-          instrument_type: instrumentTypes,
-          expiry_from: effectiveExpiryFrom,
-          expiry_to: effectiveExpiryTo,
-          limit: requestedLimit,
-          offset: startOffset,
-          sort_by: 'expiry_date',
-          sort_order: 'asc',
-          only_active: false,
-        });
-
-        // Graceful fallback: if no instruments found and we had a query,
-        // retry with a looser fuzzy symbol search (query=q) and no underlying_symbol.
-        if ((!result.instruments || result.instruments.length === 0) && q && q.trim()) {
-          // eslint-disable-next-line no-console
-          console.log('[Vayu Futures Search] No rows for parsed filters, falling back to fuzzy symbol search');
-          result = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-            query: q.trim(),
-            underlying_symbol: undefined,
+        let result =
+          await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+            // Use exact underlying_symbol when parsed to keep DB filters index-friendly
+            query: effectiveQuery,
+            underlying_symbol: underlyingSymbol,
             exchange: exchange ? [exchange] : undefined,
-            instrument_type: instrumentTypes,
+            instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'], // Added FUTCOM, FUTCUR
             expiry_from: effectiveExpiryFrom,
             expiry_to: effectiveExpiryTo,
             limit: requestedLimit,
@@ -132,10 +120,41 @@ export class VayuFutureService {
             sort_order: 'asc',
             only_active: false,
           });
+
+        // Graceful fallback: if no instruments found and we had a query,
+        // retry with a looser fuzzy symbol search (query=q) and no underlying_symbol.
+        if (
+          (!result.instruments || result.instruments.length === 0) &&
+          q &&
+          q.trim()
+        ) {
+          // eslint-disable-next-line no-console
+          console.log(
+            '[Vayu Futures Search] No rows for parsed filters, falling back to fuzzy symbol search',
+          );
+          result =
+            await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+              query: q.trim(),
+              underlying_symbol: undefined,
+              exchange: exchange ? [exchange] : undefined,
+              instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'], // Added FUTCOM, FUTCUR
+              expiry_from: effectiveExpiryFrom,
+              expiry_to: effectiveExpiryTo,
+              limit: requestedLimit,
+              offset: startOffset,
+              sort_by: 'expiry_date',
+              sort_order: 'asc',
+              only_active: false,
+            });
         }
-        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(result.instruments as any);
+        const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+          result.instruments as any,
+        );
         const ltpByPair = pairs.length
-          ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
+          ? await this.requestBatchingService.getLtpByPairs(
+              pairs as any,
+              this.vortexProvider,
+            )
           : {};
         const list = result.instruments.map((i) => {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
@@ -170,41 +189,33 @@ export class VayuFutureService {
         try {
           await this.redisService.set(cacheKey, response, foCacheTtlSec);
           // eslint-disable-next-line no-console
-          console.log('[Vayu Futures Search] Cache SET', { cacheKey, ttl: foCacheTtlSec });
+          console.log('[Vayu Futures Search] Cache SET', {
+            cacheKey,
+            ttl: foCacheTtlSec,
+          });
         } catch (e) {
           // eslint-disable-next-line no-console
-          console.warn('[Vayu Futures Search] Cache WRITE failed (non-fatal)', (e as any)?.message);
+          console.warn(
+            '[Vayu Futures Search] Cache WRITE failed (non-fatal)',
+            (e as any)?.message,
+          );
         }
         latencyTimer();
         return response;
       }
 
       // Fast single-shot probe for ltp_only=true
-      const probeLimit = Math.min(500, Math.max(requestedLimit * 4, requestedLimit + startOffset));
+      const probeLimit = Math.min(
+        500,
+        Math.max(requestedLimit * 4, requestedLimit + startOffset),
+      );
       // First attempt: parsed filters + only_active=true for tradable subset
-      let page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-        query: effectiveQuery,
-        underlying_symbol: underlyingSymbol,
-        exchange: exchange ? [exchange] : undefined,
-        instrument_type: instrumentTypes,
-        expiry_from: effectiveExpiryFrom,
-        expiry_to: effectiveExpiryTo,
-        limit: probeLimit,
-        offset: startOffset,
-        skip_count: true,
-        sort_by: 'expiry_date',
-        sort_order: 'asc',
-        only_active: true,
-      });
-
-      if ((!page.instruments || page.instruments.length === 0) && q && q.trim()) {
-        // eslint-disable-next-line no-console
-        console.log('[Vayu Futures Search] ltp_only probe empty, falling back to fuzzy symbol search');
-        page = await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-          query: q.trim(),
-          underlying_symbol: undefined,
+      let page =
+        await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+          query: effectiveQuery,
+          underlying_symbol: underlyingSymbol,
           exchange: exchange ? [exchange] : undefined,
-          instrument_type: instrumentTypes,
+          instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'], // Added FUTCOM, FUTCUR
           expiry_from: effectiveExpiryFrom,
           expiry_to: effectiveExpiryTo,
           limit: probeLimit,
@@ -214,10 +225,40 @@ export class VayuFutureService {
           sort_order: 'asc',
           only_active: true,
         });
+
+      if (
+        (!page.instruments || page.instruments.length === 0) &&
+        q &&
+        q.trim()
+      ) {
+        // eslint-disable-next-line no-console
+        console.log(
+          '[Vayu Futures Search] ltp_only probe empty, falling back to fuzzy symbol search',
+        );
+        page =
+          await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+            query: q.trim(),
+            underlying_symbol: undefined,
+            exchange: exchange ? [exchange] : undefined,
+            instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'], // Added FUTCOM, FUTCUR
+            expiry_from: effectiveExpiryFrom,
+            expiry_to: effectiveExpiryTo,
+            limit: probeLimit,
+            offset: startOffset,
+            skip_count: true,
+            sort_by: 'expiry_date',
+            sort_order: 'asc',
+            only_active: true,
+          });
       }
-      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(page.instruments as any);
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+        page.instruments as any,
+      );
       const ltpByPair = pairs.length
-        ? await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider)
+        ? await this.requestBatchingService.getLtpByPairs(
+            pairs as any,
+            this.vortexProvider,
+          )
         : {};
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
@@ -235,7 +276,10 @@ export class VayuFutureService {
           last_price: lp,
         };
       });
-      const filtered = enriched.filter((v: any) => Number.isFinite(v?.last_price) && ((v?.last_price ?? 0) > 0));
+      const filtered = enriched.filter(
+        (v: any) =>
+          Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
+      );
       const ranked = this.rankFoInstruments(filtered, sortMode, undefined);
       const sliced = ranked.slice(0, requestedLimit);
 
@@ -260,7 +304,10 @@ export class VayuFutureService {
         });
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.warn('[Vayu Futures Search] Cache WRITE failed (ltp_only, non-fatal)', (e as any)?.message);
+        console.warn(
+          '[Vayu Futures Search] Cache WRITE failed (ltp_only, non-fatal)',
+          (e as any)?.message,
+        );
       }
       latencyTimer();
       return response;
@@ -284,7 +331,11 @@ export class VayuFutureService {
       const year = Number(expiry.substring(0, 4));
       const month = Number(expiry.substring(4, 6));
       const day = Number(expiry.substring(6, 8));
-      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+      if (
+        !Number.isFinite(year) ||
+        !Number.isFinite(month) ||
+        !Number.isFinite(day)
+      ) {
         return null;
       }
       const expDate = new Date(Date.UTC(year, month - 1, day));
@@ -316,8 +367,10 @@ export class VayuFutureService {
       : undefined;
 
     const cmpDays = (a: any, b: any) => {
-      const da = typeof a.days_to_expiry === 'number' ? a.days_to_expiry : Infinity;
-      const db = typeof b.days_to_expiry === 'number' ? b.days_to_expiry : Infinity;
+      const da =
+        typeof a.days_to_expiry === 'number' ? a.days_to_expiry : Infinity;
+      const db =
+        typeof b.days_to_expiry === 'number' ? b.days_to_expiry : Infinity;
       return da - db;
     };
 
@@ -351,7 +404,9 @@ export class VayuFutureService {
       d = cmpStrikeDistance(a, b);
       if (d !== 0) return d;
       // stable tie-breakers
-      const symCmp = String(a.symbol || '').localeCompare(String(b.symbol || ''));
+      const symCmp = String(a.symbol || '').localeCompare(
+        String(b.symbol || ''),
+      );
       if (symCmp !== 0) return symCmp;
       return Number(a.token) - Number(b.token);
     });
@@ -359,4 +414,3 @@ export class VayuFutureService {
     return copy;
   }
 }
-
