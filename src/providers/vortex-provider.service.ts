@@ -1860,13 +1860,15 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     ex: string,
   ): 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' | null {
     const s = (ex || '').toUpperCase();
-    if (
-      s.includes('NSE_EQ') ||
-      s === 'NSE' ||
-      s === 'EQ' ||
-      s.includes('EQUITY')
-    )
-      return 'NSE_EQ';
+
+    // 1. MCX check first to capture MCX_FO correctly
+    if (s.includes('MCX')) return 'MCX_FO';
+
+    // 2. Currency check next (specific segment)
+    if (s.includes('NSE_CUR') || s.includes('CDS') || s.includes('CUR'))
+      return 'NSE_CUR';
+
+    // 3. F&O check (generic derivative terms like FO/FUT must be checked after MCX/Currency)
     if (
       s.includes('NSE_FO') ||
       s.includes('FO') ||
@@ -1874,9 +1876,16 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       s.includes('FNO')
     )
       return 'NSE_FO';
-    if (s.includes('NSE_CUR') || s.includes('CDS') || s.includes('CUR'))
-      return 'NSE_CUR';
-    if (s.includes('MCX')) return 'MCX_FO';
+
+    // 4. Equity check
+    if (
+      s.includes('NSE_EQ') ||
+      s === 'NSE' ||
+      s === 'EQ' ||
+      s.includes('EQUITY')
+    )
+      return 'NSE_EQ';
+
     return null;
   }
 
