@@ -364,20 +364,57 @@ export class VayuManagementService {
     is_active?: boolean,
     limit?: number,
     offset?: number,
+    q?: string,
+    ltpOnlyRaw?: string | boolean,
+    includeLtpRaw?: string | boolean,
   ) {
     try {
-      const result = await this.vortexInstrumentService.getVortexInstruments({
-        exchange,
-        instrument_name,
-        symbol,
-        option_type,
-        is_active,
-        limit: limit ? parseInt(limit.toString()) : 50,
-        offset: offset ? parseInt(offset.toString()) : 0,
-      });
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
+      const includeLtp =
+        String(includeLtpRaw || 'true').toLowerCase() === 'true' ||
+        includeLtpRaw === true;
+
+      const { instruments, total } =
+        await this.vortexInstrumentService.getVortexInstruments({
+          exchange,
+          instrument_name,
+          symbol,
+          option_type,
+          is_active,
+          limit: limit ? parseInt(limit.toString()) : 50,
+          offset: offset ? parseInt(offset.toString()) : 0,
+          q,
+        });
+
+      let enrichedInstruments = instruments;
+      let ltpData = {};
+
+      if (includeLtp || ltpOnly) {
+        const tokens = instruments.map((i) => i.token);
+        if (tokens.length > 0) {
+          ltpData = await this.vortexInstrumentService.getVortexLTP(tokens);
+          enrichedInstruments = instruments.map((inst) => ({
+            ...inst,
+            last_price: ltpData[inst.token]?.last_price ?? null,
+          }));
+
+          if (ltpOnly) {
+            enrichedInstruments = enrichedInstruments.filter(
+              (i: any) => Number.isFinite(i.last_price) && i.last_price > 0,
+            );
+          }
+        }
+      }
+
       return {
         success: true,
-        data: result,
+        data: {
+          instruments: enrichedInstruments,
+          total: ltpOnly ? enrichedInstruments.length : total,
+          ltp_only: ltpOnly,
+        },
       };
     } catch (error) {
       throw new HttpException(

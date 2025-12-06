@@ -270,10 +270,25 @@ export class VortexInstrumentService {
     is_active?: boolean;
     limit?: number;
     offset?: number;
+    q?: string;
   }): Promise<{ instruments: VortexInstrument[]; total: number }> {
     try {
       const queryBuilder =
         this.vortexInstrumentRepo.createQueryBuilder('instrument');
+
+      if (filters?.q && filters.q.trim()) {
+        const query = filters.q.trim();
+        if (query.length >= 2) {
+          queryBuilder.andWhere(
+            `(instrument.symbol ILIKE :q OR instrument.instrument_name ILIKE :q)`,
+            { q: `%${query}%` },
+          );
+        } else {
+          queryBuilder.andWhere('instrument.symbol ILIKE :q', {
+            q: `%${query}%`,
+          });
+        }
+      }
 
       if (filters?.exchange) {
         queryBuilder.andWhere('instrument.exchange = :exchange', {

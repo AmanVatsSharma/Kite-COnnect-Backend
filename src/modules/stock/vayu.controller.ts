@@ -189,6 +189,20 @@ export class VayuController {
   @ApiQuery({ name: 'is_active', required: false, example: true })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
+  @ApiQuery({ name: 'q', required: false, description: 'Fuzzy symbol/name search' })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: false,
+    description:
+      'If true, only instruments with a valid last_price are returned',
+  })
+  @ApiQuery({
+    name: 'include_ltp',
+    required: false,
+    example: true,
+    description: 'If true (default), enrich instruments with LTP',
+  })
   async getVortexInstruments(
     @Query('exchange') exchange?: string,
     @Query('instrument_name') instrumentName?: string,
@@ -197,6 +211,9 @@ export class VayuController {
     @Query('is_active') isActive?: boolean,
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
+    @Query('q') q?: string,
+    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+    @Query('include_ltp') includeLtpRaw?: string | boolean,
   ) {
     return this.vayuManagementService.getVortexInstruments(
       exchange,
@@ -206,6 +223,9 @@ export class VayuController {
       isActive,
       limit,
       offset,
+      q,
+      ltpOnlyRaw,
+      includeLtpRaw,
     );
   }
 
