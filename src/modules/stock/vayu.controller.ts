@@ -421,7 +421,7 @@ export class VayuController {
   @ApiQuery({
     name: 'ltp_only',
     required: false,
-    example: true,
+    example: false,
     description:
       'If true, only instruments with a valid last_price are returned',
   })
@@ -448,7 +448,7 @@ export class VayuController {
   @ApiQuery({
     name: 'ltp_only',
     required: false,
-    example: true,
+    example: false,
     description:
       'If true, only instruments with a valid last_price are returned',
   })
@@ -482,7 +482,7 @@ export class VayuController {
   @ApiQuery({
     name: 'ltp_only',
     required: false,
-    example: true,
+    example: false,
     description:
       'If true, only instruments with a valid last_price are returned',
   })
@@ -528,7 +528,7 @@ export class VayuController {
   @ApiQuery({
     name: 'ltp_only',
     required: false,
-    example: true,
+    example: false,
     description:
       'If true, only instruments with a valid last_price are returned',
   })
@@ -579,7 +579,7 @@ export class VayuController {
   @ApiQuery({
     name: 'ltp_only',
     required: false,
-    example: true,
+    example: false,
     description:
       'If true, only instruments with a valid last_price are returned',
   })

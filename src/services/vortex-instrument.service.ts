@@ -131,6 +131,7 @@ export class VortexInstrumentService {
                 tick: vortexInstrument.tick,
                 lot_size: vortexInstrument.lot_size,
                 description,
+                is_active: true, // Reactivate instrument on sync
               },
             );
             updated++;
