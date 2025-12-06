@@ -44,6 +44,9 @@ import { FnoQueryParserService } from '../../services/fno-query-parser.service';
 import { VayuEquityService } from './services/vayu-equity.service';
 import { VayuFutureService } from './services/vayu-future.service';
 import { VayuOptionService } from './services/vayu-option.service';
+import { VayuSearchService } from './services/vayu-search.service';
+import { VayuManagementService } from './services/vayu-management.service';
+import { VayuMarketDataService } from './services/vayu-market-data.service';
 
 @Module({
   imports: [
@@ -95,6 +98,9 @@ import { VayuOptionService } from './services/vayu-option.service';
     VayuEquityService,
     VayuFutureService,
     VayuOptionService,
+    VayuSearchService,
+    VayuManagementService,
+    VayuMarketDataService,
   ],
   exports: [
     StockService,
