@@ -696,8 +696,9 @@ export class VortexInstrumentService {
       // Exact underlying symbol filter (used by trading-style F&O search)
       if (filters.underlying_symbol && filters.underlying_symbol.trim()) {
         const underlying = filters.underlying_symbol.trim().toUpperCase();
-        qb.andWhere('v.symbol = :underlyingSymbol', {
-          underlyingSymbol: underlying,
+        // Use prefix match to capture derivatives (e.g. RELIANCE matches RELIANCE24JAN...)
+        qb.andWhere('v.symbol ILIKE :underlyingSymbol', {
+          underlyingSymbol: `${underlying}%`,
         });
       }
 
