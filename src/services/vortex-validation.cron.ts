@@ -33,7 +33,6 @@ export class VortexValidationCronService {
             dry_run: true,
             include_invalid_list: false,
           },
-          this.vortexProvider,
         );
         this.logger.log(
           `[VortexValidationCron] ${ex}: tested=${res.summary.tested} invalid=${res.summary.invalid_ltp} errors=${res.summary.errors}`,

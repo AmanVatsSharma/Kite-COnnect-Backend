@@ -6,6 +6,7 @@ import { VortexInstrument } from '../entities/vortex-instrument.entity';
 import { InstrumentMapping } from '../entities/instrument-mapping.entity';
 import { VortexProviderService } from '../providers/vortex-provider.service';
 import { RedisService } from './redis.service';
+import { RequestBatchingService } from './request-batching.service';
 
 // Ambient declarations for environments missing DOM/lib typings
 declare const console: any;
@@ -31,6 +32,7 @@ export class VortexInstrumentService {
     private mappingRepo: Repository<InstrumentMapping>,
     private vortexProvider: VortexProviderService,
     private redisService: RedisService,
+    private requestBatchingService: RequestBatchingService,
   ) {}
 
   /**
@@ -768,10 +770,8 @@ export class VortexInstrumentService {
   ): Promise<Record<string, { last_price: number | null }>> {
     try {
       if (!pairs || pairs.length === 0) return {};
-      if (typeof (this.vortexProvider as any)?.getLTPByPairsAggregated === 'function') {
-        return await (this.vortexProvider as any).getLTPByPairsAggregated(pairs as any);
-      }
-      return await this.vortexProvider.getLTPByPairs(pairs as any);
+      // Use centralized request batching to optimize Vortex API calls (1/sec gate)
+      return await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider);
     } catch (e) {
       this.logger.warn('[VortexInstrumentService] hydrateLtpByPairs failed', e as any);
       return {};
@@ -1082,8 +1082,8 @@ export class VortexInstrumentService {
 
       // 3) No implicit fallback: unresolved tokens are left out per backend semantics
 
-      // 4) Fetch LTP using explicit pairs (single or chunked calls handled by provider)
-      const ltpByPairKey = await this.vortexProvider.getLTPByPairs(pairs);
+      // 4) Fetch LTP using explicit pairs via batching service
+      const ltpByPairKey = await this.requestBatchingService.getLtpByPairs(pairs, this.vortexProvider);
 
       // 5) Convert back to number-keyed map
       const result: Record<number, { last_price: number }> = {};
@@ -1519,7 +1519,6 @@ export class VortexInstrumentService {
       safe_cleanup?: boolean;
       limit?: number;
     },
-    vortexProvider: any,
     onProgress?: (p: {
       event: 'start' | 'batch_start' | 'batch_complete' | 'complete';
       total_instruments?: number;
@@ -1806,7 +1805,8 @@ export class VortexInstrumentService {
             // Console for easy debugging
             // eslint-disable-next-line no-console
             console.log(`[VortexInstrumentService] Probe ${attempt + 1}/${probeAttempts} for ${pairs.length} pairs (batch ${batchIndex + 1})`);
-            const ltpResults = await vortexProvider.getLTPByPairs(pairs, { bypassCache: true });
+            // Use centralized batching service instead of direct provider call
+            const ltpResults = await this.requestBatchingService.getLtpByPairs(pairs, this.vortexProvider);
             totalPairsIncluded += pairs.length;
             const keysCount = Object.keys(ltpResults || {}).length;
             if (keysCount === 0) attemptHadEmpty = true;

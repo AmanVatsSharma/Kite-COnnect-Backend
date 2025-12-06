@@ -598,7 +598,6 @@ export class VayuManagementService {
       const result =
         await this.vortexInstrumentService.validateAndCleanupInstruments(
           body,
-          this.vortexProvider,
         );
       return {
         success: true,
@@ -623,7 +622,6 @@ export class VayuManagementService {
       const result =
         await this.vortexInstrumentService.validateAndCleanupInstruments(
           filters,
-          this.vortexProvider,
         );
 
       // Transform to CSV-friendly flat structure
@@ -663,7 +661,6 @@ export class VayuManagementService {
       const result =
         await this.vortexInstrumentService.validateAndCleanupInstruments(
           body,
-          this.vortexProvider,
           (progress) => send(progress),
         );
       send({ event: 'result', result });
