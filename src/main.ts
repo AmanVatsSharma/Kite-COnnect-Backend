@@ -17,6 +17,8 @@ import { NativeWsService } from './services/native-ws.service';
 import { initSentry } from './observability/sentry';
 import { initOpenTelemetry } from './observability/otel';
 
+import { RedisIoAdapter } from './adapters/redis-io.adapter';
+
 // Basic Auth for Swagger (hardcoded per request)
 const SWAGGER_USERNAME = 'support@vedpragya.com';
 const SWAGGER_PASSWORD = 'aman1sharma';
@@ -120,6 +122,11 @@ async function bootstrap() {
       allowedHeaders: ['Content-Type', 'Authorization'],
       credentials: true,
     });
+
+    // Redis Adapter for Socket.IO
+    const redisIoAdapter = new RedisIoAdapter(app);
+    await redisIoAdapter.connectToRedis();
+    app.useWebSocketAdapter(redisIoAdapter);
 
     // Global prefix
     app.setGlobalPrefix('api');

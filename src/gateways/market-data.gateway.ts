@@ -28,8 +28,6 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { createAdapter } from '@socket.io/redis-adapter';
-import { createClient } from 'redis';
 import { Logger } from '@nestjs/common';
 import { RedisService } from '../services/redis.service';
 import { MarketDataProviderResolverService } from '../services/market-data-provider-resolver.service';
@@ -99,23 +97,6 @@ export class MarketDataGateway
    */
   async handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
-
-    try {
-      // Attach Redis adapter lazily on first connection
-      if (!(this.server as any)._redisAdapterAttached) {
-        const pubClient = createClient({
-          url: `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
-          socket: { family: 4 }, // Force IPv4 to avoid ::1 issues
-        });
-        const subClient = pubClient.duplicate();
-        await Promise.all([pubClient.connect(), subClient.connect()]);
-        this.server.adapter(createAdapter(pubClient, subClient));
-        (this.server as any)._redisAdapterAttached = true;
-        this.logger.log('Socket.IO Redis adapter attached');
-      }
-    } catch (e) {
-      this.logger.error('Failed to attach Socket.IO Redis adapter', e);
-    }
 
     // API key validation and connection limit enforcement
     try {
