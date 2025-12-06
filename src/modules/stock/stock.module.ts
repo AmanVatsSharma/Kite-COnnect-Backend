@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { StockController } from './stock.controller';
+import { VayuController } from './vayu.controller';
 import { StockService } from './stock.service';
 import { Instrument } from '../../entities/instrument.entity';
 import { MarketData } from '../../entities/market-data.entity';
@@ -66,6 +67,7 @@ import { VayuMarketDataService } from './services/vayu-market-data.service';
   ],
   controllers: [
     StockController,
+    VayuController,
     HealthController,
     AuthController,
     VortexAuthController,

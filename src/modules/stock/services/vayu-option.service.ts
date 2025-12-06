@@ -688,6 +688,90 @@ export class VayuOptionService {
         {
           success: false,
           message: 'Failed to get MCX options',
+          error: (error as any)?.message || error,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async getVortexOptionsChain(symbol: string, ltpOnlyRaw?: string | boolean) {
+    try {
+      const result =
+        await this.vortexInstrumentService.getVortexOptionsChain(symbol);
+
+      // Get live prices for all options
+      const allTokens = Object.values(result.options)
+        .flatMap((expiry) => Object.values(expiry))
+        .flatMap((strike) => [strike.CE?.token, strike.PE?.token])
+        .filter(Boolean) as number[];
+
+      const ltp =
+        allTokens.length > 0
+          ? await this.vortexInstrumentService.getVortexLTP(allTokens)
+          : {};
+
+      // Add live prices to options chain
+      const optionsWithPrices = { ...result.options };
+      for (const [expiry, strikes] of Object.entries(optionsWithPrices)) {
+        for (const [strikeStr, optionPair] of Object.entries(strikes)) {
+          const strike = Number(strikeStr);
+          if (optionPair.CE) {
+            optionPair.CE = {
+              ...optionPair.CE,
+              last_price: ltp?.[optionPair.CE.token]?.last_price ?? null,
+            } as any;
+          }
+          if (optionPair.PE) {
+            optionPair.PE = {
+              ...optionPair.PE,
+              last_price: ltp?.[optionPair.PE.token]?.last_price ?? null,
+            } as any;
+          }
+        }
+      }
+
+      // Optional filter by LTP
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
+      if (ltpOnly) {
+        for (const [expiry, strikes] of Object.entries(optionsWithPrices)) {
+          for (const [strikeStr, optionPair] of Object.entries(strikes)) {
+            const ceOk =
+              Number.isFinite((optionPair as any)?.CE?.last_price) &&
+              ((optionPair as any)?.CE?.last_price ?? 0) > 0;
+            const peOk =
+              Number.isFinite((optionPair as any)?.PE?.last_price) &&
+              ((optionPair as any)?.PE?.last_price ?? 0) > 0;
+            if (!ceOk && !peOk) {
+              delete (strikes as any)[strikeStr];
+            }
+          }
+          if (Object.keys(strikes).length === 0) {
+            delete (optionsWithPrices as any)[expiry];
+          }
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          symbol: result.symbol,
+          expiries: result.expiries,
+          strikes: result.strikes,
+          options: optionsWithPrices,
+          performance: {
+            queryTime: result.queryTime,
+          },
+          ltp_only: ltpOnly || false,
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to get options chain',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,

@@ -9,6 +9,14 @@ import { VortexValidationCronService } from '../../../services/vortex-validation
 import { BatchTokensDto } from '../dto/batch-tokens.dto';
 import { ValidateInstrumentsDto } from '../dto/validate-instruments.dto';
 import { ClearCacheDto } from '../dto/clear-cache.dto';
+import { randomUUID } from 'crypto';
+
+// Ambient declarations to satisfy TS in environments without DOM/lib definitions
+declare const console: any;
+declare function setImmediate(
+  handler: (...args: any[]) => void,
+  ...args: any[]
+): any;
 
 @Injectable()
 export class VayuManagementService {
@@ -49,6 +57,299 @@ export class VayuManagementService {
           success: false,
           message: 'Failed to sync instruments',
           error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async startVayuSync(
+    exchange?: string,
+    csvUrl?: string,
+    asyncRaw?: string | boolean,
+  ) {
+    const isAsync =
+      String(asyncRaw || '').toLowerCase() === 'true' || asyncRaw === true;
+    if (!isAsync) {
+      try {
+        const summary =
+          await this.vortexInstrumentService.syncVortexInstruments(
+            exchange,
+            csvUrl,
+          );
+        return {
+          success: true,
+          message: 'Sync completed',
+          data: summary,
+          timestamp: new Date().toISOString(),
+        };
+      } catch (error) {
+        if (error instanceof HttpException) throw error;
+        throw new HttpException(
+          {
+            success: false,
+            message: 'Vayu sync failed',
+            error: (error as any)?.message || 'unknown',
+          },
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+    }
+    // Async path using Redis progress store
+    try {
+      const jobId = randomUUID();
+      const key = `vayu:sync:job:${jobId}`;
+      await this.redisService.set(
+        key,
+        { status: 'started', exchange: exchange || 'all', ts: Date.now() },
+        3600,
+      );
+      setImmediate(async () => {
+        try {
+          await this.vortexInstrumentService.syncVortexInstruments(
+            exchange,
+            csvUrl,
+            async (p) => {
+              try {
+                await this.redisService.set(
+                  key,
+                  { status: 'running', progress: p, ts: Date.now() },
+                  3600,
+                );
+              } catch (e) {
+                // eslint-disable-next-line no-console
+                console.warn(
+                  '[Vayu Sync] Failed to write progress to Redis',
+                  e,
+                );
+              }
+            },
+          );
+          await this.redisService.set(
+            key,
+            { status: 'completed', ts: Date.now() },
+            3600,
+          );
+        } catch (e) {
+          await this.redisService.set(
+            key,
+            {
+              status: 'failed',
+              error: (e as any)?.message || 'unknown',
+              ts: Date.now(),
+            },
+            3600,
+          );
+        }
+      });
+      return {
+        success: true,
+        message: 'Sync job started',
+        jobId,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to start Vayu sync',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async startVayuSyncAlwaysAsync(exchange?: string, csvUrl?: string) {
+    try {
+      const jobId = randomUUID();
+      const key = `vayu:sync:job:${jobId}`;
+      await this.redisService.set(
+        key,
+        { status: 'started', exchange: exchange || 'all', ts: Date.now() },
+        3600,
+      );
+      setImmediate(async () => {
+        try {
+          await this.vortexInstrumentService.syncVortexInstruments(
+            exchange,
+            csvUrl,
+            async (p) => {
+              try {
+                await this.redisService.set(
+                  key,
+                  { status: 'running', progress: p, ts: Date.now() },
+                  3600,
+                );
+              } catch (e) {
+                // eslint-disable-next-line no-console
+                console.warn(
+                  '[Vayu Sync] Failed to write progress to Redis',
+                  e,
+                );
+              }
+            },
+          );
+          await this.redisService.set(
+            key,
+            { status: 'completed', ts: Date.now() },
+            3600,
+          );
+        } catch (e) {
+          await this.redisService.set(
+            key,
+            {
+              status: 'failed',
+              error: (e as any)?.message || 'unknown',
+              ts: Date.now(),
+            },
+            3600,
+          );
+        }
+      });
+      return {
+        success: true,
+        message: 'Sync job started',
+        jobId,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to start Vayu sync',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async streamVayuSync(exchange?: string, csvUrl?: string, res?: any) {
+    try {
+      // Set SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+
+      const send = (data: any) => {
+        try {
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[Vayu Sync SSE] write failed:', e);
+        }
+      };
+
+      send({
+        success: true,
+        event: 'start',
+        exchange: exchange || 'all',
+        ts: new Date().toISOString(),
+      });
+
+      const result = await this.vortexInstrumentService.syncVortexInstruments(
+        exchange,
+        csvUrl,
+        (p) =>
+          send({
+            success: true,
+            event: 'progress',
+            ...p,
+            ts: new Date().toISOString(),
+          }),
+      );
+
+      send({
+        success: true,
+        event: 'complete',
+        result,
+        ts: new Date().toISOString(),
+      });
+      res.end();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[Vayu Sync SSE] Error:', error);
+      try {
+        res.write(
+          `data: ${JSON.stringify({
+            success: false,
+            error: (error as any)?.message || 'unknown',
+          })}\n\n`,
+        );
+      } catch {}
+      res.end();
+    }
+  }
+
+  async getVayuSyncStatus(jobId: string) {
+    try {
+      if (!jobId) {
+        throw new HttpException(
+          { success: false, message: 'jobId is required' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const key = `vayu:sync:job:${jobId}`;
+      const data = await this.redisService.get<any>(key);
+      if (!data) {
+        throw new HttpException(
+          { success: false, message: 'Job not found or expired' },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      return { success: true, data };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to get status',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async deleteVayuInstrumentsByFilter(
+    exchange?: string,
+    instrument_name?: string,
+    instrument_type?: string,
+  ) {
+    try {
+      if (!exchange && !instrument_name && !instrument_type) {
+        throw new HttpException(
+          {
+            success: false,
+            message:
+              'At least one filter is required: exchange or instrument_name or instrument_type',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const deleted =
+        await this.vortexInstrumentService.deleteInstrumentsByFilter({
+          exchange,
+          instrument_name,
+          instrument_type,
+        });
+      return {
+        success: true,
+        message: 'Delete completed',
+        deleted,
+        filters: { exchange, instrument_name, instrument_type },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to delete instruments',
+          error: (error as any)?.message || 'unknown',
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -175,7 +476,8 @@ export class VayuManagementService {
 
   async getVortexInstrumentStats() {
     try {
-      const stats = await this.vortexInstrumentService.getVortexInstrumentStats();
+      const stats =
+        await this.vortexInstrumentService.getVortexInstrumentStats();
       return {
         success: true,
         data: stats,
@@ -372,8 +674,34 @@ export class VayuManagementService {
     }
   }
 
-  async getValidationStatus() {
-    return this.vortexValidationCronService.getStatus();
+  async getValidationStatus(jobId: string) {
+    try {
+      if (!jobId) {
+        throw new HttpException(
+          { success: false, message: 'jobId is required' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const key = `vayu:validate:job:${jobId}`;
+      const data = await this.redisService.get<any>(key);
+      if (!data) {
+        throw new HttpException(
+          { success: false, message: 'Job not found or expired' },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      return { success: true, data };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to get status',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   async deleteInactiveInstruments() {
@@ -397,4 +725,3 @@ export class VayuManagementService {
     }
   }
 }
-

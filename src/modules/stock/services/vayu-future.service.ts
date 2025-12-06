@@ -36,15 +36,12 @@ export class VayuFutureService {
         ltpOnlyRaw === true;
       const sortMode = (sort || 'relevance').toString().toLowerCase();
 
-      // Parse trading-style F&O queries like "nifty 28mar 26000" or "banknifty 25jan".
-      // The parser only provides hints; explicit query params always win.
       const parsed = q && q.trim() ? this.fnoQueryParser.parse(q) : undefined;
       const underlyingSymbol = parsed?.underlying;
       const effectiveQuery = underlyingSymbol ? undefined : q;
       const effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
       const effectiveExpiryTo = parsed?.expiryTo || expiry_to;
 
-      // Console log for easy debugging and later tuning of parsing behaviour
       // eslint-disable-next-line no-console
       console.log('[Vayu Futures Search]', {
         q,
@@ -104,14 +101,12 @@ export class VayuFutureService {
       }
 
       if (!ltpOnly) {
-        // First attempt: use parsed underlying_symbol + filters
         let result =
           await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
-            // Use exact underlying_symbol when parsed to keep DB filters index-friendly
             query: effectiveQuery,
             underlying_symbol: underlyingSymbol,
             exchange: exchange ? [exchange] : undefined,
-            instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'], // Added FUTCOM, FUTCUR
+            instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'],
             expiry_from: effectiveExpiryFrom,
             expiry_to: effectiveExpiryTo,
             limit: requestedLimit,
@@ -121,8 +116,6 @@ export class VayuFutureService {
             only_active: false,
           });
 
-        // Graceful fallback: if no instruments found and we had a query,
-        // retry with a looser fuzzy symbol search (query=q) and no underlying_symbol.
         if (
           (!result.instruments || result.instruments.length === 0) &&
           q &&
@@ -137,7 +130,7 @@ export class VayuFutureService {
               query: q.trim(),
               underlying_symbol: undefined,
               exchange: exchange ? [exchange] : undefined,
-              instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'], // Added FUTCOM, FUTCUR
+              instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'],
               expiry_from: effectiveExpiryFrom,
               expiry_to: effectiveExpiryTo,
               limit: requestedLimit,
@@ -204,18 +197,16 @@ export class VayuFutureService {
         return response;
       }
 
-      // Fast single-shot probe for ltp_only=true
       const probeLimit = Math.min(
         500,
         Math.max(requestedLimit * 4, requestedLimit + startOffset),
       );
-      // First attempt: parsed filters + only_active=true for tradable subset
       let page =
         await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
           query: effectiveQuery,
           underlying_symbol: underlyingSymbol,
           exchange: exchange ? [exchange] : undefined,
-          instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'], // Added FUTCOM, FUTCUR
+          instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'],
           expiry_from: effectiveExpiryFrom,
           expiry_to: effectiveExpiryTo,
           limit: probeLimit,
@@ -240,7 +231,7 @@ export class VayuFutureService {
             query: q.trim(),
             underlying_symbol: undefined,
             exchange: exchange ? [exchange] : undefined,
-            instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'], // Added FUTCOM, FUTCUR
+            instrument_type: ['FUTSTK', 'FUTIDX', 'FUTCOM', 'FUTCUR'],
             expiry_from: effectiveExpiryFrom,
             expiry_to: effectiveExpiryTo,
             limit: probeLimit,
@@ -316,6 +307,148 @@ export class VayuFutureService {
         {
           success: false,
           message: 'Failed to get futures',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async getUnderlyingFutures(
+    symbol: string,
+    exchange?: string,
+    limitRaw?: number,
+    offsetRaw?: number,
+    ltpOnlyRaw?: string | boolean,
+  ) {
+    try {
+      const baseSymbol = String(symbol || '')
+        .trim()
+        .toUpperCase();
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
+      const limit = Math.min(Number(limitRaw || 100), 500);
+      const offset = Number(offsetRaw || 0);
+      const t0 = Date.now();
+
+      const timer = this.metrics.foSearchLatencySeconds.startTimer({
+        endpoint: 'vayu_underlyings_futures',
+        ltp_only: String(ltpOnly),
+      });
+      this.metrics.foSearchRequestsTotal.inc({
+        endpoint: 'vayu_underlyings_futures',
+        ltp_only: String(ltpOnly),
+        parsed: 'no',
+      });
+
+      const cacheKey = [
+        'vayu:fno:underlying:futures',
+        `sym=${baseSymbol}`,
+        `ex=${exchange || 'ANY'}`,
+        `ltp=${ltpOnly ? '1' : '0'}`,
+        `lim=${limit}`,
+        `off=${offset}`,
+      ].join('|');
+      const ttl = Number(process.env.FO_CACHE_TTL_SECONDS || 2);
+
+      try {
+        const cached = await this.redisService.get<any>(cacheKey);
+        if (cached && cached.success === true) {
+          // eslint-disable-next-line no-console
+          console.log('[Vayu Underlying Futures] Cache HIT', { cacheKey });
+          timer();
+          return cached;
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[Vayu Underlying Futures] Cache READ failed (non-fatal)',
+          (e as any)?.message,
+        );
+      }
+
+      const result =
+        await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+          query: undefined,
+          underlying_symbol: baseSymbol,
+          exchange: exchange ? [exchange] : undefined,
+          instrument_type: ['FUTSTK', 'FUTIDX'],
+          limit,
+          offset,
+          sort_by: 'expiry_date',
+          sort_order: 'asc',
+        });
+      const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
+        result.instruments as any,
+      );
+      const ltpByPair = pairs.length
+        ? await this.vortexInstrumentService.hydrateLtpByPairs(pairs as any)
+        : {};
+
+      const contracts = result.instruments.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = ltpByPair?.[key]?.last_price ?? null;
+        const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          description: (i as any)?.description || null,
+          expiry_date: i.expiry_date,
+          instrument_name: i.instrument_name,
+          tick: (i as any)?.tick,
+          lot_size: (i as any)?.lot_size,
+          days_to_expiry: daysToExpiry,
+          last_price: lp,
+        };
+      });
+
+      const filtered = ltpOnly
+        ? contracts.filter(
+            (c: any) =>
+              Number.isFinite(c?.last_price) && ((c?.last_price ?? 0) > 0),
+          )
+        : contracts;
+
+      // Group by expiry date for easy options-chain style UIs
+      const groups: Record<string, any[]> = {};
+      for (const c of filtered) {
+        const exp = String(c.expiry_date || 'NA');
+        if (!groups[exp]) groups[exp] = [];
+        groups[exp].push(c);
+      }
+
+      const response = {
+        success: true,
+        data: {
+          symbol: baseSymbol,
+          futures: groups,
+          pagination: {
+            total: result.total,
+            hasMore: result.hasMore,
+          },
+          ltp_only: ltpOnly,
+          performance: { queryTime: Date.now() - t0 },
+        },
+      };
+
+      try {
+        await this.redisService.set(cacheKey, response, ttl);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[Vayu Underlying Futures] Cache WRITE failed (non-fatal)',
+          (e as any)?.message,
+        );
+      }
+      timer();
+      return response;
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to get futures for underlying',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
