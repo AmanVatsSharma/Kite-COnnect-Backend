@@ -41,6 +41,9 @@ import { ProviderQueueService } from '../../services/provider-queue.service';
 import { LtpMemoryCacheService } from '../../services/ltp-memory-cache.service';
 import { VortexValidationCronService } from '../../services/vortex-validation.cron';
 import { FnoQueryParserService } from '../../services/fno-query-parser.service';
+import { VayuEquityService } from './services/vayu-equity.service';
+import { VayuFutureService } from './services/vayu-future.service';
+import { VayuOptionService } from './services/vayu-option.service';
 
 @Module({
   imports: [
@@ -89,6 +92,9 @@ import { FnoQueryParserService } from '../../services/fno-query-parser.service';
     AbuseDetectionService,
     VortexValidationCronService,
     FnoQueryParserService,
+    VayuEquityService,
+    VayuFutureService,
+    VayuOptionService,
   ],
   exports: [
     StockService,

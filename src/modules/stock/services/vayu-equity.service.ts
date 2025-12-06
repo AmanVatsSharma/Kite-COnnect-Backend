@@ -1,7 +1,7 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { VortexInstrumentService } from '../../services/vortex-instrument.service';
-import { RequestBatchingService } from '../request-batching.service';
-import { VortexProviderService } from '../../providers/vortex-provider.service';
+import { VortexProviderService } from 'src/providers/vortex-provider.service';
+import { RequestBatchingService } from 'src/services/request-batching.service';
+import { VortexInstrumentService } from 'src/services/vortex-instrument.service';
 
 @Injectable()
 export class VayuEquityService {

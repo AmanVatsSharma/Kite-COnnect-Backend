@@ -1,10 +1,10 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { VortexInstrumentService } from '../../services/vortex-instrument.service';
-import { RequestBatchingService } from '../request-batching.service';
-import { VortexProviderService } from '../../providers/vortex-provider.service';
-import { RedisService } from '../../services/redis.service';
-import { FnoQueryParserService } from '../../services/fno-query-parser.service';
-import { MetricsService } from '../../services/metrics.service';
+import { VortexInstrumentService } from 'src/services/vortex-instrument.service';
+import { RequestBatchingService } from 'src/services/request-batching.service';
+import { VortexProviderService } from 'src/providers/vortex-provider.service';
+import { RedisService } from 'src/services/redis.service';
+import { FnoQueryParserService } from 'src/services/fno-query-parser.service';
+import { MetricsService } from 'src/services/metrics.service';
 
 @Injectable()
 export class VayuFutureService {
