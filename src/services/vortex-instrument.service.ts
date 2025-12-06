@@ -7,6 +7,7 @@ import { InstrumentMapping } from '../entities/instrument-mapping.entity';
 import { VortexProviderService } from '../providers/vortex-provider.service';
 import { RedisService } from './redis.service';
 import { RequestBatchingService } from './request-batching.service';
+import { FnoQueryParserService } from './fno-query-parser.service';
 
 // Ambient declarations for environments missing DOM/lib typings
 declare const console: any;
@@ -33,6 +34,7 @@ export class VortexInstrumentService {
     private vortexProvider: VortexProviderService,
     private redisService: RedisService,
     private requestBatchingService: RequestBatchingService,
+    private fnoQueryParser: FnoQueryParserService,
   ) {}
 
   /**
@@ -277,16 +279,51 @@ export class VortexInstrumentService {
         this.vortexInstrumentRepo.createQueryBuilder('instrument');
 
       if (filters?.q && filters.q.trim()) {
-        const query = filters.q.trim();
-        if (query.length >= 2) {
-          queryBuilder.andWhere(
-            `(instrument.symbol ILIKE :q OR instrument.instrument_name ILIKE :q)`,
-            { q: `%${query}%` },
-          );
+        const rawQ = filters.q.trim();
+        // Try to parse as F&O query
+        const parsed = this.fnoQueryParser.parse(rawQ);
+        const isFno =
+          parsed.strike || parsed.optionType || parsed.expiryFrom || parsed.expiryTo;
+
+        if (isFno) {
+          // Structured F&O search
+          if (parsed.underlying) {
+            queryBuilder.andWhere('instrument.symbol ILIKE :underlying', {
+              underlying: `${parsed.underlying}%`,
+            });
+          }
+          if (parsed.strike) {
+            queryBuilder.andWhere('instrument.strike_price = :strike', {
+              strike: parsed.strike,
+            });
+          }
+          if (parsed.optionType) {
+            queryBuilder.andWhere('instrument.option_type = :optionType', {
+              optionType: parsed.optionType,
+            });
+          }
+          if (parsed.expiryFrom) {
+            queryBuilder.andWhere('instrument.expiry_date >= :expiryFrom', {
+              expiryFrom: parsed.expiryFrom,
+            });
+          }
+          if (parsed.expiryTo) {
+            queryBuilder.andWhere('instrument.expiry_date <= :expiryTo', {
+              expiryTo: parsed.expiryTo,
+            });
+          }
         } else {
-          queryBuilder.andWhere('instrument.symbol ILIKE :q', {
-            q: `%${query}%`,
-          });
+          // Fallback to standard fuzzy search
+          if (rawQ.length >= 2) {
+            queryBuilder.andWhere(
+              `(instrument.symbol ILIKE :q OR instrument.instrument_name ILIKE :q)`,
+              { q: `%${rawQ}%` },
+            );
+          } else {
+            queryBuilder.andWhere('instrument.symbol ILIKE :q', {
+              q: `%${rawQ}%`,
+            });
+          }
         }
       }
 
