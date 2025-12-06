@@ -110,6 +110,7 @@ export class VayuSearchService {
         symbol: string;
         exchange: string;
         instrument_name: string;
+        description?: string | null;
       }> = [];
       for (const s of scoped) {
         const sym = String(s.symbol || '').toUpperCase();
@@ -120,6 +121,7 @@ export class VayuSearchService {
           symbol: sym,
           exchange: s.exchange,
           instrument_name: s.instrument_name,
+          description: s.description,
         });
         if (deduped.length >= limit) break;
       }

@@ -822,6 +822,7 @@ export class VortexInstrumentService {
           symbol: s.symbol,
           exchange: s.exchange,
           instrument_name: s.instrument_name,
+          description: s.description,
         })),
         queryTime,
       };
@@ -1270,6 +1271,7 @@ export class VortexInstrumentService {
           symbol: s.symbol,
           exchange: s.exchange,
           instrument_name: s.instrument_name,
+          description: s.description,
         }));
       },
     );

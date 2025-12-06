@@ -36,7 +36,7 @@ interface PendingPairRequest {
   timestamp: number;
 }
 
-interface BatchMetrics {
+export interface BatchMetrics {
   totalRequests: number;
   uniqueInstruments: number;
   batchedCalls: number;
