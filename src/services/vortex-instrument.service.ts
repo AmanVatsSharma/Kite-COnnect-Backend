@@ -280,12 +280,29 @@ export class VortexInstrumentService {
 
       if (filters?.q && filters.q.trim()) {
         const rawQ = filters.q.trim();
-        // Try to parse as F&O query
-        const parsed = this.fnoQueryParser.parse(rawQ);
-        const isFno =
-          parsed.strike || parsed.optionType || parsed.expiryFrom || parsed.expiryTo;
+        let isFno = false;
+        let parsed: any = null;
 
-        if (isFno) {
+        try {
+          if (this.fnoQueryParser) {
+            parsed = this.fnoQueryParser.parse(rawQ);
+            isFno = !!(
+              parsed.strike ||
+              parsed.optionType ||
+              parsed.expiryFrom ||
+              parsed.expiryTo
+            );
+          }
+        } catch (e) {
+          this.logger.warn(
+            `[VortexInstrumentService] Error parsing F&O query "${rawQ}"`,
+            e,
+          );
+          // Fallback to standard search on error
+          isFno = false;
+        }
+
+        if (isFno && parsed) {
           // Structured F&O search
           if (parsed.underlying) {
             queryBuilder.andWhere('instrument.symbol ILIKE :underlying', {
