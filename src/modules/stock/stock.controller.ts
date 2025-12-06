@@ -21,8 +21,10 @@ import {
   ApiSecurity,
   ApiHeader,
   ApiBody,
+  ApiResponse,
 } from '@nestjs/swagger';
 import { ApiKeyGuard } from '../../guards/api-key.guard';
+import { InstrumentsRequestDto } from './dto/instruments.dto';
 
 // Ambient declarations to satisfy TS in environments without DOM/lib definitions
 declare const console: any;

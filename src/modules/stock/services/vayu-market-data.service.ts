@@ -14,7 +14,7 @@ export class VayuMarketDataService {
 
   async getVortexHealth() {
     try {
-      const status = await this.vortexProvider.checkHealth();
+      const status = await this.vortexProvider.ping();
       return {
         success: true,
         data: status,
@@ -193,7 +193,7 @@ export class VayuMarketDataService {
   }
 
   async debugBatchStats() {
-    return this.requestBatchingService.getStats();
+    return this.requestBatchingService.getBatchStats();
   }
 }
 

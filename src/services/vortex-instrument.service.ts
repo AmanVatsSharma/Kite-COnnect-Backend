@@ -791,6 +791,7 @@ export class VortexInstrumentService {
       symbol: string;
       exchange: string;
       instrument_name: string;
+      description?: string | null;
     }>;
     queryTime: number;
   }> {
@@ -806,7 +807,7 @@ export class VortexInstrumentService {
       // Use optimized query with prefix matching for autocomplete
       const suggestions = await this.vortexInstrumentRepo
         .createQueryBuilder('v')
-        .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name'])
+        .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name', 'v.description'])
         .where('v.is_active = :active', { active: true })
         .andWhere('v.symbol ILIKE :query', { query: `${trimmedQuery}%` })
         .orderBy('v.symbol', 'ASC')
@@ -1238,6 +1239,7 @@ export class VortexInstrumentService {
       symbol: string;
       exchange: string;
       instrument_name: string;
+      description?: string | null;
     }>;
     queryTime: number;
   }> {
@@ -1256,7 +1258,7 @@ export class VortexInstrumentService {
       async () => {
         const suggestions = await this.vortexInstrumentRepo
           .createQueryBuilder('v')
-          .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name'])
+          .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name', 'v.description'])
           .where('v.is_active = :active', { active: true })
           .andWhere('v.symbol ILIKE :query', { query: `${trimmedQuery}%` })
           .orderBy('v.symbol', 'ASC')
@@ -1300,7 +1302,7 @@ export class VortexInstrumentService {
         // Get most common symbols (this could be enhanced with actual trading volume data)
         const popularSymbols = await this.vortexInstrumentRepo
           .createQueryBuilder('v')
-          .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name'])
+          .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name', 'v.description'])
           .where('v.is_active = :active', { active: true })
           .andWhere('v.instrument_name IN (:...types)', {
             types: ['EQUITIES', 'EQ'],
