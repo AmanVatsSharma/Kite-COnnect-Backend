@@ -8,6 +8,7 @@ import {
   Body,
   Request,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -16,7 +17,9 @@ import {
   ApiResponse,
   ApiBody,
   ApiProduces,
+  ApiSecurity,
 } from '@nestjs/swagger';
+import { ApiKeyGuard } from '../../guards/api-key.guard';
 import { BatchTokensDto } from './dto/batch-tokens.dto';
 import { ValidateInstrumentsDto } from './dto/validate-instruments.dto';
 import { LtpRequestDto } from './dto/ltp.dto';
@@ -29,6 +32,8 @@ import { VayuManagementService } from './services/vayu-management.service';
 import { VayuMarketDataService } from './services/vayu-market-data.service';
 
 @ApiTags('vayu')
+@ApiSecurity('apiKey')
+@UseGuards(ApiKeyGuard)
 @Controller('stock/vayu')
 export class VayuController {
   constructor(
@@ -206,10 +211,16 @@ export class VayuController {
 
   @Get('instruments/search')
   @ApiOperation({
-    summary: 'Search Vayu instruments by symbol or instrument name',
+    summary: 'Search Vayu instruments with advanced filters',
+    description:
+      'Search instruments by name/symbol with optional filters for exchange, type, validity, and LTP enrichment.',
   })
   @ApiQuery({ name: 'q', required: true, example: 'RELIANCE' })
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
+  @ApiQuery({ name: 'instrument_type', required: false, example: 'EQUITIES' })
+  @ApiQuery({ name: 'symbol', required: false, description: 'Exact symbol match' })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiQuery({ name: 'offset', required: false, example: 0 })
   @ApiQuery({
     name: 'include_ltp',
     required: false,
@@ -225,11 +236,21 @@ export class VayuController {
   })
   async searchVortexInstruments(
     @Query('q') q: string,
+    @Query('exchange') exchange?: string,
+    @Query('instrument_type') instrumentType?: string,
+    @Query('symbol') symbol?: string,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
     @Query('include_ltp') includeLtpRaw?: string | boolean,
   ) {
-    return this.vayuSearchService.searchVortexTickers(
+    return this.vayuSearchService.searchVortexInstruments(
       q,
+      exchange,
+      instrumentType,
+      symbol,
+      limit,
+      offset,
       ltpOnlyRaw,
       includeLtpRaw,
     );

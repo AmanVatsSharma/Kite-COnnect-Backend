@@ -563,6 +563,7 @@ export class VortexInstrumentService {
   async searchVortexInstrumentsAdvanced(filters: {
     query?: string; // Free-text symbol search (matches v.symbol via ILIKE / FTS)
     underlying_symbol?: string; // Exact underlying symbol (e.g., NIFTY, BANKNIFTY, GOLD)
+    symbol?: string; // Exact symbol match (e.g., RELIANCE)
     exchange?: string[]; // Multiple exchanges
     instrument_type?: string[]; // EQUITIES, OPTSTK, OPTIDX, etc.
     option_type?: 'CE' | 'PE'; // For options
@@ -627,6 +628,14 @@ export class VortexInstrumentService {
         const underlying = filters.underlying_symbol.trim().toUpperCase();
         qb.andWhere('v.symbol = :underlyingSymbol', {
           underlyingSymbol: underlying,
+        });
+      }
+
+      // Exact symbol match (used by searchVortexInstruments for direct lookup)
+      if (filters.symbol && filters.symbol.trim()) {
+        const exactSymbol = filters.symbol.trim().toUpperCase();
+        qb.andWhere('v.symbol = :exactSymbol', {
+          exactSymbol: exactSymbol,
         });
       }
 

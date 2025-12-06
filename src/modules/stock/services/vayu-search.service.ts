@@ -161,6 +161,124 @@ export class VayuSearchService {
     }
   }
 
+  async searchVortexInstruments(
+    q: string,
+    exchange?: string,
+    instrumentType?: string,
+    symbol?: string,
+    limitRaw?: number,
+    offsetRaw?: number,
+    ltpOnlyRaw?: string | boolean,
+    includeLtpRaw?: string | boolean,
+  ) {
+    try {
+      const limit = limitRaw ? parseInt(limitRaw.toString()) : 50;
+      const offset = offsetRaw ? parseInt(offsetRaw.toString()) : 0;
+      const ltpOnly =
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
+      const includeLtp =
+        String(includeLtpRaw || 'true').toLowerCase() === 'true' ||
+        includeLtpRaw === true;
+
+      let types = instrumentType ? instrumentType.split(',') : undefined;
+      if (types) {
+        const mapping: Record<string, string[]> = {
+          EQUITIES: ['EQUITIES', 'EQ', 'EQIDX'],
+          FUTURES: ['FUTSTK', 'FUTIDX', 'FUTCUR', 'FUTCOM'],
+          OPTIONS: ['OPTSTK', 'OPTIDX', 'OPTCUR', 'OPTFUT'],
+          COMMODITIES: ['FUTCOM', 'OPTFUT'],
+          CURRENCY: ['FUTCUR', 'OPTCUR'],
+        };
+        const mapped: string[] = [];
+        for (const t of types) {
+          const upper = t.toUpperCase().trim();
+          if (mapping[upper]) {
+            mapped.push(...mapping[upper]);
+          } else {
+            mapped.push(upper); // Keep as-is if not a category
+          }
+        }
+        types = [...new Set(mapped)]; // Deduplicate
+      }
+
+      const result =
+        await this.vortexInstrumentService.searchVortexInstrumentsAdvanced({
+          query: q,
+          exchange: exchange ? exchange.split(',') : undefined,
+          instrument_type: types,
+          symbol: symbol,
+          limit,
+          offset,
+          only_active: false,
+        });
+
+      const items = result.instruments || [];
+      // Build authoritative pairs from DB result
+      const pairs = items.map((i) => ({
+        exchange: String(i.exchange || '').toUpperCase(),
+        token: String(i.token),
+      }));
+
+      let pairLtp: Record<string, { last_price: number | null }> = {};
+      if ((includeLtp || ltpOnly) && pairs.length) {
+        pairLtp = await this.requestBatchingService.getLtpByPairs(
+          pairs as any,
+          this.vortexProvider,
+        );
+      }
+
+      const list = items.map((i) => {
+        const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
+        const lp = pairLtp?.[key]?.last_price ?? null;
+        return {
+          token: i.token,
+          symbol: i.symbol,
+          exchange: i.exchange,
+          instrument_name: i.instrument_name,
+          expiry_date: i.expiry_date,
+          option_type: i.option_type,
+          strike_price: i.strike_price,
+          tick: i.tick,
+          lot_size: i.lot_size,
+          description: i.description,
+          last_price: lp,
+        };
+      });
+
+      const filtered = ltpOnly
+        ? list.filter(
+            (v) =>
+              Number.isFinite((v as any)?.last_price) &&
+              ((v as any)?.last_price ?? 0) > 0,
+          )
+        : list;
+
+      return {
+        success: true,
+        data: filtered,
+        pagination: {
+          total: result.total,
+          hasMore: result.hasMore,
+          limit,
+          offset,
+        },
+        include_ltp: includeLtp,
+        ltp_only: ltpOnly,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to search Vayu instruments',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   async searchVortexTickers(
     q: string,
     ltpOnlyRaw?: string | boolean,
