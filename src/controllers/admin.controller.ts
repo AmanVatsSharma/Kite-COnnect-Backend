@@ -78,6 +78,12 @@ export class AdminController {
           description:
             'Optional per-API-key set_mode RPS limit (falls back to WS_MODE_RPS when omitted)',
         },
+        allowed_exchanges: {
+          type: 'array',
+          items: { type: 'string' },
+          example: ['NSE_EQ', 'NSE_FO'],
+          description: 'List of allowed exchanges for this API key',
+        },
       },
     },
   })
@@ -92,8 +98,14 @@ export class AdminController {
       ws_subscribe_rps?: number;
       ws_unsubscribe_rps?: number;
       ws_mode_rps?: number;
+      allowed_exchanges?: string[];
     },
   ) {
+    const metadata: any = {};
+    if (body.allowed_exchanges && Array.isArray(body.allowed_exchanges)) {
+      metadata.exchanges = body.allowed_exchanges;
+    }
+
     const entity = this.apiKeyRepo.create({
       key: body.key,
       tenant_id: body.tenant_id,
@@ -110,6 +122,7 @@ export class AdminController {
           : null,
       ws_mode_rps:
         typeof body.ws_mode_rps === 'number' ? body.ws_mode_rps : null,
+      metadata: Object.keys(metadata).length > 0 ? metadata : null,
     });
     const saved = await this.apiKeyRepo.save(entity);
     // Console for easy later debugging of admin-created keys
@@ -124,6 +137,7 @@ export class AdminController {
         ws_unsubscribe_rps: saved.ws_unsubscribe_rps,
         ws_mode_rps: saved.ws_mode_rps,
       },
+      metadata: saved.metadata,
     });
     return saved;
   }
@@ -155,6 +169,7 @@ export class AdminController {
         ws_subscribe_rps: { type: 'number' },
         ws_unsubscribe_rps: { type: 'number' },
         ws_mode_rps: { type: 'number' },
+        allowed_exchanges: { type: 'array', items: { type: 'string' } },
       },
       required: ['key'],
     },
@@ -168,6 +183,7 @@ export class AdminController {
       ws_subscribe_rps?: number | null;
       ws_unsubscribe_rps?: number | null;
       ws_mode_rps?: number | null;
+      allowed_exchanges?: string[];
     },
   ) {
     const patch: Partial<ApiKey> = {};
@@ -187,6 +203,21 @@ export class AdminController {
       patch.ws_mode_rps = body.ws_mode_rps;
     }
 
+    // Handle allowed_exchanges update via metadata
+    let metadataUpdated = false;
+    if (body.allowed_exchanges !== undefined) {
+      const currentEntity = await this.apiKeyRepo.findOne({
+        where: { key: body.key },
+      });
+      if (!currentEntity) {
+        throw new NotFoundException(`API key not found: ${body.key}`);
+      }
+      const currentMeta = currentEntity.metadata || {};
+      const newMeta = { ...currentMeta, exchanges: body.allowed_exchanges };
+      patch.metadata = newMeta;
+      metadataUpdated = true;
+    }
+
     if (Object.keys(patch).length === 0) {
       return {
         success: true,
@@ -197,7 +228,13 @@ export class AdminController {
 
     const result = await this.apiKeyRepo.update({ key: body.key }, patch);
     if (!result.affected) {
-      throw new NotFoundException(`API key not found: ${body.key}`);
+      // This might happen if key was deleted concurrently, but we checked existence above for metadata
+      // If only simple limits were updated without metadata read, we might hit this.
+      if (!metadataUpdated) {
+         // Double check if we didn't just do a findOne
+         const exists = await this.apiKeyRepo.count({ where: { key: body.key } });
+         if (!exists) throw new NotFoundException(`API key not found: ${body.key}`);
+      }
     }
 
     const entity = await this.apiKeyRepo.findOne({
@@ -210,6 +247,7 @@ export class AdminController {
           ws_subscribe_rps: entity.ws_subscribe_rps,
           ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
           ws_mode_rps: entity.ws_mode_rps,
+          allowed_exchanges: entity.metadata?.exchanges,
         }
       : patch;
 
@@ -246,6 +284,7 @@ export class AdminController {
       ws_subscribe_rps: entity.ws_subscribe_rps,
       ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
       ws_mode_rps: entity.ws_mode_rps,
+      allowed_exchanges: entity.metadata?.exchanges,
     };
 
     // eslint-disable-next-line no-console
@@ -287,6 +326,7 @@ export class AdminController {
       ws_subscribe_rps: entity.ws_subscribe_rps,
       ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
       ws_mode_rps: entity.ws_mode_rps,
+      allowed_exchanges: entity.metadata?.exchanges,
     };
 
     // eslint-disable-next-line no-console
@@ -340,6 +380,7 @@ export class AdminController {
             ws_subscribe_rps: entity.ws_subscribe_rps,
             ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
             ws_mode_rps: entity.ws_mode_rps,
+            allowed_exchanges: entity.metadata?.exchanges,
           },
           usage,
         };
