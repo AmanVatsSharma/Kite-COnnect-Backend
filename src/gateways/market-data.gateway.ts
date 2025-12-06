@@ -28,7 +28,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleInit } from '@nestjs/common';
 import { RedisService } from '../services/redis.service';
 import { MarketDataProviderResolverService } from '../services/market-data-provider-resolver.service';
 import { ApiKeyService } from '../services/api-key.service';
@@ -64,7 +64,7 @@ interface ClientSubscription {
   namespace: '/market-data', // Socket.IO namespace
 })
 export class MarketDataGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit
 {
   @WebSocketServer()
   server: Server;
@@ -83,6 +83,144 @@ export class MarketDataGateway
     private metrics: MetricsService,
     private abuseDetection: AbuseDetectionService,
   ) {}
+
+  async onModuleInit() {
+    // Subscribe to API key updates to enforce limits instantly across all instances
+    try {
+      await this.redisService.subscribe('api_key_updates', async (message) => {
+        try {
+          if (message && message.key) {
+            await this.handleApiKeyUpdate(message.key);
+          }
+        } catch (e) {
+          this.logger.error('Error handling api_key_updates message', e);
+        }
+      });
+      this.logger.log('Subscribed to api_key_updates channel');
+    } catch (e) {
+      this.logger.error('Failed to subscribe to api_key_updates', e);
+    }
+  }
+
+  /**
+   * Handle API key configuration updates (e.g. changed entitlements).
+   * - Refreshes the cached API key record for connected clients.
+   * - Re-evaluates active subscriptions against new allowed exchanges.
+   * - Instantly unsubscribes from forbidden instruments.
+   */
+  private async handleApiKeyUpdate(key: string) {
+    const affectedClients = Array.from(this.clientSubscriptions.values()).filter(
+      (sub) => sub.apiKey === key,
+    );
+
+    if (affectedClients.length === 0) return;
+
+    this.logger.log(
+      `Processing API key update for ${key} (${affectedClients.length} active clients)`,
+    );
+
+    // Fetch the latest API key record
+    const newRecord = await this.apiKeyService.validateApiKey(key);
+    if (!newRecord) {
+      // Key might have been deactivated or deleted
+      this.logger.warn(`API key ${key} no longer valid, disconnecting clients`);
+      for (const sub of affectedClients) {
+        const socket = this.server.sockets.sockets.get(sub.socketId);
+        if (socket) {
+          socket.emit('error', {
+            code: 'api_key_invalid',
+            message: 'API key is no longer valid',
+          });
+          socket.disconnect(true);
+        }
+      }
+      return;
+    }
+
+    // Update cached record and re-evaluate entitlements
+    const allowedExchanges = new Set(
+      (Array.isArray(newRecord.metadata?.exchanges) &&
+        newRecord.metadata?.exchanges) || [
+        'NSE_EQ',
+        'NSE_FO',
+        'NSE_CUR',
+        'MCX_FO',
+      ],
+    );
+
+    for (const sub of affectedClients) {
+      const socket = this.server.sockets.sockets.get(sub.socketId);
+      if (!socket) continue;
+
+      // Update cached record
+      (socket.data as any).apiKeyRecord = newRecord;
+
+      // Re-evaluate subscriptions
+      // We need to map current tokens back to exchanges to check permissions
+      const tokensToCheck = [...sub.instruments];
+      if (tokensToCheck.length === 0) continue;
+
+      // Resolve tokens to exchanges (best effort)
+      let tokenExchangeMap = new Map<number, string>();
+      try {
+        const provider = await this.providerResolver.resolveForWebsocket();
+        const exMap: Map<string, any> = (provider as any)?.resolveExchanges
+          ? await (provider as any).resolveExchanges(
+              tokensToCheck.map((t) => String(t)),
+            )
+          : new Map();
+        for (const [tokStr, ex] of exMap.entries()) {
+          tokenExchangeMap.set(Number(tokStr), String(ex));
+        }
+      } catch (e) {
+        this.logger.warn('Failed to resolve exchanges during update check', e);
+      }
+
+      const forbiddenTokens: number[] = [];
+      const keptTokens: number[] = [];
+
+      for (const token of tokensToCheck) {
+        const ex = tokenExchangeMap.get(token);
+        // If we can't resolve exchange, we assume it's allowed (fail-open) OR
+        // we could check if we have explicit pair info stored.
+        // For now, we rely on the resolver. If resolved and not in set -> forbidden.
+        if (ex && !allowedExchanges.has(ex)) {
+          forbiddenTokens.push(token);
+        } else {
+          keptTokens.push(token);
+        }
+      }
+
+      if (forbiddenTokens.length > 0) {
+        this.logger.log(
+          `Revoking ${forbiddenTokens.length} subscriptions for client ${sub.socketId} due to entitlement change`,
+        );
+        // Unsubscribe from forbidden tokens
+        await this.unsubscribeFromInstruments(forbiddenTokens, sub.socketId);
+        forbiddenTokens.forEach((t) => socket.leave(`instrument:${t}`));
+
+        // Update local state
+        sub.instruments = keptTokens;
+        forbiddenTokens.forEach((t) => sub.modeByInstrument.delete(t));
+
+        // Notify client
+        socket.emit('error', {
+          code: 'entitlement_revoked',
+          message: 'Some subscriptions were revoked due to updated API key permissions',
+          revoked_tokens: forbiddenTokens,
+        });
+        
+        // Send updated subscription list
+        socket.emit('unsubscription_confirmed', {
+          requested: forbiddenTokens,
+          removed: forbiddenTokens,
+          remaining: keptTokens,
+          reason: 'entitlement_update',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  }
 
   /**
    * Handle new client connection

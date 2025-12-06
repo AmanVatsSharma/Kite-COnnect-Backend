@@ -184,6 +184,25 @@ export class ApiKeyService {
     }
   }
 
+  /**
+   * Notify the system (specifically WebSocket gateways) that an API key's
+   * configuration (limits, entitlements) has changed.
+   * Uses Redis Pub/Sub to broadcast the update to all instances.
+   */
+  async notifyApiKeyUpdate(key: string): Promise<void> {
+    try {
+      await this.redisService.publish('api_key_updates', JSON.stringify({ key }));
+      // eslint-disable-next-line no-console
+      console.log(`[ApiKeyService] Published update notification for key=${key}`);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[ApiKeyService] Failed to publish API key update notification',
+        error,
+      );
+    }
+  }
+
   private buildMinuteBucketKey(prefix: string, key: string): string {
     const now = new Date();
     const minute = `${now.getUTCFullYear()}${now.getUTCMonth()}${now.getUTCDate()}${now.getUTCHours()}${now.getUTCMinutes()}`;

@@ -219,6 +219,9 @@ export class AdminController {
       limits,
     });
 
+    // Notify gateways of update
+    await this.apiKeyService.notifyApiKeyUpdate(body.key);
+
     return {
       success: true,
       key: body.key,
@@ -508,6 +511,8 @@ export class AdminController {
   @ApiBody({ schema: { properties: { apiKey: { type: 'string' }, exchanges: { type: 'array', items: { type: 'string' } } }, required: ['apiKey', 'exchanges'] } })
   async setWsEntitlements(@Body() body: { apiKey: string; exchanges: string[] }) {
     await this.apiKeyRepo.update({ key: body.apiKey }, { metadata: { exchanges: body.exchanges } as any });
+    // Notify gateways of update
+    await this.apiKeyService.notifyApiKeyUpdate(body.apiKey);
     return { success: true };
   }
 
