@@ -6,18 +6,18 @@ import { AppModule } from './app.module';
 import * as helmet from 'helmet';
 import * as compression from 'compression';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { ResponseInterceptor } from './common/interceptors/response.interceptor';
-import { RequestIdInterceptor } from './interceptors/request-id.interceptor';
-import { RateLimitInterceptor } from './interceptors/rate-limit.interceptor';
-import { RedisService } from './services/redis.service';
-import { MetricsInterceptor } from './interceptors/metrics.interceptor';
-import { OriginAuditInterceptor } from './interceptors/origin-audit.interceptor';
-import { NativeWsService } from './services/native-ws.service';
-import { initSentry } from './observability/sentry';
-import { initOpenTelemetry } from './observability/otel';
+import { HttpExceptionFilter } from '@shared/common/filters/http-exception.filter';
+import { ResponseInterceptor } from '@shared/common/interceptors/response.interceptor';
+import { RequestIdInterceptor } from '@shared/interceptors/request-id.interceptor';
+import { RateLimitInterceptor } from '@shared/interceptors/rate-limit.interceptor';
+import { RedisService } from '@infra/redis/redis.service';
+import { MetricsInterceptor } from '@shared/interceptors/metrics.interceptor';
+import { OriginAuditInterceptor } from '@shared/interceptors/origin-audit.interceptor';
+import { NativeWsService } from '@features/market-data/application/native-ws.service';
+import { initSentry } from '@infra/observability/sentry';
+import { initOpenTelemetry } from '@infra/observability/otel';
 
-import { RedisIoAdapter } from './adapters/redis-io.adapter';
+import { RedisIoAdapter } from '@infra/adapters/redis-io.adapter';
 
 // Basic Auth for Swagger (hardcoded per request)
 const SWAGGER_USERNAME = 'support@vedpragya.com';

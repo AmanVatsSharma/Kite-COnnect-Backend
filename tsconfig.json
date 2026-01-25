@@ -19,6 +19,12 @@
     "noFallthroughCasesInSwitch": false,
     "moduleResolution": "node",
     "types": ["node"],
-    "lib": ["ES2021"]
+    "lib": ["ES2021"],
+    "paths": {
+      "@infra/*": ["src/infra/*"],
+      "@shared/*": ["src/shared/*"],
+      "@features/*": ["src/features/*"],
+      "@config/*": ["src/config/*"]
+    }
   }
 }

@@ -3,11 +3,17 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { TerminusModule } from '@nestjs/terminus';
-import { StockModule } from './modules/stock/stock.module';
-import { FalconModule } from './modules/falcon/falcon.module';
 import { getDatabaseConfig } from './config/database.config';
-import { getRedisConfig } from './config/redis.config';
+
+import { RedisModule } from '@infra/redis/redis.module';
+import { AuthModule } from './features/auth/auth.module';
+import { AdminModule } from './features/admin/admin.module';
+import { MarketDataModule } from './features/market-data/market-data.module';
+import { KiteConnectModule } from './features/kite-connect/kite-connect.module';
+import { StockModule } from './features/stock/stock.module';
+import { FalconModule } from './features/falcon/falcon.module';
+import { HealthModule } from './features/health/health.module';
+import { ObservabilityModule } from './infra/observability/observability.module';
 
 @Module({
   imports: [
@@ -21,9 +27,15 @@ import { getRedisConfig } from './config/redis.config';
         getDatabaseConfig(configService),
       inject: [ConfigService],
     }),
-    TerminusModule,
+    ObservabilityModule,
+    RedisModule,
+    AuthModule,
+    AdminModule,
+    MarketDataModule,
+    KiteConnectModule,
     StockModule,
     FalconModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
