@@ -1,16 +1,16 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Instrument } from '../entities/instrument.entity';
-import { MarketData } from '../entities/market-data.entity';
-import { Subscription } from '../entities/subscription.entity';
-import { KiteSession } from '../entities/kite-session.entity';
-import { ApiKey } from '../entities/api-key.entity';
-import { InstrumentMapping } from '../entities/instrument-mapping.entity';
-import { VortexSession } from '../entities/vortex-session.entity';
-import { VortexInstrument } from '../entities/vortex-instrument.entity';
-import { FalconInstrument } from '../modules/falcon/entities/falcon-instrument.entity';
-import { RequestAuditLog } from '../entities/request-audit-log.entity';
-import { ApiKeyAbuseFlag } from '../entities/api-key-abuse-flag.entity';
+import { Instrument } from '@features/market-data/domain/instrument.entity';
+import { MarketData } from '@features/market-data/domain/market-data.entity';
+import { Subscription } from '@features/market-data/domain/subscription.entity';
+import { KiteSession } from '@features/kite-connect/domain/kite-session.entity';
+import { ApiKey } from '@features/auth/domain/api-key.entity';
+import { InstrumentMapping } from '@features/market-data/domain/instrument-mapping.entity';
+import { VortexSession } from '@features/stock/domain/vortex-session.entity';
+import { VortexInstrument } from '@features/stock/domain/vortex-instrument.entity';
+import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.entity';
+import { RequestAuditLog } from '@features/admin/domain/request-audit-log.entity';
+import { ApiKeyAbuseFlag } from '@features/auth/domain/api-key-abuse-flag.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
