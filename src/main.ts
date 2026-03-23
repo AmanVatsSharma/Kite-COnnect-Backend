@@ -3,7 +3,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
-import * as helmet from 'helmet';
+import { join } from 'path';
+import { existsSync } from 'fs';
+import * as express from 'express';
 import * as compression from 'compression';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from '@shared/common/filters/http-exception.filter';
@@ -27,9 +29,15 @@ function swaggerBasicAuth(req: any, res: any, next: any) {
   const authLogger = new Logger('SwaggerBasicAuth');
   const realm = 'Swagger Docs';
   const authHeader = req.headers['authorization'];
-  if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Basic ')) {
+  if (
+    !authHeader ||
+    typeof authHeader !== 'string' ||
+    !authHeader.startsWith('Basic ')
+  ) {
     res.setHeader('WWW-Authenticate', `Basic realm="${realm}"`);
-    authLogger.warn(`[401] Missing/invalid Authorization for ${req.method} ${req.originalUrl}`);
+    authLogger.warn(
+      `[401] Missing/invalid Authorization for ${req.method} ${req.originalUrl}`,
+    );
     return res.status(401).send('Authentication required.');
   }
   try {
@@ -42,10 +50,15 @@ function swaggerBasicAuth(req: any, res: any, next: any) {
       return next();
     }
     res.setHeader('WWW-Authenticate', `Basic realm="${realm}"`);
-    authLogger.warn(`[401] Invalid credentials user="${username}" for ${req.method} ${req.originalUrl}`);
+    authLogger.warn(
+      `[401] Invalid credentials user="${username}" for ${req.method} ${req.originalUrl}`,
+    );
     return res.status(401).send('Invalid credentials.');
   } catch (e) {
-    authLogger.error(`[500] Error decoding Authorization for ${req.method} ${req.originalUrl}`, e);
+    authLogger.error(
+      `[500] Error decoding Authorization for ${req.method} ${req.originalUrl}`,
+      e,
+    );
     return res.status(500).send('Auth error.');
   }
 }
@@ -57,8 +70,12 @@ async function bootstrap() {
     const app = await NestFactory.create<NestExpressApplication>(AppModule);
     const configService = app.get(ConfigService);
     // Observability (dynamic, safe when deps are missing)
-    try { initSentry(configService); } catch {}
-    try { await initOpenTelemetry(configService); } catch {}
+    try {
+      initSentry(configService);
+    } catch {}
+    try {
+      await initOpenTelemetry(configService);
+    } catch {}
 
     // Guidance: if Kite credentials are not configured, keep app running and guide user to login
     const kiteApiKey = configService.get('KITE_API_KEY');
@@ -112,14 +129,23 @@ async function bootstrap() {
       const redis = app.get(RedisService);
       app.useGlobalInterceptors(new RateLimitInterceptor(redis, configService));
     } catch (e) {
-      logger.warn('Rate limiter not initialized; continuing without throttling', e as any);
+      logger.warn(
+        'Rate limiter not initialized; continuing without throttling',
+        e as any,
+      );
     }
 
-    // CORS configuration
+    // CORS configuration (admin dashboard sends x-admin-token / x-api-key)
     app.enableCors({
       origin: configService.get('CORS_ORIGIN', '*'),
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-admin-token',
+        'x-api-key',
+        'x-provider',
+      ],
       credentials: true,
     });
 
@@ -131,15 +157,45 @@ async function bootstrap() {
     // Global prefix
     app.setGlobalPrefix('api');
 
-    // Serve static dashboard
-    app.useStaticAssets('src/public', {
-      prefix: '/dashboard',
-      index: ['dashboard.html'],
-    });
+    // Static: Vite SPA in public/dashboard + legacy HTML at public root (URLs under /dashboard/*)
+    const publicRoot = existsSync(join(__dirname, 'public'))
+      ? join(__dirname, 'public')
+      : join(process.cwd(), 'src', 'public');
+    const spaRoot = join(publicRoot, 'dashboard');
+    const spaIndexPath = join(spaRoot, 'index.html');
+    if (!existsSync(spaIndexPath)) {
+      logger.error(
+        `Admin SPA missing (${spaIndexPath}). Run: npm run admin:build`,
+      );
+      if (process.env.NODE_ENV === 'production') {
+        logger.error(
+          'Refusing to start in production without dashboard assets.',
+        );
+        process.exit(1);
+      }
+    }
+    app.use('/dashboard', express.static(spaRoot, { index: 'index.html' }));
+    app.use('/dashboard', express.static(publicRoot));
+    app.use(
+      '/dashboard',
+      (
+        req: express.Request,
+        res: express.Response,
+        next: express.NextFunction,
+      ) => {
+        if (req.method !== 'GET') return next();
+        const pathOnly = req.path.split('?')[0];
+        if (pathOnly.includes('.') && !pathOnly.endsWith('/')) return next();
+        res.sendFile(join(spaRoot, 'index.html'), (err) => next(err));
+      },
+    );
 
     // Protect Swagger endpoints with Basic Auth
     // Note: cover both UI and potential JSON endpoints
-    app.use(['/api/docs', '/api/docs/json', '/api-json', '/api/docs-json'], swaggerBasicAuth);
+    app.use(
+      ['/api/docs', '/api/docs/json', '/api-json', '/api/docs-json'],
+      swaggerBasicAuth,
+    );
 
     // Swagger setup
     const swaggerConfig = new DocumentBuilder()
@@ -163,10 +219,15 @@ async function bootstrap() {
       const httpAdapter: any = app.getHttpAdapter();
       const expressInstance = httpAdapter.getInstance?.() ?? httpAdapter;
       if (expressInstance && typeof expressInstance.get === 'function') {
-        expressInstance.get('/api/docs/json', (req: any, res: any) => res.json(document));
+        expressInstance.get('/api/docs/json', (req: any, res: any) =>
+          res.json(document),
+        );
       }
     } catch (e) {
-      logger.warn('Failed to bind /api/docs/json route for Swagger JSON; default /api-json may be used instead.', e);
+      logger.warn(
+        'Failed to bind /api/docs/json route for Swagger JSON; default /api-json may be used instead.',
+        e,
+      );
     }
 
     const port = configService.get('PORT', 3000);
@@ -188,6 +249,7 @@ async function bootstrap() {
       `📊 Health check available at http://localhost:${port}/api/health`,
     );
     logger.log(`📘 Swagger docs at http://localhost:${port}/api/docs`);
+    logger.log(`🧭 Admin dashboard at http://localhost:${port}/dashboard/`);
     logger.log(`📈 WebSocket available at ws://localhost:${port}/market-data`);
     if (!kiteApiKey || !kiteAccessToken) {
       logger.log(

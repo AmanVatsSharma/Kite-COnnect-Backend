@@ -67,8 +67,6 @@ export class NativeWsService implements OnModuleDestroy {
             (this.server as WSServer).emit('connection', ws, request);
           });
         } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error('[NativeWsService] upgrade handler error', e);
           this.logger.error('Upgrade handler error', e as any);
         }
       });
@@ -91,9 +89,6 @@ export class NativeWsService implements OnModuleDestroy {
         });
 
         client.on('error', (err) => {
-          // Console for easy later debugging
-          // eslint-disable-next-line no-console
-          console.error('[NativeWsService] Client error', err);
           this.logger.error('Client WS error', err as any);
         });
       } catch (e) {
@@ -102,9 +97,6 @@ export class NativeWsService implements OnModuleDestroy {
     });
 
     this.server.on('error', (err) => {
-      // Console for easy later debugging
-      // eslint-disable-next-line no-console
-      console.error('[NativeWsService] Server error', err);
       this.logger.error('WS server error', err as any);
     });
 
@@ -129,10 +121,7 @@ export class NativeWsService implements OnModuleDestroy {
       }
     }, 30000);
 
-    this.logger.log(`Native WebSocket server initialized on ${path}`);
-    // Console for easy later debugging
-    // eslint-disable-next-line no-console
-    console.log(`[NativeWsService] WS listening on path ${path}`);
+    this.logger.log(`Native WebSocket server initialized on path ${path}`);
   }
 
   onModuleDestroy() {
@@ -159,9 +148,6 @@ export class NativeWsService implements OnModuleDestroy {
     client.clientId = clientId;
 
     this.logger.log(`Native WebSocket client connected: ${clientId}`);
-    // Console for easy later debugging
-    // eslint-disable-next-line no-console
-    console.log(`[NativeWsService] Client connected ${clientId}`);
 
     // Parse query parameters for API key
     const url = new URL(request.url, 'http://dummy.com');
@@ -231,9 +217,6 @@ export class NativeWsService implements OnModuleDestroy {
   private async handleDisconnect(client: HeartbeatWebSocket) {
     const clientId = client.clientId || 'unknown';
     this.logger.log(`Native WebSocket client disconnected: ${clientId}`);
-    // Console for easy later debugging
-    // eslint-disable-next-line no-console
-    console.log(`[NativeWsService] Client disconnected ${clientId}`);
 
     const subscription = this.clientSubscriptions.get(clientId);
     if (subscription) {
@@ -348,13 +331,8 @@ export class NativeWsService implements OnModuleDestroy {
       subscription.modeByInstrument.set(token, mode);
     });
 
-    // Subscribe to streaming service
-    // Console for easy later debugging
-    // eslint-disable-next-line no-console
-    console.log(
-      `[NativeWsService] Subscribing client ${clientId} to ${instruments.length} instruments: ${JSON.stringify(
-        instruments,
-      )} with mode=${mode}`,
+    this.logger.debug(
+      `[NativeWsService] Subscribing client ${clientId} count=${instruments.length} mode=${mode}`,
     );
     await this.subscribeToInstruments(instruments, mode, clientId);
 
@@ -366,12 +344,7 @@ export class NativeWsService implements OnModuleDestroy {
     });
 
     this.logger.log(
-      `Client ${clientId} subscribed to ${instruments.length} instruments with mode=${mode}`,
-    );
-    // Console for easy later debugging
-    // eslint-disable-next-line no-console
-    console.log(
-      `[NativeWsService] Subscription confirmed sent to client ${clientId} for ${instruments.length} instruments`,
+      `Client ${clientId} subscribed to ${instruments.length} instruments with mode=${mode}; confirmation sent`,
     );
   }
 

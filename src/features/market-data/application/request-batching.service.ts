@@ -6,7 +6,14 @@
  * @author BharatERP
  * @created 2025-11-13
  */
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Inject,
+  forwardRef,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { MarketDataProvider } from '@features/market-data/infra/market-data.provider';
 import { ProviderQueueService } from '@features/market-data/application/provider-queue.service';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
@@ -46,8 +53,9 @@ export interface BatchMetrics {
 }
 
 @Injectable()
-export class RequestBatchingService {
+export class RequestBatchingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RequestBatchingService.name);
+  private metricsLogInterval: ReturnType<typeof setInterval> | null = null;
   private pendingRequests: Map<string, PendingRequest[]> = new Map();
   private pendingPairRequests: Map<string, PendingPairRequest[]> = new Map();
   private batchTimeout = 1000; // 1 second batch window for per-second batching
@@ -65,11 +73,19 @@ export class RequestBatchingService {
     private providerQueue: ProviderQueueService,
     @Inject(forwardRef(() => MarketDataStreamService))
     private marketDataStream: MarketDataStreamService,
-  ) {
-    // Log batching metrics every 10 seconds
-    setInterval(() => {
+  ) {}
+
+  onModuleInit() {
+    this.metricsLogInterval = setInterval(() => {
       this.logBatchingMetrics();
-    }, 10000);
+    }, 10_000);
+  }
+
+  onModuleDestroy() {
+    if (this.metricsLogInterval) {
+      clearInterval(this.metricsLogInterval);
+      this.metricsLogInterval = null;
+    }
   }
 
   async getQuote(tokens: string[], provider: MarketDataProvider): Promise<any> {
@@ -373,9 +389,26 @@ export class RequestBatchingService {
       for (const chunk of chunks) {
         try {
           const chunkStart = Date.now();
-          const map = await this.providerQueue.execute('ltp' as any, async () =>
-            (provider as any).getLTPByPairs(chunk),
-          );
+          const map = await this.providerQueue.execute('ltp' as any, async () => {
+            if (typeof provider.getLTPByPairs === 'function') {
+              return provider.getLTPByPairs(chunk);
+            }
+            const tokens = chunk.map((p) => String(p.token));
+            const ltp = await provider.getLTP(tokens);
+            const out: Record<string, { last_price: number | null }> = {};
+            for (const p of chunk) {
+              const k = `${String(p.exchange).toUpperCase()}-${String(p.token)}`;
+              const row = ltp?.[String(p.token)];
+              const lp = row?.last_price;
+              out[k] = {
+                last_price:
+                  Number.isFinite(Number(lp)) && Number(lp) > 0
+                    ? Number(lp)
+                    : null,
+              };
+            }
+            return out;
+          });
           batchedCalls++;
           const elapsed = Date.now() - chunkStart;
           Object.assign(results, map || {});
