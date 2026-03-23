@@ -42,6 +42,10 @@ import {
 import { OriginAuditService } from '@features/admin/application/origin-audit.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { AbuseDetectionService } from '@features/auth/application/abuse-detection.service';
+import {
+  shapeMarketTickForMode,
+  StreamTickMode,
+} from '@features/market-data/application/tick-shape.util';
 
 const PROTOCOL_VERSION = '2.0';
 
@@ -372,15 +376,22 @@ export class MarketDataGateway
     try {
       const apiKey: string = (client.data as any)?.apiKey;
       const record: any = (client.data as any)?.apiKeyRecord;
-      const limits = {
+      const limits: Record<string, any> = {
         connection: record?.connection_limit || 3,
+        maxUpstreamInstruments: 1000,
         maxSubscriptionsPerSocket: 1000,
-      } as any;
+      };
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
         const lim = (provider as any)?.getSubscriptionLimit?.();
         if (Number.isFinite(lim) && lim > 0) {
-          limits.maxSubscriptionsPerSocket = lim;
+          limits.maxUpstreamInstruments = lim;
+        }
+        const v = (provider as any)?.getVortexWsLimits?.() ?? null;
+        if (v) {
+          limits.maxSubscriptionsPerSocket = v.perSocket;
+          limits.maxVortexShards = v.maxShards;
+          limits.maxVortexInstruments = v.total;
         }
       } catch {}
       const exchanges =
@@ -699,11 +710,19 @@ export class MarketDataGateway
         client.join(`instrument:${token}`);
       });
 
-      // Ack with details
+      // Ack with details (Vortex: total = shards × 1000 per access token)
       let maxSubs = 1000;
       try {
         const lim = (provider as any)?.getSubscriptionLimit?.();
         if (Number.isFinite(lim) && lim > 0) maxSubs = lim;
+      } catch {}
+      let vortexLimits: {
+        perSocket: number;
+        maxShards: number;
+        total: number;
+      } | null = null;
+      try {
+        vortexLimits = (provider as any)?.getVortexWsLimits?.() ?? null;
       } catch {}
       // Initial snapshot for included tokens
       let snapshot: Record<string, { last_price: number | null }> = {};
@@ -728,7 +747,16 @@ export class MarketDataGateway
         forbidden: forbiddenPairs.map((p) => ({ token: p.token, exchange: p.exchange })),
         snapshot,
         mode,
-        limits: { maxSubscriptionsPerSocket: maxSubs },
+        limits: {
+          maxUpstreamInstruments: maxSubs,
+          ...(vortexLimits
+            ? {
+                maxSubscriptionsPerSocket: vortexLimits.perSocket,
+                maxVortexShards: vortexLimits.maxShards,
+                maxVortexInstruments: vortexLimits.total,
+              }
+            : {}),
+        },
         queues,
         timestamp: new Date().toISOString(),
       });
@@ -1084,14 +1112,23 @@ export class MarketDataGateway
           'NSE_CUR',
           'MCX_FO',
         ];
-      const limits = {
+      const limits: Record<string, any> = {
         connection: record?.connection_limit || 3,
+        maxUpstreamInstruments: 1000,
         maxSubscriptionsPerSocket: 1000,
-      } as any;
+      };
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
         const lim = (provider as any)?.getSubscriptionLimit?.();
-        if (Number.isFinite(lim) && lim > 0) limits.maxSubscriptionsPerSocket = lim;
+        if (Number.isFinite(lim) && lim > 0) {
+          limits.maxUpstreamInstruments = lim;
+        }
+        const v = (provider as any)?.getVortexWsLimits?.() ?? null;
+        if (v) {
+          limits.maxSubscriptionsPerSocket = v.perSocket;
+          limits.maxVortexShards = v.maxShards;
+          limits.maxVortexInstruments = v.total;
+        }
       } catch {}
 
       const sub = this.clientSubscriptions.get(client.id);
@@ -1460,27 +1497,27 @@ export class MarketDataGateway
   async broadcastMarketData(instrumentToken: number, data: any) {
     try {
       const startTime = Date.now();
-      const subscribedClients = Array.from(
-        this.clientSubscriptions.values(),
-      ).filter((sub) => sub.instruments.includes(instrumentToken));
+      const room = `instrument:${instrumentToken}`;
+      const sockets = await this.server.in(room).fetchSockets();
+      if (sockets.length === 0) return;
 
-      if (subscribedClients.length > 0) {
-        const message = {
+      const ts = new Date().toISOString();
+      for (const s of sockets) {
+        const sub = this.clientSubscriptions.get(s.id);
+        const mode: StreamTickMode =
+          sub?.modeByInstrument?.get(instrumentToken) || 'ltp';
+        const payload = shapeMarketTickForMode(data, mode);
+        s.emit('market_data', {
           instrumentToken,
-          data,
-          timestamp: new Date().toISOString(),
-        };
-
-        // Room-based broadcast
-        this.server
-          .to(`instrument:${instrumentToken}`)
-          .emit('market_data', message);
-
-        const broadcastTime = Date.now() - startTime;
-        this.logger.log(
-          `[Gateway] Broadcasted tick ${instrumentToken} to ${subscribedClients.length} clients in ${broadcastTime}ms`,
-        );
+          data: payload,
+          timestamp: ts,
+        });
       }
+
+      const broadcastTime = Date.now() - startTime;
+      this.logger.log(
+        `[Gateway] Broadcasted tick ${instrumentToken} to ${sockets.length} clients in ${broadcastTime}ms`,
+      );
     } catch (error) {
       this.logger.error('[Gateway] Error broadcasting market data', error);
     }
