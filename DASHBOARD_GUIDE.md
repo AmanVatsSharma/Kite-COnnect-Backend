@@ -2,7 +2,27 @@
 
 ## Overview
 
-The Ultimate Trading Data Provider Dashboard is a comprehensive web interface for managing market data providers, authentication, real-time monitoring, and system administration.
+The primary admin UI is a **Vite + React** single-page app (live polling via TanStack Query) served by Nest at **`/dashboard/`**. It covers the full `/api/admin/*` surface (API keys, provider/stream, WebSocket admin, abuse, audit, debug).
+
+The older one-file UI remains as **`/dashboard/legacy-dashboard.html`** (linked from the new app as “Legacy UI”).
+
+## React admin (recommended)
+
+### Development
+
+1. Terminal A: `npm run start:dev` (Nest, default port 3000).
+2. Terminal B: `npm run admin:dev` (Vite on port 5173; proxies `/api` to Nest).
+3. Open **`http://localhost:5173/dashboard/`** (Vite `base` is `/dashboard/`).
+
+Set **`ADMIN_TOKEN`** in Nest `.env`, then open **Settings** in the UI and paste the same value (stored in `sessionStorage` as `x-admin-token`).
+
+### Production build
+
+- From repo root: `npm run build` runs `admin:build` then `nest build`. Static files land in `src/public/dashboard` and are copied to `dist/public` for the Docker image.
+
+### Legacy static dashboard
+
+The Ultimate Trading Data Provider Dashboard (legacy) is a comprehensive single-file HTML interface for managing market data providers, authentication, real-time monitoring, and system administration.
 
 ## Features
 
@@ -58,7 +78,7 @@ The Ultimate Trading Data Provider Dashboard is a comprehensive web interface fo
 
 ### Getting Started
 
-1. **Access Dashboard**: Navigate to `/dashboard.html`
+1. **Access Dashboard**: Navigate to **`/dashboard/`** (React) or **`/dashboard/legacy-dashboard.html`** (legacy)
 2. **Authentication**: Complete provider authentication wizards
 3. **Admin Setup**: Configure global provider and start streaming
 4. **Testing**: Use testing tools to verify functionality

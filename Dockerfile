@@ -4,16 +4,18 @@ FROM node:18-alpine AS builder
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files (root + Vite admin app)
 COPY package*.json ./
+COPY apps/admin-dashboard/package*.json ./apps/admin-dashboard/
 
-# Install ALL dependencies (including devDependencies for build)
+# Install dependencies (admin UI + Nest)
 RUN npm ci && npm cache clean --force
+RUN cd apps/admin-dashboard && npm ci && npm cache clean --force
 
 # Copy source code
 COPY . .
 
-# Build the application
+# Build admin SPA into src/public/dashboard, then Nest (copies public to dist)
 RUN npm run build
 
 # Production stage

@@ -6,7 +6,9 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "admin:dev": "npm run dev --prefix apps/admin-dashboard",
+    "admin:build": "npm run build --prefix apps/admin-dashboard",
+    "build": "npm run admin:build && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",

@@ -1,7 +1,11 @@
 # compiled output
 /dist
 /node_modules
+/apps/admin-dashboard/node_modules
 /build
+
+# Vite admin SPA output (run npm run admin:build)
+/src/public/dashboard
 
 # Logs
 logs
