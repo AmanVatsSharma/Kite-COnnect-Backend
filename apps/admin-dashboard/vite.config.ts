@@ -1,20 +1,31 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-export default defineConfig({
-  plugins: [react()],
-  base: '/dashboard/',
-  build: {
-    outDir: '../../src/public/dashboard',
-    emptyOutDir: true,
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig(({ mode }) => {
+  const repoRoot = path.resolve(__dirname, '../..');
+  const env = loadEnv(mode, repoRoot, '');
+  const apiPort = env.PORT || '3000';
+  const target = `http://127.0.0.1:${apiPort}`;
+
+  return {
+    plugins: [react()],
+    base: '/dashboard/',
+    build: {
+      outDir: '../../src/public/dashboard',
+      emptyOutDir: true,
+    },
+    server: {
+      port: 5173,
+      proxy: {
+        '/api': {
+          target,
+          changeOrigin: true,
+        },
       },
     },
-  },
+  };
 });
