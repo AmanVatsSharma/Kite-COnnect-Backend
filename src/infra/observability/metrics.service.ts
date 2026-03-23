@@ -23,6 +23,16 @@ export class MetricsService {
   readonly httpRequestsByCountryTotal: Counter;
   readonly wsConnectionsByApiKey: Gauge;
   readonly wsEventsByApiKeyTotal: Counter;
+  /** Ingested tick messages from upstream provider (batch size summed in caller). */
+  readonly marketDataStreamTicksIngestedTotal: Counter;
+  /** Subscription/unsubscription queue evictions when caps are exceeded. */
+  readonly marketDataStreamQueueDroppedTotal: Counter;
+  /** Time to process one subscription batch window (subscribe + unsubscribe). */
+  readonly marketDataStreamBatchSeconds: Histogram;
+  /** 1 when upstream WS ticker is connected, 0 otherwise (low-cardinality). */
+  readonly marketDataStreamTickerConnected: Gauge;
+  /** 1 when active HTTP provider has no credentials / client (degraded), 0 otherwise. */
+  readonly providerDegradedMode: Gauge;
 
   constructor() {
     collectDefaultMetrics({ register });
@@ -121,6 +131,38 @@ export class MetricsService {
       name: 'ws_events_by_api_key_total',
       help: 'Total WebSocket events by API key and event type',
       labelNames: ['api_key', 'event'],
+      registers: [register],
+    });
+
+    this.marketDataStreamTicksIngestedTotal = new Counter({
+      name: 'market_data_stream_ticks_ingested_total',
+      help: 'Total ticks ingested from provider ticker into stream service',
+      labelNames: ['provider'],
+      registers: [register],
+    });
+    this.marketDataStreamQueueDroppedTotal = new Counter({
+      name: 'market_data_stream_queue_dropped_total',
+      help: 'Dropped or evicted items from stream subscription queues',
+      labelNames: ['reason'],
+      registers: [register],
+    });
+    this.marketDataStreamBatchSeconds = new Histogram({
+      name: 'market_data_stream_batch_seconds',
+      help: 'Latency of subscription batch processing',
+      labelNames: ['provider'],
+      buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2],
+      registers: [register],
+    });
+    this.marketDataStreamTickerConnected = new Gauge({
+      name: 'market_data_stream_ticker_connected',
+      help: 'Whether market data provider ticker WebSocket is connected (1=yes)',
+      labelNames: ['provider'],
+      registers: [register],
+    });
+    this.providerDegradedMode = new Gauge({
+      name: 'provider_degraded_mode',
+      help: 'Provider operating without full credentials or HTTP client (1=degraded)',
+      labelNames: ['provider'],
       registers: [register],
     });
   }
