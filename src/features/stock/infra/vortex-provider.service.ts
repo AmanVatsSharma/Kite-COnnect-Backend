@@ -12,6 +12,7 @@ import { InstrumentMapping } from '@features/market-data/domain/instrument-mappi
 import { RedisService } from '@infra/redis/redis.service';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { ProviderQueueService } from '@features/market-data/application/provider-queue.service';
+import { MetricsService } from '@infra/observability/metrics.service';
 
 // Minimal safe no-op ticker used when Vortex streaming is not configured
 class NoopTicker {
@@ -199,6 +200,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     private readonly redisService: RedisService,
     private readonly ltpCache: LtpMemoryCacheService,
     private readonly providerQueue: ProviderQueueService,
+    private readonly metrics: MetricsService,
     @InjectRepository(VortexSession)
     private vortexSessionRepo: Repository<VortexSession>,
     @InjectRepository(Instrument)
@@ -213,6 +215,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     await this.initialize();
     // Auto-load saved access token on startup
     await this.loadSavedToken();
+    this.refreshVortexDegradedMetric();
     // Start WS hotset warmer if enabled
     if (this.hotsetEnabled) {
       this.startHotsetWarmer();
@@ -237,9 +240,20 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         this.logger.log('[Vortex] HTTP client initialized');
       }
       this.initialized = true;
+      this.refreshVortexDegradedMetric();
     } catch (error) {
       this.logger.error('[Vortex] initialize failed (non-fatal)', error as any);
       this.initialized = false; // but keep provider usable with stubs
+      this.refreshVortexDegradedMetric();
+    }
+  }
+
+  private refreshVortexDegradedMetric() {
+    try {
+      const degraded = this.http ? 0 : 1;
+      this.metrics.providerDegradedMode.labels('vortex').set(degraded);
+    } catch {
+      /* non-fatal */
     }
   }
 
@@ -1619,6 +1633,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     return {
       initialized: this.initialized,
       httpConfigured: !!this.http,
+      httpClientReady: !!this.http,
+      degraded: !this.http,
       wsConnected: this.wsConnected,
       reconnectAttempts: this.reconnectAttempts,
       hasAccessToken: !!this.accessToken,
@@ -1718,9 +1734,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         return { token: t, exchange: (r?.exchange as any) || null, source: (r?.source as any) || null };
       });
 
-      // Console-friendly summary for quick inspection
-      // eslint-disable-next-line no-console
-      console.log('[Vortex Debug] resolve summary:', {
+      this.logger.debug('[Vortex Debug] resolve summary', {
         requested: input.length,
         resolved: out.filter((x) => !!x.exchange).length,
         via: { vortex_instruments: viCount, instrument_mappings: imCount, instruments: instCount },
@@ -1746,8 +1760,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       .map((r) => `${r.exchange}-${r.token}`);
     const qParams = pairs.map((k) => `q=${encodeURIComponent(k)}`).join('&');
     const url = `/data/quotes?${qParams}&mode=${mode}`;
-    // eslint-disable-next-line no-console
-    console.log('[Vortex Debug] buildQuery:', { mode, requested: tokens.length, included: pairs.length });
+    this.logger.debug('[Vortex Debug] buildQuery', {
+      mode,
+      requested: tokens.length,
+      included: pairs.length,
+    });
     return {
       pairs,
       url,

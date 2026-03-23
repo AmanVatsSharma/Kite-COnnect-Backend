@@ -267,13 +267,9 @@ export class MarketDataGateway
             risk_score: status.risk_score,
             reasons: status.reason_codes,
           });
-          // eslint-disable-next-line no-console
-          console.log('[MarketDataGateway] Blocked API key WS connect rejected', {
-            apiKey,
-            tenant_id: (record as any)?.tenant_id,
-            risk_score: status.risk_score,
-            reasons: status.reason_codes,
-          });
+          this.logger.warn(
+            `[MarketDataGateway] Blocked API key WS connect rejected apiKey=${apiKey} tenant=${(record as any)?.tenant_id} risk=${status.risk_score}`,
+          );
           client.disconnect(true);
           return;
         }
@@ -282,14 +278,8 @@ export class MarketDataGateway
           `Abuse detection check failed for WS key=${apiKey}; continuing`,
           e as any,
         );
-        // eslint-disable-next-line no-console
-        console.error(
-          '[MarketDataGateway] Abuse detection check failed – continuing',
-          {
-            apiKey,
-            tenant_id: (record as any)?.tenant_id,
-            error: (e as any)?.message ?? e,
-          },
+        this.logger.warn(
+          `[MarketDataGateway] Abuse detection check failed — continuing apiKey=${apiKey} err=${(e as any)?.message ?? e}`,
         );
       }
       await this.apiKeyService.trackWsConnection(
@@ -578,14 +568,8 @@ export class MarketDataGateway
             limit,
             retry_after_ms: rl.retry_after_ms,
           });
-          // eslint-disable-next-line no-console
-          console.log(
-            '[MarketDataGateway] Subscribe rate limit exceeded',
-            JSON.stringify({
-              apiKey,
-              limit,
-              retry_after_ms: rl.retry_after_ms,
-            }),
+          this.logger.warn(
+            `[MarketDataGateway] Subscribe rate limit exceeded apiKey=${apiKey} limit=${limit} retry_after_ms=${rl.retry_after_ms}`,
           );
           return;
         }
@@ -704,22 +688,15 @@ export class MarketDataGateway
 
       // Delegate to stream service via pairs to prime mapping first
       if (finalPairs.length > 0) {
-        console.log(
-          `[MarketDataGateway] Subscribing client ${client.id} with ${finalPairs.length} pairs (mode=${mode})`,
+        this.logger.debug(
+          `[MarketDataGateway] Subscribing client ${client.id} pairs=${finalPairs.length} mode=${mode}`,
         );
-        await (this.streamService as any).subscribePairs?.(
-          finalPairs,
-          mode,
-          client.id,
-        );
+        await this.streamService.subscribePairs(finalPairs, mode, client.id);
       }
 
       // Join rooms only for included tokens
       includedTokens.forEach((token) => {
         client.join(`instrument:${token}`);
-        console.log(
-          `[MarketDataGateway] Client ${client.id} joined room for instrument:${token}`,
-        );
       });
 
       // Ack with details
@@ -818,10 +795,7 @@ export class MarketDataGateway
       }
 
       this.logger.log(
-        `Client ${client.id} subscribed to ${includedTokens.length}/${requestedRaw.length} instruments with mode=${mode}`,
-      );
-      console.log(
-        `[MarketDataGateway] Subscription confirmed sent to client ${client.id} (included=${includedTokens.length}, unresolved=${unresolved.length})`,
+        `Client ${client.id} subscribed to ${includedTokens.length}/${requestedRaw.length} instruments with mode=${mode}; confirmed (unresolved=${unresolved.length})`,
       );
     } catch (error) {
       this.logger.error('Error handling instrument subscription', error);
@@ -902,14 +876,8 @@ export class MarketDataGateway
             limit,
             retry_after_ms: rl.retry_after_ms,
           });
-          // eslint-disable-next-line no-console
-          console.log(
-            '[MarketDataGateway] Unsubscribe rate limit exceeded',
-            JSON.stringify({
-              apiKey,
-              limit,
-              retry_after_ms: rl.retry_after_ms,
-            }),
+          this.logger.warn(
+            `[MarketDataGateway] Unsubscribe rate limit exceeded apiKey=${apiKey} limit=${limit} retry_after_ms=${rl.retry_after_ms}`,
           );
           return;
         }
@@ -1257,14 +1225,8 @@ export class MarketDataGateway
             limit,
             retry_after_ms: rl.retry_after_ms,
           });
-          // eslint-disable-next-line no-console
-          console.log(
-            '[MarketDataGateway] Set mode rate limit exceeded',
-            JSON.stringify({
-              apiKey,
-              limit,
-              retry_after_ms: rl.retry_after_ms,
-            }),
+          this.logger.warn(
+            `[MarketDataGateway] Set mode rate limit exceeded apiKey=${apiKey} limit=${limit} retry_after_ms=${rl.retry_after_ms}`,
           );
           return;
         }
