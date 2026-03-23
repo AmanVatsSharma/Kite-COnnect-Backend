@@ -1,7 +1,18 @@
+/**
+ * @file AuditDebugPage.tsx
+ * @module admin-dashboard
+ * @description Audit sampling and provider debug endpoints with labeled fields and raw JSON.
+ */
+
 import { useQuery } from '@tanstack/react-query';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
-import { JsonBlock } from '../components/JsonBlock';
+import { ErrorInline } from '../components/ErrorInline';
+import { KeyValueGrid } from '../components/KeyValueGrid';
+import { RawJsonDetails } from '../components/RawJsonDetails';
+import { SectionCard } from '../components/section-card';
+import { auditConfigToRows } from '../lib/views/audit-views';
+import { flattenObject } from '../lib/views/flatten';
 
 export function AuditDebugPage() {
   const token = getAdminToken();
@@ -38,21 +49,34 @@ export function AuditDebugPage() {
     <>
       <section className="card">
         <h2>Audit sampling config</h2>
-        {audit.isError && <p className="err">{(audit.error as Error).message}</p>}
-        {audit.data && <JsonBlock value={audit.data} />}
+        <ErrorInline message={audit.isError ? (audit.error as Error).message : null} />
+        {audit.data && (
+          <>
+            <KeyValueGrid rows={auditConfigToRows(audit.data).map((r) => ({ label: r.label, value: r.value }))} />
+            <RawJsonDetails value={audit.data} summary="Technical details (raw JSON)" />
+          </>
+        )}
       </section>
 
-      <section className="card">
-        <h2>Falcon (Kite) debug</h2>
-        {falcon.isError && <p className="err">{(falcon.error as Error).message}</p>}
-        {falcon.data && <JsonBlock value={falcon.data} />}
-      </section>
+      <SectionCard title="Falcon (Kite) debug" collapsible defaultOpen={false}>
+        <ErrorInline message={falcon.isError ? (falcon.error as Error).message : null} />
+        {falcon.data && (
+          <div className="debug-kv">
+            <KeyValueGrid rows={flattenObject(falcon.data, '', 3).map((r) => ({ label: r.label, value: r.value }))} />
+            <RawJsonDetails value={falcon.data} summary="Technical details (raw JSON)" />
+          </div>
+        )}
+      </SectionCard>
 
-      <section className="card">
-        <h2>Vayu (Vortex) debug</h2>
-        {vayu.isError && <p className="err">{(vayu.error as Error).message}</p>}
-        {vayu.data && <JsonBlock value={vayu.data} />}
-      </section>
+      <SectionCard title="Vayu (Vortex) debug" collapsible defaultOpen={false}>
+        <ErrorInline message={vayu.isError ? (vayu.error as Error).message : null} />
+        {vayu.data && (
+          <div className="debug-kv">
+            <KeyValueGrid rows={flattenObject(vayu.data, '', 3).map((r) => ({ label: r.label, value: r.value }))} />
+            <RawJsonDetails value={vayu.data} summary="Technical details (raw JSON)" />
+          </div>
+        )}
+      </SectionCard>
     </>
   );
 }
