@@ -1,3 +1,10 @@
+/**
+ * @file market-data-stream.service.ts
+ * @module market-data
+ * @description Orchestrates provider ticker streaming, subscription batching, LTP cache, and Redis stream status.
+ * @author BharatERP
+ * @created 2025-03-23
+ */
 import {
   Injectable,
   Logger,
@@ -27,6 +34,14 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   private unsubscriptionQueue: Set<number> = new Set();
   private subscriptionBatchInterval: NodeJS.Timeout | null = null;
   private readonly SUBSCRIBE_CHUNK_SIZE = 500; // backpressure-friendly chunking
+  /** Cap queued subscribe entries to limit memory under storms. */
+  private readonly SUB_QUEUE_MAX = 50_000;
+  private readonly UNSUB_QUEUE_MAX = 50_000;
+  /** Prometheus label for stream metrics (resolved provider). */
+  private streamMetricsProvider = 'unknown';
+  /** Attach stream-level ticker handlers once per ticker instance (avoids duplicates on re-init). */
+  private readonly tickerStreamHandlersBound = new WeakMap<object, true>();
+  private readonly rateLogAt = new Map<string, number>();
 
   constructor(
     private providerResolver: MarketDataProviderResolverService,
@@ -44,41 +59,118 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     await this.stopStreaming();
   }
 
+  private rateLimitedLog(
+    level: 'debug' | 'warn',
+    key: string,
+    message: string,
+    minIntervalMs = 10_000,
+  ) {
+    const now = Date.now();
+    if (now - (this.rateLogAt.get(key) || 0) < minIntervalMs) return;
+    this.rateLogAt.set(key, now);
+    if (level === 'warn') this.logger.warn(message);
+    else this.logger.debug(message);
+  }
+
+  private ensureSubscriptionQueueCapacity(incomingNewTokens: number) {
+    while (this.subscriptionQueue.size + incomingNewTokens > this.SUB_QUEUE_MAX) {
+      const first = this.subscriptionQueue.keys().next().value;
+      if (first === undefined) break;
+      this.subscriptionQueue.delete(first);
+      try {
+        this.metrics.marketDataStreamQueueDroppedTotal
+          .labels('subscribe_evict')
+          .inc();
+      } catch {}
+    }
+  }
+
+  private trimUnsubscriptionQueue() {
+    while (this.unsubscriptionQueue.size > this.UNSUB_QUEUE_MAX) {
+      const first = this.unsubscriptionQueue.values().next().value;
+      if (first === undefined) break;
+      this.unsubscriptionQueue.delete(first);
+      try {
+        this.metrics.marketDataStreamQueueDroppedTotal
+          .labels('unsubscribe_evict')
+          .inc();
+      } catch {}
+    }
+  }
+
   private async initializeStreaming() {
     try {
+      const providerName =
+        (await this.providerResolver.getGlobalProviderName()) ||
+        (this.providerResolver as any)?.config?.get?.('DATA_PROVIDER') ||
+        'kite';
+      this.streamMetricsProvider = String(providerName).toLowerCase();
+
       // Global provider for WS streaming
       const provider = await this.providerResolver.resolveForWebsocket();
       const ticker = provider.initializeTicker();
 
-      // Set up ticker event handlers
+      // Set up ticker event handlers (idempotent per ticker instance)
       if (ticker?.on) {
-        ticker.on('ticks', (ticks: any[]) => {
-          this.handleTicks(ticks);
-        });
+        if (!this.tickerStreamHandlersBound.has(ticker)) {
+          this.tickerStreamHandlersBound.set(ticker, true);
 
-        ticker.on('connect', () => {
-          this.logger.log('Provider ticker connected');
-          this.isStreaming = true;
-          try {
-            this.redisService.publish('stream:status', { event: 'connected', ts: Date.now() });
-          } catch {}
-        });
+          ticker.on('ticks', (ticks: any[]) => {
+            this.handleTicks(ticks);
+          });
 
-        ticker.on('disconnect', () => {
-          this.logger.log('Provider ticker disconnected');
-          this.isStreaming = false;
-          try {
-            this.redisService.publish('stream:status', { event: 'disconnected', ts: Date.now() });
-          } catch {}
-        });
+          ticker.on('connect', () => {
+            this.logger.log('Provider ticker connected');
+            this.isStreaming = true;
+            try {
+              this.metrics.marketDataStreamTickerConnected
+                .labels(this.streamMetricsProvider)
+                .set(1);
+            } catch {}
+            try {
+              this.redisService.publish('stream:status', {
+                event: 'connected',
+                provider: this.streamMetricsProvider,
+                ts: Date.now(),
+              });
+            } catch {}
+          });
 
-        ticker.on('error', (error: any) => {
-          this.logger.error('Provider ticker error', error);
-          this.isStreaming = false;
-          try {
-            this.redisService.publish('stream:status', { event: 'error', error: (error?.message || 'unknown'), ts: Date.now() });
-          } catch {}
-        });
+          ticker.on('disconnect', () => {
+            this.logger.log('Provider ticker disconnected');
+            this.isStreaming = false;
+            try {
+              this.metrics.marketDataStreamTickerConnected
+                .labels(this.streamMetricsProvider)
+                .set(0);
+            } catch {}
+            try {
+              this.redisService.publish('stream:status', {
+                event: 'disconnected',
+                provider: this.streamMetricsProvider,
+                ts: Date.now(),
+              });
+            } catch {}
+          });
+
+          ticker.on('error', (error: any) => {
+            this.logger.error('Provider ticker error', error);
+            this.isStreaming = false;
+            try {
+              this.metrics.marketDataStreamTickerConnected
+                .labels(this.streamMetricsProvider)
+                .set(0);
+            } catch {}
+            try {
+              this.redisService.publish('stream:status', {
+                event: 'error',
+                provider: this.streamMetricsProvider,
+                error: error?.message || 'unknown',
+                ts: Date.now(),
+              });
+            } catch {}
+          });
+        }
 
         // Connect to ticker with safe guard
         // Connect without blocking startup; failures will be logged inside the provider
@@ -94,9 +186,25 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           this.logger.error('Error scheduling provider ticker connect', e);
         }
       } else {
-        this.logger.warn(
-          'Ticker not initialized; ensure provider is configured and authenticated (Kite or Vortex)',
+        this.rateLimitedLog(
+          'warn',
+          'ticker_missing',
+          'Ticker not initialized; market data WS is in degraded mode (configure credentials).',
+          60_000,
         );
+        try {
+          this.metrics.marketDataStreamTickerConnected
+            .labels(this.streamMetricsProvider)
+            .set(0);
+        } catch {}
+        try {
+          this.redisService.publish('stream:status', {
+            event: 'degraded',
+            reason: 'no_ticker',
+            provider: this.streamMetricsProvider,
+            ts: Date.now(),
+          });
+        } catch {}
       }
 
       this.logger.log('Market data streaming service initialized');
@@ -107,20 +215,21 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
   private async handleTicks(ticks: any[]) {
     try {
-      console.log(
-        `[MarketDataStreamService] Received ${ticks.length} ticks from provider`,
+      if (!Array.isArray(ticks) || ticks.length === 0) return;
+      try {
+        this.metrics.marketDataStreamTicksIngestedTotal
+          .labels(this.streamMetricsProvider)
+          .inc(ticks.length);
+      } catch {}
+      this.logger.debug(
+        `[StreamBatching] Ingesting tick batch count=${ticks.length} provider=${this.streamMetricsProvider}`,
       );
-      this.logger.debug(`[StreamBatching] Handling ${ticks.length} ticks`);
 
       for (const tick of ticks) {
         const instrumentToken = tick.instrument_token;
 
         // Update subscribed instruments set first
         this.subscribedInstruments.add(instrumentToken);
-
-        console.log(
-          `[MarketDataStreamService] Processing tick for token ${instrumentToken}: last_price=${tick.last_price}`,
-        );
 
         // Update in-memory LTP cache first for hot-read path
         try {
@@ -133,26 +242,16 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         // Store market data in database and broadcast (non-blocking if DB fails)
         try {
           await this.stockService.storeMarketData(instrumentToken, tick);
-          console.log(
-            `[MarketDataStreamService] Successfully stored and broadcasted tick for token ${instrumentToken}`,
-          );
-        } catch (storeError) {
-          // Log but continue processing - broadcast still happens
-          console.error(
-            `[MarketDataStreamService] Failed to store tick for ${instrumentToken}:`,
-            storeError,
-          );
-          this.logger.debug(
-            `Failed to store tick for ${instrumentToken}, continuing with broadcast: ${storeError.message}`,
+        } catch (storeError: any) {
+          this.rateLimitedLog(
+            'debug',
+            `store_tick_fail:${instrumentToken}`,
+            `Failed to store tick for ${instrumentToken}, continuing: ${storeError?.message || storeError}`,
+            30_000,
           );
         }
       }
-
-      console.log(
-        `[MarketDataStreamService] Completed processing ${ticks.length} ticks`,
-      );
     } catch (error) {
-      console.error(`[MarketDataStreamService] Error handling ticks:`, error);
       this.logger.error('Error handling ticks', error);
     }
   }
@@ -163,12 +262,14 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     clientId?: string,
   ) {
     try {
-      console.log(
-        `[MarketDataStreamService] subscribeToInstruments called: tokens=${JSON.stringify(instrumentTokens)}, mode=${mode}, clientId=${clientId || 'none'}`,
-      );
       this.logger.log(
         `[StreamBatching] Received subscription request for ${instrumentTokens.length} instruments with mode=${mode} from client=${clientId || 'unknown'}`,
       );
+
+      const prospectiveNew = instrumentTokens.filter(
+        (t) => !this.subscriptionQueue.has(t),
+      ).length;
+      this.ensureSubscriptionQueueCapacity(prospectiveNew);
 
       // Queue subscriptions for batching instead of immediate execution
       const newTokens: number[] = [];
@@ -182,9 +283,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             clients: new Set(),
           });
           newTokens.push(token);
-          console.log(
-            `[MarketDataStreamService] Added new token ${token} to subscription queue with mode=${mode}`,
-          );
         } else {
           existingTokens.push(token);
         }
@@ -192,43 +290,24 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         const subscription = this.subscriptionQueue.get(token)!;
         if (clientId) {
           subscription.clients.add(clientId);
-          console.log(
-            `[MarketDataStreamService] Added client ${clientId} to subscription for token ${token}`,
-          );
         }
 
         // Update mode if it's higher priority (full > ohlcv > ltp)
         const modePriority = { ltp: 1, ohlcv: 2, full: 3 };
-        const oldMode = subscription.mode;
         if (modePriority[mode] > modePriority[subscription.mode]) {
           subscription.mode = mode;
-          console.log(
-            `[MarketDataStreamService] Upgraded mode for token ${token} from ${oldMode} to ${mode}`,
-          );
         }
       });
 
       // Start batching interval if not already started
       if (!this.subscriptionBatchInterval) {
-        console.log(
-          `[MarketDataStreamService] Starting subscription batch processing interval`,
-        );
         this.startSubscriptionBatching();
       }
 
       this.logger.log(
         `[StreamBatching] Queued ${instrumentTokens.length} instruments (${newTokens.length} new, ${existingTokens.length} existing) for subscription with mode=${mode}, client=${clientId || 'unknown'}`,
       );
-      if (newTokens.length > 0) {
-        console.log(
-          `[MarketDataStreamService] New tokens queued: ${JSON.stringify(newTokens)}`,
-        );
-      }
     } catch (error) {
-      console.error(
-        `[MarketDataStreamService] Error queuing instrument subscriptions:`,
-        error,
-      );
       this.logger.error('Error queuing instrument subscriptions', error);
       throw error;
     }
@@ -255,14 +334,13 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       const provider = await this.providerResolver.resolveForWebsocket();
       // Prime mapping so ticker.subscribe() can send correct exchange without defaulting
       try {
-        (provider as any)?.primeExchangeMapping?.(pairs);
+        provider.primeExchangeMapping?.(pairs);
       } catch (e) {
-        this.logger.warn('[Stream] primeExchangeMapping not available', e as any);
+        this.logger.warn('[Stream] primeExchangeMapping failed', e as any);
       }
       const tokens = Array.from(new Set(pairs.map((p) => Number(p.token))));
       await this.subscribeToInstruments(tokens, mode, clientId);
     } catch (error) {
-      console.error('[MarketDataStreamService] Error in subscribePairs:', error);
       this.logger.error('Error in subscribePairs', error);
       throw error;
     }
@@ -288,6 +366,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           this.unsubscriptionQueue.add(token);
         }
       });
+      this.trimUnsubscriptionQueue();
 
       this.logger.log(
         `[StreamBatching] Queued ${instrumentTokens.length} instruments for unsubscription`,
@@ -305,6 +384,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async processSubscriptionBatch() {
+    const t0 = Date.now();
     try {
       if (
         this.subscriptionQueue.size === 0 &&
@@ -313,9 +393,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      console.log(
-        `[MarketDataStreamService] Processing subscription batch: ${this.subscriptionQueue.size} subscriptions, ${this.unsubscriptionQueue.size} unsubscriptions`,
-      );
       this.logger.log(
         `[StreamBatching] Processing batch: ${this.subscriptionQueue.size} subscriptions, ${this.unsubscriptionQueue.size} unsubscriptions`,
       );
@@ -323,11 +400,11 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       const provider = await this.providerResolver.resolveForWebsocket();
       const ticker = provider.getTicker();
       if (!ticker || !this.isStreaming) {
-        console.warn(
-          `[MarketDataStreamService] Cannot process batch: ticker=${!!ticker}, isStreaming=${this.isStreaming}`,
-        );
-        this.logger.warn(
-          `[StreamBatching] Cannot process: ticker=${!!ticker}, isStreaming=${this.isStreaming}`,
+        this.rateLimitedLog(
+          'warn',
+          'batch_skip_no_ticker',
+          `[StreamBatching] Cannot process batch: ticker=${!!ticker}, isStreaming=${this.isStreaming} (will retry next tick)`,
+          15_000,
         );
         return;
       }
@@ -336,10 +413,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       if (this.subscriptionQueue.size > 0) {
         const subscriptions = Array.from(this.subscriptionQueue.entries());
         const tokensToSubscribe = subscriptions.map(([token]) => token);
-
-        console.log(
-          `[MarketDataStreamService] Processing ${tokensToSubscribe.length} subscriptions: ${JSON.stringify(tokensToSubscribe)}`,
-        );
 
         // Group by mode for efficient batching
         const modeGroups = new Map<string, number[]>();
@@ -350,18 +423,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           modeGroups.get(sub.mode)!.push(token);
         });
 
-        console.log(
-          `[MarketDataStreamService] Grouped subscriptions by mode:`,
-          Array.from(modeGroups.entries()).map(
-            ([mode, tokens]) => `${mode}: ${tokens.length} tokens`,
-          ),
-        );
-
         // Subscribe by mode groups with chunking
         for (const [mode, tokens] of modeGroups) {
-          console.log(
-            `[MarketDataStreamService] Calling ticker.subscribe() for ${tokens.length} tokens with mode=${mode}`,
-          );
           this.logger.log(
             `[StreamBatching] Subscribing ${tokens.length} tokens with mode=${mode} to provider`,
           );
@@ -371,17 +434,11 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           }
           tokens.forEach((token) => {
             this.subscribedInstruments.add(token);
-            console.log(
-              `[MarketDataStreamService] Added token ${token} to subscribedInstruments set`,
-            );
           });
         }
 
         this.logger.log(
           `[StreamBatching] Processed ${tokensToSubscribe.length} subscriptions in ${modeGroups.size} mode groups`,
-        );
-        console.log(
-          `[MarketDataStreamService] Completed subscription batch processing for ${tokensToSubscribe.length} tokens`,
         );
         this.subscriptionQueue.clear();
       }
@@ -389,37 +446,31 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       // Process unsubscriptions
       if (this.unsubscriptionQueue.size > 0) {
         const tokensToUnsubscribe = Array.from(this.unsubscriptionQueue);
-        console.log(
-          `[MarketDataStreamService] Processing ${tokensToUnsubscribe.length} unsubscriptions: ${JSON.stringify(tokensToUnsubscribe)}`,
-        );
         for (let i = 0; i < tokensToUnsubscribe.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
           const chunk = tokensToUnsubscribe.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
           ticker.unsubscribe(chunk);
         }
         tokensToUnsubscribe.forEach((token) => {
           this.subscribedInstruments.delete(token);
-          console.log(
-            `[MarketDataStreamService] Removed token ${token} from subscribedInstruments set`,
-          );
         });
 
         this.logger.log(
           `[StreamBatching] Processed ${tokensToUnsubscribe.length} unsubscriptions`,
         );
-        console.log(
-          `[MarketDataStreamService] Completed unsubscription batch processing for ${tokensToUnsubscribe.length} tokens`,
-        );
         this.unsubscriptionQueue.clear();
       }
     } catch (error) {
-      console.error(
-        `[MarketDataStreamService] Error processing subscription batch:`,
-        error,
-      );
       this.logger.error(
         '[StreamBatching] Error processing subscription batch',
         error,
       );
+    } finally {
+      try {
+        const elapsed = (Date.now() - t0) / 1000;
+        this.metrics.marketDataStreamBatchSeconds
+          .labels(this.streamMetricsProvider)
+          .observe(elapsed);
+      } catch {}
     }
   }
 
@@ -539,17 +590,37 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Health snapshot for /health and admin: streaming flags, queues, ticker presence.
+   */
+  async getMarketDataHealthSnapshot() {
+    const provider = await this.providerResolver.resolveForWebsocket();
+    const ticker = provider.getTicker?.();
+    const providerName =
+      (await this.providerResolver.getGlobalProviderName()) ||
+      (this.providerResolver as any)?.config?.get?.('DATA_PROVIDER') ||
+      'kite';
+    return {
+      provider: String(providerName).toLowerCase(),
+      isStreaming: this.isStreaming,
+      wsTickerReady: !!ticker,
+      marketDataDegraded: !ticker,
+      queues: this.getQueueStatus(),
+      subscribedCount: this.subscribedInstruments.size,
+    };
+  }
+
   // Health check method
   async getStreamingStatus() {
+    const snapshot = await this.getMarketDataHealthSnapshot();
     return {
       isStreaming: this.isStreaming,
       subscribedInstruments: Array.from(this.subscribedInstruments),
       subscribedCount: this.subscribedInstruments.size,
-      // Provider-agnostic status; detailed per-provider status can be added later
-      provider:
-        (await this.providerResolver.getGlobalProviderName()) ||
-        this.providerResolver['config']?.get('DATA_PROVIDER') ||
-        'kite',
+      provider: snapshot.provider,
+      wsTickerReady: snapshot.wsTickerReady,
+      marketDataDegraded: snapshot.marketDataDegraded,
+      queues: snapshot.queues,
     };
   }
 
@@ -571,10 +642,20 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
   private async stopStreaming() {
     try {
+      if (this.subscriptionBatchInterval) {
+        clearInterval(this.subscriptionBatchInterval);
+        this.subscriptionBatchInterval = null;
+      }
       if (this.streamInterval) {
         clearInterval(this.streamInterval);
         this.streamInterval = null;
       }
+
+      try {
+        this.metrics.marketDataStreamTickerConnected
+          .labels(this.streamMetricsProvider)
+          .set(0);
+      } catch {}
 
       const provider = await this.providerResolver.resolveForWebsocket();
       const ticker = provider.getTicker();
