@@ -1,7 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '@infra/redis/redis.service';
-import { MarketDataProvider, TickerLike } from '@features/market-data/infra/market-data.provider';
+import {
+  MarketDataProvider,
+  MarketDataExchangeToken,
+  MarketDataLtpPair,
+  TickerLike,
+} from '@features/market-data/infra/market-data.provider';
+import { MetricsService } from '@infra/observability/metrics.service';
 import { KiteConnect } from 'kiteconnect';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { KiteTicker } = require('kiteconnect');
@@ -9,8 +15,8 @@ const { KiteTicker } = require('kiteconnect');
 @Injectable()
 export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   private readonly logger = new Logger(KiteProviderService.name);
-  private kite: KiteConnect;
-  private ticker: TickerLike;
+  private kite: KiteConnect | undefined;
+  private ticker: TickerLike | undefined;
   private isConnected = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -27,6 +33,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   constructor(
     private configService: ConfigService,
     private redisService: RedisService,
+    private metrics: MetricsService,
   ) {}
 
   async onModuleInit() {
@@ -55,6 +62,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         this.logger.warn(
           '[Kite] Visit /api/auth/kite/login to authenticate and enable ticker.',
         );
+        this.refreshDegradedMetric();
         return;
       }
 
@@ -65,8 +73,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         access_token: accessToken,
       });
       this.logger.log('[Kite] Client initialized successfully');
+      this.refreshDegradedMetric();
     } catch (error) {
       this.logger.error('[Kite] Failed to initialize client', error as any);
+      this.refreshDegradedMetric();
     }
   }
 
@@ -94,16 +104,62 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         });
       }
       this.logger.log('[Kite] Access token updated');
+      this.refreshDegradedMetric();
     } catch (error) {
       this.logger.error('[Kite] Failed to update access token', error as any);
       throw error;
     }
   }
 
+  /** Kite quotes are token-scoped; exchange priming is a no-op. */
+  primeExchangeMapping(_pairs: MarketDataExchangeToken[]): void {
+    void _pairs;
+  }
+
+  async getLTPByPairs(
+    pairs: MarketDataLtpPair[],
+  ): Promise<Record<string, { last_price: number | null }>> {
+    const out: Record<string, { last_price: number | null }> = {};
+    if (!pairs?.length) return out;
+    if (!this.kite) {
+      for (const p of pairs) {
+        const k = `${String(p.exchange).toUpperCase()}-${String(p.token)}`;
+        out[k] = { last_price: null };
+      }
+      return out;
+    }
+    const uniq = [...new Set(pairs.map((p) => String(p.token)))];
+    let ltpMap: Record<string, any> = {};
+    try {
+      ltpMap = await this.kite.getLTP(uniq);
+    } catch (error) {
+      this.logger.error('[Kite] getLTPByPairs upstream failed', error as any);
+      for (const p of pairs) {
+        const k = `${String(p.exchange).toUpperCase()}-${String(p.token)}`;
+        out[k] = { last_price: null };
+      }
+      return out;
+    }
+    for (const p of pairs) {
+      const k = `${String(p.exchange).toUpperCase()}-${String(p.token)}`;
+      const tok = String(p.token);
+      const row = ltpMap[tok] ?? ltpMap[p.token as any];
+      const lp = row?.last_price;
+      out[k] = {
+        last_price:
+          Number.isFinite(Number(lp)) && Number(lp) > 0 ? Number(lp) : null,
+      };
+    }
+    return out;
+  }
+
   async getInstruments(exchange?: string): Promise<any[]> {
     try {
       if (!this.kite) {
-        throw new Error('Kite provider not initialized');
+        this.logger.warn(
+          '[Kite] getInstruments: client not initialized (degraded). Returning [].',
+        );
+        return [];
       }
       const instruments = await this.kite.getInstruments(exchange);
       this.logger.log(
@@ -119,7 +175,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   async getQuote(instrumentTokens: string[]): Promise<any> {
     try {
       if (!this.kite) {
-        throw new Error('Kite provider not initialized');
+        this.logger.warn(
+          '[Kite] getQuote: client not initialized (degraded). Returning {}.',
+        );
+        return {};
       }
       const quotes = await this.kite.getQuote(instrumentTokens);
       return quotes;
@@ -137,7 +196,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   ): Promise<any> {
     try {
       if (!this.kite) {
-        throw new Error('Kite provider not initialized');
+        this.logger.warn(
+          '[Kite] getHistoricalData: client not initialized (degraded). Returning null.',
+        );
+        return null;
       }
       const historicalData = await this.kite.getHistoricalData(
         instrumentToken,
@@ -155,7 +217,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   async getLTP(instrumentTokens: string[]): Promise<any> {
     try {
       if (!this.kite) {
-        throw new Error('Kite provider not initialized');
+        this.logger.warn(
+          '[Kite] getLTP: client not initialized (degraded). Returning {}.',
+        );
+        return {};
       }
       const ltp = await this.kite.getLTP(instrumentTokens);
       return ltp;
@@ -168,13 +233,25 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   async getOHLC(instrumentTokens: string[]): Promise<any> {
     try {
       if (!this.kite) {
-        throw new Error('Kite provider not initialized');
+        this.logger.warn(
+          '[Kite] getOHLC: client not initialized (degraded). Returning {}.',
+        );
+        return {};
       }
       const ohlc = await this.kite.getOHLC(instrumentTokens);
       return ohlc;
     } catch (error) {
       this.logger.error('[Kite] Failed to fetch OHLC', error as any);
       throw error;
+    }
+  }
+
+  private refreshDegradedMetric() {
+    try {
+      const degraded = this.kite ? 0 : 1;
+      this.metrics.providerDegradedMode.labels('kite').set(degraded);
+    } catch {
+      /* non-fatal */
     }
   }
 
@@ -369,6 +446,8 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       disableReconnect: this.disableReconnect,
       hasApiKey: !!this.currentApiKey,
       hasAccessToken: !!this.currentAccessToken,
+      httpClientReady: !!this.kite,
+      degraded: !this.kite,
       maskedApiKey: this.mask(this.currentApiKey),
       maskedAccessToken: this.mask(this.currentAccessToken),
       lastTickerError: this.lastTickerError,

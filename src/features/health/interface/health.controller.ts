@@ -1,4 +1,4 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, Res, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { StockService } from '@features/stock/application/stock.service';
 import { MarketDataProviderResolverService } from '@features/market-data/application/market-data-provider-resolver.service';
@@ -11,6 +11,8 @@ import { VortexProviderService } from '@features/stock/infra/vortex-provider.ser
 @Controller('health')
 @ApiTags('health')
 export class HealthController {
+  private readonly logger = new Logger(HealthController.name);
+
   constructor(
     private stockService: StockService,
     private resolver: MarketDataProviderResolverService,
@@ -62,27 +64,30 @@ export class HealthController {
   @ApiOperation({ summary: 'Market data provider and streaming health' })
   async getMarketDataHealth() {
     try {
-      const [streamingStatus, vortexPing] = await Promise.all([
+      const [streamingStatus, vortexPing, mdSnapshot] = await Promise.all([
         this.marketDataStreamService.getStreamingStatus(),
         this.vortexProvider.ping?.(),
+        this.marketDataStreamService.getMarketDataHealthSnapshot(),
       ]);
 
       const healthData = {
         provider: (await this.resolver.getGlobalProviderName()) || 'env',
         streaming: streamingStatus,
+        marketData: mdSnapshot,
         vortex: vortexPing,
         timestamp: new Date().toISOString(),
       };
 
-      // Log health check for monitoring
-      console.log(
-        `[Health] Market data health check: provider=${healthData.provider}, streaming=${streamingStatus.isStreaming}, vortex=${vortexPing?.httpOk}`,
+      this.logger.debug(
+        `[Health] Market data health provider=${healthData.provider} streaming=${streamingStatus.isStreaming} vortexHttp=${vortexPing?.httpOk} wsTickerReady=${mdSnapshot.wsTickerReady}`,
       );
 
       return healthData;
     } catch (error) {
-      console.error('[Health] Market data health check failed:', error);
-      return { error: error.message };
+      this.logger.warn(
+        `[Health] Market data health check failed: ${(error as any)?.message || error}`,
+      );
+      return { error: (error as Error).message };
     }
   }
 
