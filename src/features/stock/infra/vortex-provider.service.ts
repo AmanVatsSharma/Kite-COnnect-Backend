@@ -1,8 +1,15 @@
+/**
+ * @file vortex-provider.service.ts
+ * @module stock
+ * @description Rupeezy Vortex REST + WebSocket market data provider (sharded WS, OHLCV/full parsing).
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2025-03-23
+ */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MarketDataProvider, TickerLike } from '@features/market-data/infra/market-data.provider';
 import axios, { AxiosInstance } from 'axios';
-import * as WebSocket from 'ws';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { VortexSession } from '@features/stock/domain/vortex-session.entity';
@@ -13,6 +20,7 @@ import { RedisService } from '@infra/redis/redis.service';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { ProviderQueueService } from '@features/market-data/application/provider-queue.service';
 import { MetricsService } from '@infra/observability/metrics.service';
+import { VortexShardedTicker } from '@features/stock/infra/vortex-ws-ticker';
 
 // Minimal safe no-op ticker used when Vortex streaming is not configured
 class NoopTicker {
@@ -33,7 +41,7 @@ class NoopTicker {
   disconnect() {
     this.logger.warn('[Vortex] NoopTicker.disconnect called');
   }
-  subscribe(_tokens: number[]) {
+  subscribe(_tokens: number[], _mode?: string) {
     this.logger.warn('[Vortex] NoopTicker.subscribe called');
   }
   unsubscribe(_tokens: number[]) {
@@ -55,6 +63,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 8;
   private readonly maxSubscriptionsPerSocket = 1000;
+  /** Mirrors VortexShardedTicker maxShards after initializeTicker(). */
+  private vortexShardCount = 1;
   // SWR config
   private readonly swrServeStaleMs = Math.max(
     0,
@@ -885,491 +895,43 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     this.logger.log(
       `[Vortex] Using WebSocket URL: ${streamUrl.replace(/auth_token=[^&]*/, 'auth_token=***')}`,
     );
+    const maxShards = Math.min(
+      3,
+      Math.max(1, Number(process.env.VORTEX_WS_MAX_SHARDS || 3)),
+    );
+    this.vortexShardCount = maxShards;
     const self = this;
-    class VortexTicker {
-      private ws: WebSocket | null = null;
-      private handlers: Record<string, Function[]> = {};
-      private subscribed: Set<number> = new Set();
-      private modeByToken: Map<number, 'ltp' | 'ohlcv' | 'full'> = new Map();
-      private exchangeByToken: Map<
-        number,
-        'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'
-      > = new Map();
-      // Prime exchange mapping for tokens where the exchange is already known (from REST resolution or client-specified pairs)
-      // This allows the subscribe flow to avoid any defaults and prevents incorrect NSE_EQ fallbacks.
-      primeExchangeMapping(pairs: Array<{ token: number; exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' }>) {
-        try {
-          for (const p of pairs || []) {
-            if (Number.isFinite(p?.token as any) && p?.exchange) {
-              this.exchangeByToken.set(Number(p.token), p.exchange);
-            }
-          }
-          self.logger.debug(
-            `[Vortex] Primed exchange mapping for ${pairs?.length || 0} tokens`,
-          );
-        } catch (e) {
-          self.logger.warn('[Vortex] primeExchangeMapping failed', e as any);
-        }
-      }
-      private pingTimer: NodeJS.Timeout | null = null;
-      private lastPongAt: number = 0;
-
-      on(event: string, fn: Function) {
-        if (!this.handlers[event]) this.handlers[event] = [];
-        this.handlers[event].push(fn);
-      }
-      emit(event: string, ...args: any[]) {
-        (this.handlers[event] || []).forEach((h) => {
+    this.ticker = new VortexShardedTicker({
+      streamUrl,
+      maxShards,
+      maxSubscriptionsPerSocket: this.maxSubscriptionsPerSocket,
+      logger: this.logger,
+      parseBinaryTicks: (buf: Buffer) => this.parseBinaryTicks(buf),
+      getExchangesForTokens: (tokens: string[]) =>
+        this.getExchangesForTokens(tokens),
+      getAccessToken: () => self.accessToken,
+      getConfigAccessToken: () => self.configService.get('VORTEX_ACCESS_TOKEN'),
+      maxReconnectAttempts: this.maxReconnectAttempts,
+      onParentWsConnected: (anyConnected: boolean) => {
+        self.wsConnected = anyConnected;
+      },
+      metrics: {
+        incSubscribeDropped: (reason: string) => {
           try {
-            h(...args);
-          } catch {}
-        });
-      }
-
-      connect() {
-        const token =
-          self.accessToken || self.configService.get('VORTEX_ACCESS_TOKEN');
-        if (!token) {
-          self.logger.warn('[Vortex] No access_token for WS; did you login?');
-          return;
-        }
-        const url = `${streamUrl}?auth_token=${encodeURIComponent(token)}`;
-        self.logger.log(
-          `[Vortex] WS connecting to ${url.replace(token, '***')}`,
-        );
-        this.ws = new WebSocket(url);
-        this.ws.on('open', () => {
-          self.wsConnected = true;
-          self.reconnectAttempts = 0;
-          self.logger.log('[Vortex] WS connected successfully');
-          this.startHeartbeat();
-          // Resubscribe previously subscribed tokens on reconnect
-          if (this.subscribed.size > 0) {
-            self.logger.log(
-              `[Vortex] Resubscribing to ${this.subscribed.size} previously subscribed tokens`,
-            );
-            this.resubscribeAll();
+            self.metrics.vortexSubscribeDroppedTotal.labels(reason).inc();
+          } catch {
+            /* ignore */
           }
-          this.emit('connect');
-        });
-        this.ws.on('close', (code, reason) => {
-          self.wsConnected = false;
-          self.logger.warn(
-            `[Vortex] WS disconnected with code ${code}: ${reason}`,
-          );
-          this.stopHeartbeat();
-          this.emit('disconnect');
-          this.scheduleReconnect();
-        });
-        this.ws.on('error', (e) => {
-          self.logger.error('[Vortex] WS error', e as any);
-          this.emit('error', e);
-        });
-        this.ws.on('ping', () => {
+        },
+        setShardsConnected: (n: number) => {
           try {
-            this.ws?.pong();
-          } catch {}
-        });
-        this.ws.on('pong', () => {
-          this.lastPongAt = Date.now();
-        });
-        this.ws.on('message', (data: any) => {
-          if (typeof data === 'string') {
-            try {
-              const j = JSON.parse(data.toString());
-
-              // Handle subscription confirmations and errors
-              // Vortex may send confirmation/error messages for subscriptions
-              if (
-                j?.message_type === 'subscribed' ||
-                j?.status === 'subscribed' ||
-                (j?.type === 'subscription' && j?.status === 'success')
-              ) {
-                const token = j?.token;
-                const exchange = j?.exchange;
-                if (token) {
-                  // Confirm subscription was successful
-                  if (!this.subscribed.has(token)) {
-                    this.subscribed.add(token);
-                    self.logger.log(
-                      `[Vortex] Subscription confirmed by server for token ${token} (exchange: ${exchange || 'unknown'})`,
-                    );
-                  }
-                }
-              } else if (
-                j?.message_type === 'unsubscribed' ||
-                j?.status === 'unsubscribed'
-              ) {
-                const token = j?.token;
-                if (token) {
-                  this.subscribed.delete(token);
-                  self.logger.log(
-                    `[Vortex] Unsubscription confirmed by server for token ${token}`,
-                  );
-                }
-              } else if (
-                j?.error ||
-                j?.status === 'error' ||
-                j?.message_type === 'error'
-              ) {
-                const token = j?.token;
-                const errorMsg = j?.error || j?.message || 'Unknown error';
-                if (token) {
-                  // Remove from subscribed Set if subscription failed
-                  this.subscribed.delete(token);
-                  this.modeByToken.delete(token);
-                  this.exchangeByToken.delete(token);
-                  self.logger.error(
-                    `[Vortex] Subscription error for token ${token}: ${errorMsg}`,
-                  );
-                } else {
-                  self.logger.error(
-                    `[Vortex] Received error message: ${errorMsg}`,
-                  );
-                }
-              } else if (j?.type === 'postback') {
-                self.logger.debug('[Vortex] Received postback message');
-              } else {
-                // Log other text messages for debugging
-                self.logger.debug(
-                  `[Vortex] Received text message: ${data.toString()}`,
-                );
-              }
-            } catch (e) {
-              self.logger.warn(
-                '[Vortex] Failed to parse text message',
-                e as any,
-              );
-            }
-          } else if (Buffer.isBuffer(data)) {
-            try {
-              const ticks = self.parseBinaryTicks(data);
-              if (ticks.length) {
-                self.logger.debug(
-                  `[Vortex] Parsed ${ticks.length} binary ticks`,
-                );
-                this.emit('ticks', ticks);
-              }
-            } catch (e) {
-              self.logger.error(
-                '[Vortex] Failed to parse binary tick packet',
-                e as any,
-              );
-            }
+            self.metrics.vortexWsShardsConnected.labels('vortex').set(n);
+          } catch {
+            /* ignore */
           }
-        });
-      }
-      disconnect() {
-        try {
-          this.ws?.close();
-        } catch {}
-      }
-      subscribe(tokens: number[], mode: 'ltp' | 'ohlcv' | 'full' = 'ltp') {
-        // Filter out tokens that are already subscribed
-        const unique = tokens.filter((t) => !this.subscribed.has(t));
-        const available = Math.max(
-          0,
-          self.maxSubscriptionsPerSocket - this.subscribed.size,
-        );
-        const toAdd = unique.slice(0, available);
-        const dropped = unique.slice(available);
-
-        if (toAdd.length === 0 && unique.length > 0) {
-          self.logger.warn(
-            `[Vortex] Subscription limit (${self.maxSubscriptionsPerSocket}) reached; dropping ${unique.length} tokens`,
-          );
-        }
-
-        // Check WebSocket state before proceeding
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          self.logger.warn(
-            `[Vortex] Cannot subscribe to ${toAdd.length} tokens: WebSocket is not OPEN (state: ${this.ws?.readyState ?? 'null'})`,
-          );
-          return;
-        }
-
-        // Set mode for all tokens before subscribing
-        toAdd.forEach((token) => {
-          this.modeByToken.set(token, mode);
-        });
-
-        self.logger.log(
-          `[Vortex] Processing subscription for ${toAdd.length} tokens with mode=${mode}`,
-        );
-
-        // Fire-and-forget: resolve exchanges per token and send subscribe frames
-        (async () => {
-          try {
-            const exMapRaw = await self.getExchangesForTokens(
-              toAdd.map((t) => String(t)),
-            );
-            const successfullySubscribed: number[] = [];
-
-            for (const t of toAdd) {
-              // Double-check WebSocket state before each send
-              if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-                self.logger.warn(
-                  `[Vortex] WebSocket disconnected while subscribing token ${t}, skipping remaining tokens`,
-                );
-                break;
-              }
-
-              try {
-                const tokenMode = this.modeByToken.get(t) || mode;
-                // Prefer pre-primed mapping if present; otherwise use resolved exchange map
-                let ex =
-                  (this.exchangeByToken.get(t) as
-                    | 'NSE_EQ'
-                    | 'NSE_FO'
-                    | 'NSE_CUR'
-                    | 'MCX_FO'
-                    | undefined) ||
-                  (exMapRaw.get(String(t)) as
-                    | 'NSE_EQ'
-                    | 'NSE_FO'
-                    | 'NSE_CUR'
-                    | 'MCX_FO'
-                    | undefined);
-                if (!ex) {
-                  // Do not default to NSE_EQ; skip unresolved tokens and inform logs
-                  self.logger.warn(
-                    `[Vortex] Skipping subscription for token ${t}: exchange could not be resolved`,
-                  );
-                  continue;
-                }
-                this.exchangeByToken.set(t, ex);
-
-                // Send subscription message
-                this.send({
-                  exchange: ex,
-                  token: t,
-                  mode: tokenMode,
-                  message_type: 'subscribe',
-                });
-
-                // Only mark as subscribed AFTER successfully sending
-                // Note: We assume send() succeeded if WebSocket is OPEN (send() catches errors but doesn't throw)
-                // In production, Vortex server should send confirmation which we'll handle separately
-                this.subscribed.add(t);
-                successfullySubscribed.push(t);
-
-                self.logger.debug(
-                  `[Vortex] Sent subscription request for token ${t} (exchange: ${ex}, mode: ${tokenMode})`,
-                );
-              } catch (tokenError) {
-                self.logger.error(
-                  `[Vortex] Failed to subscribe token ${t}`,
-                  tokenError as any,
-                );
-                // Don't add to subscribed Set if send failed
-              }
-            }
-
-            if (successfullySubscribed.length > 0) {
-              self.logger.log(
-                `[Vortex] Successfully sent subscription requests for ${successfullySubscribed.length}/${toAdd.length} tokens with mode=${mode}`,
-              );
-              self.logger.debug(
-                `[Vortex] Subscribed tokens: ${successfullySubscribed.map((t) => `${t}:${this.exchangeByToken.get(t)}`).join(', ')}`,
-              );
-            }
-          } catch (e) {
-            // Do not fallback to NSE_EQ; log and skip
-            self.logger.error(
-              '[Vortex] subscribe exchange resolution failed; skipping unresolved tokens (no NSE_EQ fallback)',
-              e as any,
-            );
-          }
-        })();
-
-        if (dropped.length) {
-          self.logger.warn(
-            `[Vortex] Dropped ${dropped.length} subscriptions due to limit (${this.subscribed.size}/${self.maxSubscriptionsPerSocket})`,
-          );
-        }
-      }
-      unsubscribe(tokens: number[]) {
-        // Fire-and-forget: ensure exchange mapping exists for tokens
-        (async () => {
-          try {
-            const missing = tokens.filter((t) => !this.exchangeByToken.has(t));
-            if (missing.length) {
-              const exMapRaw = await self.getExchangesForTokens(
-                missing.map((t) => String(t)),
-              );
-              missing.forEach((t) => {
-                const ex = exMapRaw.get(String(t)) as
-                  | 'NSE_EQ'
-                  | 'NSE_FO'
-                  | 'NSE_CUR'
-                  | 'MCX_FO'
-                  | undefined;
-                if (ex) this.exchangeByToken.set(t, ex);
-              });
-            }
-          } catch (e) {
-            self.logger.warn(
-              '[Vortex] unsubscribe exchange resolution failed; some tokens may be skipped',
-              e as any,
-            );
-          }
-          tokens.forEach((t) => {
-            const ex = this.exchangeByToken.get(t);
-            if (!ex) {
-              self.logger.warn(
-                `[Vortex] Skipping unsubscribe for token ${t}: exchange unknown`,
-              );
-              return;
-            }
-            const mode = this.modeByToken.get(t) || 'ltp';
-            this.send({
-              exchange: ex,
-              token: t,
-              mode,
-              message_type: 'unsubscribe',
-            });
-            this.subscribed.delete(t);
-            this.modeByToken.delete(t);
-            this.exchangeByToken.delete(t);
-          });
-          if (tokens.length)
-            self.logger.log(`[Vortex] Unsubscribed ${tokens.length} tokens`);
-        })();
-      }
-      setMode(mode: string, tokens: number[]) {
-        const m = mode as any as 'ltp' | 'ohlcv' | 'full';
-        const target = tokens.filter((t) => this.subscribed.has(t));
-        target.forEach((t) => this.modeByToken.set(t, m));
-        // Fire-and-forget mapping and send
-        (async () => {
-          try {
-            const missing = target.filter((t) => !this.exchangeByToken.has(t));
-            if (missing.length) {
-              const exMapRaw = await self.getExchangesForTokens(
-                missing.map((t) => String(t)),
-              );
-              missing.forEach((t) => {
-                const ex = exMapRaw.get(String(t)) as
-                  | 'NSE_EQ'
-                  | 'NSE_FO'
-                  | 'NSE_CUR'
-                  | 'MCX_FO'
-                  | undefined;
-                if (ex) this.exchangeByToken.set(t, ex);
-              });
-            }
-          } catch (e) {
-            self.logger.warn(
-              '[Vortex] setMode exchange resolution failed; some tokens may be skipped',
-              e as any,
-            );
-          }
-          target.forEach((t) => {
-            const ex = this.exchangeByToken.get(t);
-            if (!ex) {
-              self.logger.warn(
-                `[Vortex] Skipping setMode for token ${t}: exchange unknown`,
-              );
-              return;
-            }
-            this.send({
-              exchange: ex,
-              token: t,
-              mode: m,
-              message_type: 'subscribe',
-            });
-          });
-          if (target.length)
-            self.logger.log(
-              `[Vortex] Mode set to ${m} for ${target.length} tokens`,
-            );
-        })();
-      }
-      private send(obj: any) {
-        try {
-          const message = JSON.stringify(obj);
-          this.ws?.send(message);
-          self.logger.debug(`[Vortex] Sent WS message: ${message}`);
-        } catch (e) {
-          self.logger.error('[Vortex] WS send failed', e as any);
-        }
-      }
-      private scheduleReconnect() {
-        if (self.reconnectAttempts >= self.maxReconnectAttempts) return;
-        const base = 1000 * Math.pow(1.5, self.reconnectAttempts++);
-        const jitter = Math.floor(Math.random() * 300);
-        const delay = base + jitter;
-        setTimeout(() => this.connect(), delay);
-      }
-      private startHeartbeat() {
-        this.stopHeartbeat();
-        this.lastPongAt = Date.now();
-        this.pingTimer = setInterval(() => {
-          try {
-            // If server supports ping/pong, send ping
-            this.ws?.ping?.();
-            // Fallback: send a lightweight text heartbeat to avoid idling
-            this.send({ type: 'ping', t: Date.now() });
-          } catch {}
-          // If no pong for 60s, force reconnect
-          if (Date.now() - this.lastPongAt > 60000) {
-            try {
-              this.ws?.terminate?.();
-            } catch {}
-          }
-        }, 15000);
-      }
-      private stopHeartbeat() {
-        if (this.pingTimer) {
-          clearInterval(this.pingTimer);
-          this.pingTimer = null;
-        }
-      }
-      private resubscribeAll() {
-        const tokens = Array.from(this.subscribed);
-        if (tokens.length === 0) return;
-        (async () => {
-          try {
-            const missing = tokens.filter((t) => !this.exchangeByToken.has(t));
-            if (missing.length) {
-              const exMapRaw = await self.getExchangesForTokens(
-                missing.map((t) => String(t)),
-              );
-              missing.forEach((t) => {
-                const ex = exMapRaw.get(String(t)) as
-                  | 'NSE_EQ'
-                  | 'NSE_FO'
-                  | 'NSE_CUR'
-                  | 'MCX_FO'
-                  | undefined;
-                if (ex) this.exchangeByToken.set(t, ex);
-              });
-            }
-          } catch (e) {
-            self.logger.warn(
-              '[Vortex] resubscribeAll exchange resolution failed; skipping unresolved tokens',
-              e as any,
-            );
-          }
-          const toResub = tokens.filter((t) => this.exchangeByToken.has(t));
-          for (const t of toResub) {
-            const mode = this.modeByToken.get(t) || 'ltp';
-            const ex = this.exchangeByToken.get(t);
-            if (!ex) continue;
-            this.send({
-              exchange: ex,
-              token: t,
-              mode,
-              message_type: 'subscribe',
-            });
-          }
-          self.logger.log(
-            `[Vortex] Resubscribed ${toResub.length}/${tokens.length} tokens (skipped unresolved)`,
-          );
-        })();
-      }
-    }
-    this.ticker = new VortexTicker();
+        },
+      },
+    });
     return this.ticker;
   }
 
@@ -1377,9 +939,26 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     return this.ticker;
   }
 
-  // Public: expose WS per-socket subscription limit for gateway acks
+  // Public: total upstream instrument capacity (Vortex: shards × 1000 per Rupeezy limits)
   getSubscriptionLimit(): number {
-    return this.maxSubscriptionsPerSocket;
+    return this.maxSubscriptionsPerSocket * this.vortexShardCount;
+  }
+
+  /** Vortex-only: per-socket cap, shard count, and total instruments (null when ticker not built). */
+  getVortexWsLimits(): {
+    perSocket: number;
+    maxShards: number;
+    total: number;
+  } | null {
+    const t = this.ticker as VortexShardedTicker | undefined;
+    if (!t || typeof (t as any).getTotalCapacity !== 'function') {
+      return null;
+    }
+    return {
+      perSocket: t.getMaxPerSocket(),
+      maxShards: t.getShardCount(),
+      total: t.getTotalCapacity(),
+    };
   }
 
   // Public: reusable exchange resolution for gateways/services (same precedence as REST)

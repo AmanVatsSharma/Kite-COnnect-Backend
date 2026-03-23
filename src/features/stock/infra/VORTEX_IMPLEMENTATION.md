@@ -52,6 +52,17 @@ ws.send(JSON.stringify({
 }));
 ```
 
+### Multi-socket sharding (1000 instruments / connection)
+
+Rupeezy allows **1000** simultaneous instrument subscriptions **per WebSocket** and **up to 3** concurrent WebSocket connections **per access token**. The backend implements this via [`vortex-ws-ticker.ts`](./vortex-ws-ticker.ts):
+
+- **`VortexShardedTicker`** routes each new instrument to the first shard with capacity; opens additional shards on demand (shard 0 connects on `connect()`, shards 1–2 connect when needed).
+- **`VORTEX_WS_MAX_SHARDS`** (default `3`, clamped 1–3) controls how many sockets may be used.
+- **`getSubscriptionLimit()`** on `VortexProviderService` returns `1000 × maxShards` (e.g. **3000**).
+- **`getVortexWsLimits()`** returns `{ perSocket, maxShards, total }` for gateway acks.
+- **Mode upgrade**: if `subscribe` is called again for an already-subscribed token with a **higher** mode (`full` > `ohlcv` > `ltp`), the shard sends a new subscribe frame with the upgraded mode (same as explicit `setMode`).
+- Metrics: `vortex_subscribe_dropped_total{reason}`, `vortex_ws_shards_connected`.
+
 ### Binary Data Parsing
 The WebSocket sends binary data in three packet sizes:
 
