@@ -2,8 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
-import type { ApiKeyRow } from '../lib/types';
-import { JsonBlock } from '../components/JsonBlock';
+import type { ApiKeyRow, ApiKeyUsageItem } from '../lib/types';
+import { ErrorInline } from '../components/ErrorInline';
+import { KeyValueGrid } from '../components/KeyValueGrid';
+import { RawJsonDetails } from '../components/RawJsonDetails';
+import { StatusBadge } from '../components/StatusBadge';
+import { limitsToRows, usageBundleToRows } from '../lib/views/api-key-views';
+import { flattenObject } from '../lib/views/flatten';
 
 export function ApiKeysPage() {
   const token = getAdminToken();
@@ -178,8 +183,10 @@ export function ApiKeysPage() {
                     <code>{k.key}</code>
                   </td>
                   <td>{k.tenant_id}</td>
-                  <td>{k.is_active ? 'yes' : 'no'}</td>
-                  <td>{k.provider ?? '-'}</td>
+                  <td>
+                    <StatusBadge variant={k.is_active ? 'ok' : 'warn'}>{k.is_active ? 'Active' : 'Inactive'}</StatusBadge>
+                  </td>
+                  <td>{k.provider ?? '—'}</td>
                   <td>
                     <button
                       type="button"
@@ -208,19 +215,36 @@ export function ApiKeysPage() {
           <button type="button" className="btn btn-ghost" style={{ marginBottom: 12 }} onClick={() => setDetailKey('')}>
             Clear selection
           </button>
-          <h3 className="muted">GET …/apikeys/:key/limits</h3>
-          {limitsDetail.isError && <p className="err">{(limitsDetail.error as Error).message}</p>}
-          {limitsDetail.data && <JsonBlock value={limitsDetail.data} />}
+          <h3 className="muted">Configured limits</h3>
+          <ErrorInline message={limitsDetail.isError ? (limitsDetail.error as Error).message : null} />
+          {limitsDetail.data && (
+            <>
+              <KeyValueGrid rows={limitsToRows(limitsDetail.data).map((r) => ({ label: r.label, value: r.value }))} />
+              <RawJsonDetails value={limitsDetail.data} summary="Raw limits response" />
+            </>
+          )}
           <h3 className="muted" style={{ marginTop: 16 }}>
-            GET …/apikeys/:key/usage
+            Usage bundle (limits + usage)
           </h3>
-          {usageDetail.isError && <p className="err">{(usageDetail.error as Error).message}</p>}
-          {usageDetail.data && <JsonBlock value={usageDetail.data} />}
+          <ErrorInline message={usageDetail.isError ? (usageDetail.error as Error).message : null} />
+          {usageDetail.data && (
+            <>
+              <KeyValueGrid rows={usageBundleToRows(usageDetail.data).map((r) => ({ label: r.label, value: r.value }))} />
+              <RawJsonDetails value={usageDetail.data} summary="Raw usage bundle" />
+            </>
+          )}
           <h3 className="muted" style={{ marginTop: 16 }}>
-            GET …/usage?key= (legacy query)
+            Legacy usage report (query param)
           </h3>
-          {usageReportQ.isError && <p className="err">{(usageReportQ.error as Error).message}</p>}
-          {usageReportQ.data && <JsonBlock value={usageReportQ.data} />}
+          <ErrorInline message={usageReportQ.isError ? (usageReportQ.error as Error).message : null} />
+          {usageReportQ.data && (
+            <>
+              <KeyValueGrid
+                rows={flattenObject(usageReportQ.data, '', 3).map((r) => ({ label: r.label, value: r.value }))}
+              />
+              <RawJsonDetails value={usageReportQ.data} summary="Raw legacy usage" />
+            </>
+          )}
         </section>
       )}
 
@@ -242,8 +266,50 @@ export function ApiKeysPage() {
             Next
           </button>
         </div>
-        {usage.isError && <p className="err">{(usage.error as Error).message}</p>}
-        {usage.data && <JsonBlock value={usage.data} />}
+        <ErrorInline message={usage.isError ? (usage.error as Error).message : null} />
+        {usage.data && (
+          <>
+            <p className="muted" style={{ marginBottom: 8 }}>
+              Page {usage.data.page} of {Math.max(1, Math.ceil(usage.data.total / usage.data.pageSize))} —{' '}
+              {usage.data.total} keys total
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Tenant</th>
+                  <th>Active</th>
+                  <th>HTTP/min</th>
+                  <th>Conn limit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.data.items.map((item: ApiKeyUsageItem) => (
+                  <tr key={item.key}>
+                    <td>
+                      <code>{item.key}</code>
+                    </td>
+                    <td>{item.tenant_id}</td>
+                    <td>
+                      <StatusBadge variant={item.is_active ? 'ok' : 'warn'}>
+                        {item.is_active ? 'Yes' : 'No'}
+                      </StatusBadge>
+                    </td>
+                    <td>
+                      {item.limits.rate_limit_per_minute != null
+                        ? String(item.limits.rate_limit_per_minute)
+                        : '—'}
+                    </td>
+                    <td>
+                      {item.limits.connection_limit != null ? String(item.limits.connection_limit) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <RawJsonDetails value={usage.data} summary="Raw paginated usage payload" />
+          </>
+        )}
       </section>
     </>
   );

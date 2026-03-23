@@ -1,8 +1,19 @@
+/**
+ * @file AbusePage.tsx
+ * @module admin-dashboard
+ * @description Abuse flags list, lookup, and manual block with badges and structured detail.
+ */
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
 import type { AbuseFlag } from '../lib/types';
+import { ErrorInline } from '../components/ErrorInline';
+import { KeyValueGrid } from '../components/KeyValueGrid';
+import { RawJsonDetails } from '../components/RawJsonDetails';
+import { StatusBadge } from '../components/StatusBadge';
+import { abuseFlagFromUnknown, abuseRiskVariant } from '../lib/views/abuse-views';
 
 export function AbusePage() {
   const token = getAdminToken();
@@ -50,13 +61,34 @@ export function AbusePage() {
       <section className="card">
         <h2>Filters</h2>
         <div className="row">
-          <button type="button" className={`btn ${blockedFilter === undefined ? '' : 'btn-ghost'}`} onClick={() => { setBlockedFilter(undefined); setPage(1); }}>
+          <button
+            type="button"
+            className={`btn ${blockedFilter === undefined ? '' : 'btn-ghost'}`}
+            onClick={() => {
+              setBlockedFilter(undefined);
+              setPage(1);
+            }}
+          >
             All
           </button>
-          <button type="button" className={`btn ${blockedFilter === true ? '' : 'btn-ghost'}`} onClick={() => { setBlockedFilter(true); setPage(1); }}>
+          <button
+            type="button"
+            className={`btn ${blockedFilter === true ? '' : 'btn-ghost'}`}
+            onClick={() => {
+              setBlockedFilter(true);
+              setPage(1);
+            }}
+          >
             Blocked only
           </button>
-          <button type="button" className={`btn ${blockedFilter === false ? '' : 'btn-ghost'}`} onClick={() => { setBlockedFilter(false); setPage(1); }}>
+          <button
+            type="button"
+            className={`btn ${blockedFilter === false ? '' : 'btn-ghost'}`}
+            onClick={() => {
+              setBlockedFilter(false);
+              setPage(1);
+            }}
+          >
             Not blocked
           </button>
         </div>
@@ -72,7 +104,7 @@ export function AbusePage() {
             Next
           </button>
         </div>
-        {list.isError && <p className="err">{(list.error as Error).message}</p>}
+        <ErrorInline message={list.isError ? (list.error as Error).message : null} />
         {list.data && (
           <table>
             <thead>
@@ -89,9 +121,13 @@ export function AbusePage() {
                   <td>
                     <code>{f.api_key}</code>
                   </td>
-                  <td>{f.risk_score}</td>
-                  <td>{f.blocked ? 'yes' : 'no'}</td>
-                  <td>{(f.reason_codes || []).join(', ')}</td>
+                  <td>
+                    <StatusBadge variant={abuseRiskVariant(f.risk_score)}>{f.risk_score}</StatusBadge>
+                  </td>
+                  <td>
+                    <StatusBadge variant={f.blocked ? 'bad' : 'ok'}>{f.blocked ? 'Blocked' : 'Clear'}</StatusBadge>
+                  </td>
+                  <td>{(f.reason_codes || []).join(', ') || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -102,8 +138,13 @@ export function AbusePage() {
       <section className="card">
         <h2>Lookup one key</h2>
         <input value={lookupKey} onChange={(e) => setLookupKey(e.target.value)} placeholder="api key id" />
-        {one.isError && <p className="err">{(one.error as Error).message}</p>}
-        {one.data && <pre className="json"><code>{JSON.stringify(one.data, null, 2)}</code></pre>}
+        <ErrorInline message={one.isError ? (one.error as Error).message : null} />
+        {one.data && (
+          <>
+            <KeyValueGrid rows={abuseFlagFromUnknown(one.data).map((r) => ({ label: r.label, value: r.value }))} />
+            <RawJsonDetails value={one.data} summary="Technical details (raw JSON)" />
+          </>
+        )}
       </section>
 
       <section className="card">
@@ -118,7 +159,12 @@ export function AbusePage() {
             <input value={blockReason} onChange={(e) => setBlockReason(e.target.value)} />
           </div>
         </div>
-        <button type="button" className="btn btn-danger" disabled={!blockKey || block.isPending} onClick={() => block.mutate({ api_key: blockKey, reason: blockReason || undefined })}>
+        <button
+          type="button"
+          className="btn btn-danger"
+          disabled={!blockKey || block.isPending}
+          onClick={() => block.mutate({ api_key: blockKey, reason: blockReason || undefined })}
+        >
           Block
         </button>
         <div className="row" style={{ marginTop: 16 }}>
@@ -127,7 +173,12 @@ export function AbusePage() {
             <input value={unblockKey} onChange={(e) => setUnblockKey(e.target.value)} />
           </div>
         </div>
-        <button type="button" className="btn" disabled={!unblockKey || unblock.isPending} onClick={() => unblock.mutate({ api_key: unblockKey })}>
+        <button
+          type="button"
+          className="btn"
+          disabled={!unblockKey || unblock.isPending}
+          onClick={() => unblock.mutate({ api_key: unblockKey })}
+        >
           Unblock
         </button>
       </section>
