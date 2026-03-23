@@ -2,7 +2,12 @@
 
 ## Overview
 
-The Market Data Gateway handles real-time WebSocket connections for market data streaming, implementing intelligent request batching and mode-aware subscriptions.
+Market data is exposed over:
+
+- **Socket.IO** — `MarketDataGateway` on namespace `/market-data` (primary SaaS path).
+- **Native WebSocket** — `NativeWsService` on path `/ws` (manual upgrade, same stream backend).
+
+Both validate API keys, respect rate limits, and delegate to `MarketDataStreamService`.
 
 ## Architecture Flow
 
@@ -11,81 +16,45 @@ sequenceDiagram
     participant Client as WebSocket Client
     participant Gateway as MarketDataGateway
     participant StreamService as MarketDataStreamService
-    participant Provider as VortexProvider
-    participant VortexAPI as Vortex WebSocket API
+    participant Resolver as MarketDataProviderResolverService
+    participant Provider as KiteOrVortexProvider
+    participant Upstream as ExchangeTickerWS
 
-    Client->>Gateway: connect with x-api-key
+    Client->>Gateway: connect with api_key
     Gateway->>Gateway: validate API key
     Gateway->>Gateway: create ClientSubscription
     Gateway-->>Client: connected event
 
-    Client->>Gateway: subscribe_instruments {instruments: [738561], mode: 'ltp'}
-    Gateway->>Gateway: validate mode & instruments
-    Gateway->>StreamService: subscribeToInstruments(instruments, mode, clientId)
-    StreamService->>StreamService: queue subscription (500ms batching)
-    StreamService->>Provider: subscribe(tokens, mode)
-    Provider->>VortexAPI: WS send subscribe frame
-    Gateway-->>Client: subscription_confirmed
+    Client->>Gateway: subscribe instruments mode
+    Gateway->>Gateway: validate mode resolve exchanges entitlements
+    Gateway->>StreamService: subscribePairs subscribeToInstruments
+    StreamService->>StreamService: queue subscription 500ms batching
+    StreamService->>Provider: ticker.subscribe chunked
+    Provider->>Upstream: subscribe frames
 
-    VortexAPI-->>Provider: binary tick data
-    Provider->>Provider: parseBinaryTicks()
-    Provider->>StreamService: emit('ticks', ticks)
-    StreamService->>Gateway: broadcastMarketData()
-    Gateway->>Gateway: find subscribed clients
-    Gateway-->>Client: market_data event
+    Upstream-->>Provider: ticks
+    Provider->>StreamService: ticks event
+    StreamService->>Gateway: broadcast to rooms
+    Gateway-->>Client: market_data
 ```
 
-## Key Features
+## Entitlements (exchange allow-list)
 
-### 1. Mode-Aware Subscriptions
-- Supports three modes: `ltp`, `ohlcv`, `full`
-- Each client can specify mode per subscription
-- Mode determines binary packet size (22/62/266 bytes)
+- On **subscribe**, resolved exchanges are compared to the API key allowed exchange set. Pairs outside the set appear in `forbidden` on `subscription_confirmed` and emit `error` with `code: forbidden_exchange`.
+- On **API key entitlement hot-reload** (`api_key_updates` Redis channel), the gateway re-resolves tokens. **Fail-open for unresolved exchange**: if the resolver cannot map a token to an exchange, the token is **not** revoked (only tokens with a **resolved** exchange **not** in the allow-list are revoked). See `handleApiKeyUpdate` in `market-data.gateway.ts`.
 
-### 2. Intelligent Batching
-- Collects subscription requests for 500ms before sending to provider
-- Deduplicates instruments across multiple clients
-- Groups by mode for efficient provider calls
-- Tracks client reference counts for proper cleanup
+## Batching
 
-### 3. Connection Management
-- API key validation and rate limiting
-- Connection limit enforcement per API key
-- Automatic cleanup on disconnect
-- Graceful error handling
+- Subscriptions are queued and flushed every **500ms**.
+- Chunk size **500** instruments per provider subscribe call.
+- Queue depth surfaces in `subscription_confirmed.queues` and Prometheus `provider_queue_depth`.
 
-### 4. Broadcasting Optimization
-- Uses Socket.IO rooms for targeted broadcasting
-- Only broadcasts to clients subscribed to specific instruments
-- Tracks broadcast latency and metrics
+## Stream status (Redis)
 
-## Batching Flow
+- `MarketDataStreamService` publishes `stream:status` for `connected`, `disconnected`, `error`, and `degraded` (no ticker). Gateway can forward as `stream_status` to clients where implemented.
 
-```mermaid
-graph TD
-    A[Client 1: subscribe [738561,5633] mode=ltp] --> C[Subscription Queue]
-    B[Client 2: subscribe [738561] mode=full] --> C
-    D[Client 3: subscribe [5633] mode=ohlcv] --> C
-    
-    C --> E[500ms Batch Timer]
-    E --> F[Deduplicate & Group by Mode]
-    F --> G[Mode Groups: ltp=[738561,5633], full=[738561], ohlcv=[5633]]
-    G --> H[Send to Provider]
-    H --> I[Update Client Subscriptions]
-    I --> J[Broadcast to Rooms]
-```
+## Error handling
 
-## Error Handling
-
-- Graceful degradation on provider failures
-- Auto-reconnection with exponential backoff
-- Rate limit detection and handling
-- Invalid mode fallback to 'ltp'
-- Comprehensive error logging
-
-## Performance Metrics
-
-- Batch efficiency: 100+ user requests → <10 provider calls
-- Broadcast latency: <5ms for 100 clients
-- Memory usage: <500MB for 1000 connections
-- Reconnect time: <2s on disconnect
+- Rate limits: `rate_limited` errors with `retry_after_ms`.
+- Streaming inactive: `stream_inactive` if admin has not started the provider stream (`isStreaming` false).
+- Provider errors: Nest `Logger`; degraded HTTP paths return empty objects from providers where configured (Kite when REST client missing).
