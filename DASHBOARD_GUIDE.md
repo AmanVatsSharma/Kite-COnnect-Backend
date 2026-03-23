@@ -31,7 +31,7 @@ Set **`ADMIN_TOKEN`** in Nest `.env`, then open **Settings** in the UI and paste
 
 ### One-command dev (Nest + Vite)
 
-- **`npm run dev:full`**: runs `nest start --watch` and the Vite admin dev server together (requires `concurrently`). Use **`http://localhost:5173/dashboard/`** for HMR, or **`http://localhost:3000/dashboard/`** on Nest after the ensure script has built the SPA once.
+- **`npm run dev:full`** (alias **`npm run start:full`**): runs `nest start --watch` and, after **`wait-on`** sees your API port open (defaults to **`PORT`** from repo `.env` or **3000**), starts the Vite admin dev server — avoids proxy `ECONNREFUSED` while Nest is still booting. Requires **`concurrently`** and **`wait-on`**. Use **`http://localhost:5173/dashboard/`** for HMR. The Vite proxy target uses the same **`PORT`** as Nest (via `apps/admin-dashboard/vite.config.ts` reading the root `.env`).
 
 ### Legacy static dashboard
 

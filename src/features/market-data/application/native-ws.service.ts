@@ -10,6 +10,11 @@ import { RedisService } from '@infra/redis/redis.service';
 import { MarketDataProviderResolverService } from '@features/market-data/application/market-data-provider-resolver.service';
 import { ApiKeyService } from '@features/auth/application/api-key.service';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
+import {
+  shapeMarketTickForMode,
+  StreamTickMode,
+} from '@features/market-data/application/tick-shape.util';
+import { validateSetModePayload } from '@shared/utils/ws-validation';
 
 interface ClientSubscription {
   clientId: string;
@@ -253,6 +258,9 @@ export class NativeWsService implements OnModuleDestroy {
         case 'unsubscribe':
           this.handleUnsubscribe(client, data);
           break;
+        case 'set_mode':
+          void this.handleSetMode(client, data);
+          break;
         case 'get_quote':
           this.handleGetQuote(client, data);
           break;
@@ -336,10 +344,31 @@ export class NativeWsService implements OnModuleDestroy {
     );
     await this.subscribeToInstruments(instruments, mode, clientId);
 
+    let limits: Record<string, unknown> = {
+      maxUpstreamInstruments: 1000,
+      maxSubscriptionsPerSocket: 1000,
+    };
+    try {
+      const provider = await this.providerResolver.resolveForWebsocket();
+      const lim = (provider as any)?.getSubscriptionLimit?.();
+      if (Number.isFinite(lim) && lim > 0) {
+        limits.maxUpstreamInstruments = lim;
+      }
+      const v = (provider as any)?.getVortexWsLimits?.() ?? null;
+      if (v) {
+        limits.maxSubscriptionsPerSocket = v.perSocket;
+        limits.maxVortexShards = v.maxShards;
+        limits.maxVortexInstruments = v.total;
+      }
+    } catch {
+      /* ignore */
+    }
+
     // Send confirmation
     this.sendToClient(client, 'subscription_confirmed', {
       instruments: subscription.instruments,
       mode,
+      limits,
       timestamp: new Date().toISOString(),
     });
 
@@ -389,6 +418,50 @@ export class NativeWsService implements OnModuleDestroy {
     this.logger.log(
       `Client ${clientId} unsubscribed from ${instruments.length} instruments`,
     );
+  }
+
+  private async handleSetMode(client: HeartbeatWebSocket, data: any) {
+    const clientId = client.clientId || 'unknown';
+    const subscription = this.clientSubscriptions.get(clientId);
+    if (!subscription) {
+      this.sendError(
+        client,
+        'WS_SUBSCRIPTION_NOT_FOUND',
+        'Client subscription not found',
+      );
+      return;
+    }
+    const val = validateSetModePayload(data);
+    if (!val.ok) {
+      this.sendError(client, 'WS_INVALID_PAYLOAD', 'Invalid set_mode payload');
+      return;
+    }
+    const { instruments, mode } = data as {
+      instruments: Array<number | string>;
+      mode: 'ltp' | 'ohlcv' | 'full';
+    };
+    const tokens: number[] = [];
+    for (const item of instruments as any[]) {
+      if (typeof item === 'string' && /-\d+$/.test(item)) {
+        const tok = Number(String(item).split('-').pop());
+        if (Number.isFinite(tok)) tokens.push(tok);
+      } else {
+        const n = Number(item);
+        if (Number.isFinite(n)) tokens.push(n);
+      }
+    }
+    const subscribedSet = new Set(subscription.instruments);
+    const target = tokens.filter((t) => subscribedSet.has(t));
+    if (target.length > 0) {
+      await this.streamService.setMode(mode, target);
+      target.forEach((t) => subscription.modeByInstrument.set(t, mode));
+    }
+    this.sendToClient(client, 'mode_set', {
+      requested: tokens,
+      updated: target,
+      mode,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   private async handleGetQuote(client: HeartbeatWebSocket, data: any) {
@@ -542,9 +615,12 @@ export class NativeWsService implements OnModuleDestroy {
               : undefined;
 
             if (subscription && subscription.instruments.includes(instrumentToken)) {
+              const m: StreamTickMode =
+                subscription.modeByInstrument.get(instrumentToken) || 'ltp';
+              const payload = shapeMarketTickForMode(data, m);
               this.sendToClient(ws, 'market_data', {
                 instrumentToken,
-                data,
+                data: payload,
                 timestamp: new Date().toISOString(),
               });
             }
