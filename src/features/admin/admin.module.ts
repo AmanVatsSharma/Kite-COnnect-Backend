@@ -8,6 +8,7 @@ import { AdminGuard } from './guards/admin.guard';
 import { RequestAuditLog } from './domain/request-audit-log.entity';
 import { OriginAuditService } from './application/origin-audit.service';
 import { AuditCleanupCronService } from './application/audit-cleanup.cron';
+import { OriginAuditInterceptor } from '@shared/interceptors/origin-audit.interceptor';
 
 import { RedisModule } from '@infra/redis/redis.module';
 import { AuthModule } from '../auth/auth.module';
@@ -27,7 +28,12 @@ import { StockModule } from '../stock/stock.module';
     forwardRef(() => StockModule)
   ],
   controllers: [AdminController],
-  providers: [OriginAuditService, AdminGuard, AuditCleanupCronService],
-  exports: [OriginAuditService],
+  providers: [
+    OriginAuditService,
+    OriginAuditInterceptor,
+    AdminGuard,
+    AuditCleanupCronService,
+  ],
+  exports: [OriginAuditService, OriginAuditInterceptor],
 })
 export class AdminModule {}

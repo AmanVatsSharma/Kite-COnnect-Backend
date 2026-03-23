@@ -7,6 +7,7 @@ import { AbuseDetectionService } from './application/abuse-detection.service';
 import { ApiKey } from './domain/api-key.entity';
 import { ApiKeyAbuseFlag } from './domain/api-key-abuse-flag.entity';
 import { RequestAuditLog } from '@features/admin/domain/request-audit-log.entity';
+import { VortexSession } from '@features/stock/domain/vortex-session.entity';
 import { RedisModule } from '@infra/redis/redis.module';
 import { KiteConnectModule } from '../kite-connect/kite-connect.module';
 import { MarketDataModule } from '../market-data/market-data.module';
@@ -15,7 +16,12 @@ import { AdminModule } from '../admin/admin.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ApiKey, ApiKeyAbuseFlag, RequestAuditLog]),
+    TypeOrmModule.forFeature([
+      ApiKey,
+      ApiKeyAbuseFlag,
+      RequestAuditLog,
+      VortexSession,
+    ]),
     ConfigModule,
     RedisModule,
     KiteConnectModule,
