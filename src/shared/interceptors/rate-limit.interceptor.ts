@@ -1,4 +1,11 @@
-import { CallHandler, ExecutionContext, HttpException, HttpStatus, Injectable, NestInterceptor } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NestInterceptor,
+} from '@nestjs/common';
 import { Observable, from } from 'rxjs';
 import { mergeMap } from 'rxjs/operators';
 import { ConfigService } from '@nestjs/config';
@@ -10,19 +17,39 @@ export class RateLimitInterceptor implements NestInterceptor {
   private readonly perKeyLimit: number;
   private readonly perIpLimit: number;
 
-  constructor(private readonly redis: RedisService, private readonly config: ConfigService) {
+  constructor(
+    private readonly redis: RedisService,
+    private readonly config: ConfigService,
+  ) {
     this.windowSec = Number(config.get('RATE_LIMIT_WINDOW_SEC', 60));
     this.perKeyLimit = Number(config.get('RATE_LIMIT_PER_KEY', 180));
     this.perIpLimit = Number(config.get('RATE_LIMIT_PER_IP', 360));
   }
 
   async guardRequest(req: any): Promise<void> {
+    const urlPath = (req?.originalUrl || req?.url || '').split(
+      '?',
+    )[0] as string;
+    if (urlPath.startsWith('/api/admin')) {
+      return;
+    }
     try {
       const now = Math.floor(Date.now() / 1000);
       const windowStart = now - (now % this.windowSec);
-      const route = (req?.route?.path || req?.url || 'unknown').replace(/[^a-zA-Z0-9:_/-]/g, '');
-      const ip = (req?.ip || req?.connection?.remoteAddress || 'unknown').toString();
-      const apiKey = (req?.headers?.['x-api-key'] || req?.query?.['api_key'] || 'anonymous').toString();
+      const route = (req?.route?.path || req?.url || 'unknown').replace(
+        /[^a-zA-Z0-9:_/-]/g,
+        '',
+      );
+      const ip = (
+        req?.ip ||
+        req?.connection?.remoteAddress ||
+        'unknown'
+      ).toString();
+      const apiKey = (
+        req?.headers?.['x-api-key'] ||
+        req?.query?.['api_key'] ||
+        'anonymous'
+      ).toString();
 
       // Per API key limit
       const keyCounter = `rate:key:${apiKey}:${route}:${windowStart}`;
@@ -66,5 +93,3 @@ export class RateLimitInterceptor implements NestInterceptor {
     return from(this.guardRequest(req)).pipe(mergeMap(() => next.handle()));
   }
 }
-
-
