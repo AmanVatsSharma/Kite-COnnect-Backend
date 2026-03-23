@@ -20,6 +20,19 @@ Set **`ADMIN_TOKEN`** in Nest `.env`, then open **Settings** in the UI and paste
 
 - From repo root: `npm run build` runs `admin:build` then `nest build`. Static files land in `src/public/dashboard` and are copied to `dist/public` for the Docker image.
 
+### Starting Nest (dashboard always built)
+
+- **`prestart` / `prestart:dev` / `prestart:prod` / `prestart:debug`** run [`scripts/ensure-admin-dashboard.mjs`](scripts/ensure-admin-dashboard.mjs): if `src/public/dashboard/index.html` (or `dist/public/dashboard/index.html`) is missing, it runs `npm run admin:build`.
+- In **production**, if the SPA index is still missing after bootstrap checks, Nest **exits** with an error (see [`src/main.ts`](src/main.ts)).
+
+### Rate limiting vs admin API
+
+- HTTP routes under **`/api/admin`** are **not** counted against the global per-IP / per-API-key [`RateLimitInterceptor`](src/shared/interceptors/rate-limit.interceptor.ts) buckets, so the React admin UI can poll frequently without tripping `429` for operators using a valid admin token.
+
+### One-command dev (Nest + Vite)
+
+- **`npm run dev:full`**: runs `nest start --watch` and the Vite admin dev server together (requires `concurrently`). Use **`http://localhost:5173/dashboard/`** for HMR, or **`http://localhost:3000/dashboard/`** on Nest after the ensure script has built the SPA once.
+
 ### Legacy static dashboard
 
 The Ultimate Trading Data Provider Dashboard (legacy) is a comprehensive single-file HTML interface for managing market data providers, authentication, real-time monitoring, and system administration.
