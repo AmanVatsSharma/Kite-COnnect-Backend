@@ -1,15 +1,29 @@
+/**
+ * @file WsAdminPage.tsx
+ * @module admin-dashboard
+ * @description WebSocket admin: structured status/config, forms, and collapsible raw responses.
+ */
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
-import { JsonBlock } from '../components/JsonBlock';
+import { ErrorInline } from '../components/ErrorInline';
+import { KeyValueGrid } from '../components/KeyValueGrid';
+import { MetricCard } from '../components/MetricCard';
+import { RawJsonDetails } from '../components/RawJsonDetails';
+import { StatusBadge } from '../components/StatusBadge';
+import { wsStatusSummaryRows } from '../lib/views/overview-views';
+import { wsConfigToRows } from '../lib/views/ws-config-views';
+import { flattenObject } from '../lib/views/flatten';
 
 export function WsAdminPage() {
   const token = getAdminToken();
   const qc = useQueryClient();
-  const [subRps, setSubRps] = useState('');
-  const [unsubRps, setUnsubRps] = useState('');
-  const [modeRps, setModeRps] = useState('');
+  /** `null` = show server baseline; string = user override (incl. empty). */
+  const [subRps, setSubRps] = useState<string | null>(null);
+  const [unsubRps, setUnsubRps] = useState<string | null>(null);
+  const [modeRps, setModeRps] = useState<string | null>(null);
   const [entKey, setEntKey] = useState('');
   const [entEx, setEntEx] = useState('NSE_EQ,NSE_FO');
   const [blJson, setBlJson] = useState('{}');
@@ -31,9 +45,32 @@ export function WsAdminPage() {
     enabled: !!token,
   });
 
+  const rateBaseline = useMemo(() => {
+    const c = config.data;
+    if (!c || typeof c !== 'object') return { sub: '', unsub: '', mode: '' };
+    const o = c as unknown as Record<string, unknown>;
+    const rl = o.rate_limits;
+    if (!rl || typeof rl !== 'object') return { sub: '', unsub: '', mode: '' };
+    const r = rl as Record<string, unknown>;
+    return {
+      sub: typeof r.subscribe_rps === 'number' ? String(r.subscribe_rps) : '',
+      unsub: typeof r.unsubscribe_rps === 'number' ? String(r.unsubscribe_rps) : '',
+      mode: typeof r.mode_rps === 'number' ? String(r.mode_rps) : '',
+    };
+  }, [config.data]);
+
+  const subRpsVal = subRps ?? rateBaseline.sub;
+  const unsubRpsVal = unsubRps ?? rateBaseline.unsub;
+  const modeRpsVal = modeRps ?? rateBaseline.mode;
+
   const setRps = useMutation({
     mutationFn: admin.setWsRateLimits,
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin-ws-config'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin-ws-config'] });
+      setSubRps(null);
+      setUnsubRps(null);
+      setModeRps(null);
+    },
   });
 
   const ent = useMutation({ mutationFn: admin.setWsEntitlements });
@@ -49,30 +86,66 @@ export function WsAdminPage() {
     );
   }
 
+  const statusRows = status.data ? wsStatusSummaryRows(status.data) : [];
+  const statusExtra =
+    status.data && !statusRows.length ? flattenObject(status.data, '', 2) : statusRows;
+  const conn =
+    status.data && typeof status.data === 'object'
+      ? (status.data as Record<string, unknown>).connections
+      : undefined;
+
   return (
     <>
       <section className="card">
         <h2>WS status</h2>
-        {status.isError && <p className="err">{(status.error as Error).message}</p>}
-        {status.data && <JsonBlock value={status.data} />}
+        <ErrorInline message={status.isError ? (status.error as Error).message : null} />
+        {status.data && (
+          <>
+            {typeof conn === 'number' && (
+              <div className="metric-grid" style={{ marginBottom: 12 }}>
+                <MetricCard label="Connections" value={String(conn)} />
+                {typeof (status.data as Record<string, unknown>).redis_ok === 'boolean' && (
+                  <MetricCard
+                    label="Redis"
+                    value={
+                      (status.data as Record<string, unknown>).redis_ok ? (
+                        <StatusBadge variant="ok">OK</StatusBadge>
+                      ) : (
+                        <StatusBadge variant="bad">Issue</StatusBadge>
+                      )
+                    }
+                  />
+                )}
+              </div>
+            )}
+            <KeyValueGrid rows={statusExtra.map((r) => ({ label: r.label, value: r.value }))} />
+            <RawJsonDetails value={status.data} summary="Technical details (raw JSON)" />
+          </>
+        )}
       </section>
 
       <section className="card">
         <h2>WS config</h2>
-        {config.data && <JsonBlock value={config.data} />}
+        <ErrorInline message={config.isError ? (config.error as Error).message : null} />
+        {config.data && (
+          <>
+            <KeyValueGrid rows={wsConfigToRows(config.data).map((r) => ({ label: r.label, value: r.value }))} />
+            <RawJsonDetails value={config.data} summary="Technical details (raw JSON)" />
+          </>
+        )}
         <h3 style={{ marginTop: 16 }}>Update process env rate limits</h3>
         <div className="row">
           <div>
             <label>subscribe_rps</label>
-            <input value={subRps} onChange={(e) => setSubRps(e.target.value)} placeholder="10" />
+            <input value={subRpsVal} onChange={(e) => setSubRps(e.target.value)} placeholder="10" />
           </div>
           <div>
             <label>unsubscribe_rps</label>
-            <input value={unsubRps} onChange={(e) => setUnsubRps(e.target.value)} />
+            <input value={unsubRpsVal} onChange={(e) => setUnsubRps(e.target.value)} />
           </div>
           <div>
             <label>mode_rps</label>
-            <input value={modeRps} onChange={(e) => setModeRps(e.target.value)} />
+            <input value={modeRpsVal} onChange={(e) => setModeRps(e.target.value)} />
           </div>
         </div>
         <button
@@ -81,9 +154,9 @@ export function WsAdminPage() {
           disabled={setRps.isPending}
           onClick={() =>
             setRps.mutate({
-              subscribe_rps: subRps ? Number(subRps) : undefined,
-              unsubscribe_rps: unsubRps ? Number(unsubRps) : undefined,
-              mode_rps: modeRps ? Number(modeRps) : undefined,
+              subscribe_rps: subRpsVal.trim() !== '' ? Number(subRpsVal) : undefined,
+              unsubscribe_rps: unsubRpsVal.trim() !== '' ? Number(unsubRpsVal) : undefined,
+              mode_rps: modeRpsVal.trim() !== '' ? Number(modeRpsVal) : undefined,
             })
           }
         >
@@ -194,7 +267,7 @@ export function WsAdminPage() {
         >
           Broadcast
         </button>
-        {broadcast.data && <JsonBlock value={broadcast.data} />}
+        {broadcast.data && <RawJsonDetails value={broadcast.data} summary="Broadcast response (raw JSON)" />}
       </section>
     </>
   );
