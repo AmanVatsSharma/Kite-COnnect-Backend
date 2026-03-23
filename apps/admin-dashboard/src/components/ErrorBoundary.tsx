@@ -11,7 +11,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // eslint-disable-next-line no-console -- surface render failures in dev
     console.error('[admin-dashboard]', error, info.componentStack);
   }
 

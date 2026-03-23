@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { getAdminToken } from '../lib/api-client';
-import { useAuthAlert } from '../contexts/AuthAlertContext';
+import { useAuthAlert } from '../hooks/useAuthAlert';
 
 const links = [
   { to: '/', label: 'Overview' },
