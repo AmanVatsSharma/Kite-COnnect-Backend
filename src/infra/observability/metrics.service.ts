@@ -1,3 +1,11 @@
+/**
+ * @file metrics.service.ts
+ * @module infra/observability
+ * @description Prometheus metrics registry and counters/gauges/histograms for HTTP, providers, market stream, Vortex WS.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2025-03-23
+ */
 import { Injectable } from '@nestjs/common';
 import {
   collectDefaultMetrics,
@@ -33,6 +41,10 @@ export class MetricsService {
   readonly marketDataStreamTickerConnected: Gauge;
   /** 1 when active HTTP provider has no credentials / client (degraded), 0 otherwise. */
   readonly providerDegradedMode: Gauge;
+  /** Vortex: subscribe dropped (per-shard cap or all shards full). */
+  readonly vortexSubscribeDroppedTotal: Counter;
+  /** Vortex: count of WebSocket shards currently connected (0–3). */
+  readonly vortexWsShardsConnected: Gauge;
 
   constructor() {
     collectDefaultMetrics({ register });
@@ -162,6 +174,18 @@ export class MetricsService {
     this.providerDegradedMode = new Gauge({
       name: 'provider_degraded_mode',
       help: 'Provider operating without full credentials or HTTP client (1=degraded)',
+      labelNames: ['provider'],
+      registers: [register],
+    });
+    this.vortexSubscribeDroppedTotal = new Counter({
+      name: 'vortex_subscribe_dropped_total',
+      help: 'Vortex upstream subscribe dropped (shard or global capacity)',
+      labelNames: ['reason'],
+      registers: [register],
+    });
+    this.vortexWsShardsConnected = new Gauge({
+      name: 'vortex_ws_shards_connected',
+      help: 'Connected Vortex WebSocket shards (max 3 per access token)',
       labelNames: ['provider'],
       registers: [register],
     });
