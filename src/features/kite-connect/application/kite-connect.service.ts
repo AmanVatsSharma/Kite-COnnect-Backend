@@ -1,3 +1,11 @@
+/**
+ * @file kite-connect.service.ts
+ * @module kite-connect
+ * @description Legacy Kite Connect REST + ticker helpers (streaming uses KiteProviderService).
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-03-28
+ */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KiteConnect } from 'kiteconnect';
@@ -30,7 +38,7 @@ export class KiteConnectService implements OnModuleInit {
           'Kite Connect credentials not found. Starting without Kite.',
         );
         this.logger.warn(
-          'Use /api/auth/kite/login to authenticate and enable ticker.',
+          'Use /api/auth/falcon/login to authenticate and enable ticker.',
         );
         return;
       }

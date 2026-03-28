@@ -1,3 +1,11 @@
+/**
+ * @file health.controller.ts
+ * @module health
+ * @description Health endpoints; streaming summary uses client-visible provider labels (Falcon|Vayu).
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-03-28
+ */
 import { Controller, Get, Res, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { StockService } from '@features/stock/application/stock.service';
@@ -7,6 +15,7 @@ import { RedisService } from '@infra/redis/redis.service';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { VortexProviderService } from '@features/stock/infra/vortex-provider.service';
+import { internalToClientProviderName } from '@shared/utils/provider-label.util';
 
 @Controller('health')
 @ApiTags('health')
@@ -33,14 +42,15 @@ export class HealthController {
         this.vortexProvider.ping?.(),
       ]);
 
-      const globalProvider = await this.resolver.getGlobalProviderName();
+      const resolved =
+        await this.resolver.getResolvedInternalProviderNameForWebsocket();
       return {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         services: {
           database: 'connected',
           redis: 'connected',
-          provider: globalProvider || 'env',
+          provider: internalToClientProviderName(resolved),
           streaming: streamingStatus.isStreaming ? 'active' : 'inactive',
           vortexHttp: vortexPing?.httpOk ? 'reachable' : 'unreachable',
         },
@@ -70,8 +80,9 @@ export class HealthController {
         this.marketDataStreamService.getMarketDataHealthSnapshot(),
       ]);
 
+      const internal = await this.resolver.getResolvedInternalProviderNameForWebsocket();
       const healthData = {
-        provider: (await this.resolver.getGlobalProviderName()) || 'env',
+        provider: internalToClientProviderName(internal),
         streaming: streamingStatus,
         marketData: mdSnapshot,
         vortex: vortexPing,
@@ -112,7 +123,8 @@ export class HealthController {
         redisStatus = 'error';
       }
 
-      const globalProvider = await this.resolver.getGlobalProviderName();
+      const resolvedDetailed =
+        await this.resolver.getResolvedInternalProviderNameForWebsocket();
       return {
         status: 'healthy',
         timestamp: new Date().toISOString(),
@@ -121,7 +133,7 @@ export class HealthController {
         services: {
           database: 'connected',
           redis: redisStatus,
-          provider: globalProvider || 'env',
+          provider: internalToClientProviderName(resolvedDetailed),
           streaming: streamingStatus.isStreaming ? 'active' : 'inactive',
           vortexHttp: vortexPing?.httpOk ? 'reachable' : 'unreachable',
         },

@@ -1,3 +1,11 @@
+/**
+ * @file kite-provider.service.ts
+ * @module kite-connect
+ * @description Kite Connect HTTP + ticker provider implementing MarketDataProvider; ticker wrapped for stream mode parity with Vortex (ohlcv → quote).
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-03-28
+ */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '@infra/redis/redis.service';
@@ -9,6 +17,7 @@ import {
 } from '@features/market-data/infra/market-data.provider';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { KiteConnect } from 'kiteconnect';
+import { wrapKiteTickerForStreaming } from '@features/kite-connect/infra/kite-ticker.facade';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { KiteTicker } = require('kiteconnect');
 
@@ -60,7 +69,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
           '[Kite] Credentials not found. Provider will operate in degraded mode.',
         );
         this.logger.warn(
-          '[Kite] Visit /api/auth/kite/login to authenticate and enable ticker.',
+          '[Kite] Visit /api/auth/falcon/login to authenticate and enable ticker.',
         );
         this.refreshDegradedMetric();
         return;
@@ -265,21 +274,21 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       return undefined as any;
     }
 
-    const ticker = new KiteTicker({
+    const inner = new KiteTicker({
       api_key: apiKey,
       access_token: accessToken,
     });
 
-    ticker.on('connect', () => {
+    inner.on('connect', () => {
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.disableReconnect = false;
       this.logger.log('[Kite] Ticker connected');
     });
-    ticker.on('ticks', (ticks: any[]) => {
+    inner.on('ticks', (ticks: any[]) => {
       this.logger.debug?.(`[Kite] Received ${ticks?.length || 0} ticks`);
     });
-    ticker.on('disconnect', (...args: any[]) => {
+    inner.on('disconnect', (...args: any[]) => {
       this.isConnected = false;
       this.logger.warn(
         '[Kite] Ticker disconnected ' + this.stringifyArgs(args),
@@ -301,7 +310,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         1000 + Math.floor(Math.random() * 2000) + this.reconnectAttempts * 500;
       setTimeout(() => {
         try {
-          ticker.connect();
+          inner.connect();
         } catch (e) {
           this.logger.error('[Kite] Ticker reconnect failed', e as any);
         }
@@ -309,20 +318,20 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     });
 
     // Optional events if exposed by SDK; safe to attach even if never emitted
-    ticker.on('reconnect', (...args: any[]) => {
+    inner.on('reconnect', (...args: any[]) => {
       this.logger.warn(
         '[Kite] Ticker reconnect event ' + this.stringifyArgs(args),
       );
     });
-    ticker.on('noreconnect', (...args: any[]) => {
+    inner.on('noreconnect', (...args: any[]) => {
       this.logger.warn(
         '[Kite] Ticker noreconnect event ' + this.stringifyArgs(args),
       );
     });
-    ticker.on('close', (...args: any[]) => {
+    inner.on('close', (...args: any[]) => {
       this.logger.warn('[Kite] Ticker close event ' + this.stringifyArgs(args));
     });
-    ticker.on('error', (error: any) => {
+    inner.on('error', (error: any) => {
       const pretty = this.formatError(error);
       this.lastTickerError = {
         message: pretty,
@@ -334,15 +343,15 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       if (this.isAuthError(error)) {
         this.disableReconnect = true;
         this.logger.warn(
-          '[Kite] Disabling reconnect due to authentication error. Visit /api/auth/kite/login to re-authenticate.',
+          '[Kite] Disabling reconnect due to authentication error. Visit /api/auth/falcon/login to re-authenticate.',
         );
         try {
-          ticker.disconnect?.();
+          inner.disconnect?.();
         } catch {}
       }
     });
 
-    this.ticker = ticker;
+    this.ticker = wrapKiteTickerForStreaming(inner);
     return this.ticker;
   }
 
