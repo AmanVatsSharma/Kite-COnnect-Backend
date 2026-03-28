@@ -1,3 +1,14 @@
+/**
+ * @file stock.service.ts
+ * @module stock
+ * @description Stock and market-data orchestration: instruments, quotes, realtime tick fan-out and async DB persistence.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-03-24
+ *
+ * Notes:
+ * - Realtime ticks use forwardRealtimeTick + enqueuePersistMarketData so WS is not blocked on DB writes.
+ */
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -15,6 +26,7 @@ import { VortexInstrumentService } from '@features/stock/application/vortex-inst
 import { Inject, forwardRef } from '@nestjs/common';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
+import { MarketTickEmitOptions } from '@features/market-data/application/tick-shape.util';
 
 @Injectable()
 export class StockService {
@@ -535,7 +547,66 @@ export class StockService {
     }
   }
 
-  async storeMarketData(instrumentToken: number, data: any): Promise<void> {
+  /**
+   * Hot path: Redis last_tick + WebSocket broadcast (no DB). Use with enqueuePersistMarketData for persistence.
+   */
+  async forwardRealtimeTick(
+    instrumentToken: number,
+    data: any,
+    emitOpts?: MarketTickEmitOptions,
+  ): Promise<void> {
+    try {
+      await this.redisService.set(`last_tick:${instrumentToken}`, data, 300);
+    } catch (e: any) {
+      this.logger.warn(
+        `Failed to set last_tick in Redis for token ${instrumentToken}: ${e?.message || e}`,
+      );
+    }
+
+    try {
+      await this.marketDataGateway.broadcastMarketData(
+        instrumentToken,
+        data,
+        emitOpts,
+      );
+      this.logger.debug(
+        `[StockService] Broadcasted market data for token ${instrumentToken} to MarketDataGateway`,
+      );
+    } catch (gatewayError: any) {
+      this.logger.warn(
+        `[StockService] Failed to broadcast to MarketDataGateway: ${gatewayError?.message || gatewayError}`,
+      );
+    }
+
+    try {
+      await this.nativeWsService.broadcastMarketData(
+        instrumentToken,
+        data,
+        emitOpts,
+      );
+      this.logger.debug(
+        `[StockService] Broadcasted market data for token ${instrumentToken} to NativeWsService`,
+      );
+    } catch (nativeGatewayError: any) {
+      this.logger.warn(
+        `[StockService] Failed to broadcast to NativeWsService: ${nativeGatewayError?.message || nativeGatewayError}`,
+      );
+    }
+  }
+
+  /**
+   * Schedule DB + quote cache write without blocking the tick loop.
+   */
+  enqueuePersistMarketData(instrumentToken: number, data: any): void {
+    setImmediate(() => {
+      void this.persistMarketDataColdPath(instrumentToken, data);
+    });
+  }
+
+  private async persistMarketDataColdPath(
+    instrumentToken: number,
+    data: any,
+  ): Promise<void> {
     try {
       const marketData = this.marketDataRepository.create({
         instrument_token: instrumentToken,
@@ -556,51 +627,36 @@ export class StockService {
 
       try {
         await this.marketDataRepository.save(marketData);
-        this.logger.log(`Stored market data for instrument ${instrumentToken}`);
-      } catch (dbError) {
-        // Log database error but don't block broadcasting
+        this.logger.debug(
+          `Stored market data for instrument ${instrumentToken} (async path)`,
+        );
+      } catch (dbError: any) {
         this.logger.warn(
-          `Failed to store market data in DB for token ${instrumentToken}: ${dbError.message}. Continuing with broadcast.`,
+          `Failed to store market data in DB for token ${instrumentToken}: ${dbError?.message || dbError}`,
         );
       }
 
-      // Cache the data (non-blocking)
       try {
         await this.redisService.cacheMarketData(instrumentToken, data, 60);
-        await this.redisService.set(`last_tick:${instrumentToken}`, data, 300);
-      } catch (cacheError) {
-        this.logger.warn(`Failed to cache market data: ${cacheError.message}`);
-      }
-
-      // Always broadcast to WebSocket clients (even if DB save failed)
-      // Broadcast to both Socket.IO and native WebSocket gateways
-      try {
-        await this.marketDataGateway.broadcastMarketData(instrumentToken, data);
-        this.logger.debug(
-          `[StockService] Broadcasted market data for token ${instrumentToken} to MarketDataGateway`,
-        );
-      } catch (gatewayError) {
+      } catch (cacheError: any) {
         this.logger.warn(
-          `[StockService] Failed to broadcast to MarketDataGateway: ${gatewayError.message}`,
-        );
-      }
-
-      try {
-        await this.nativeWsService.broadcastMarketData(
-          instrumentToken,
-          data,
-        );
-        this.logger.debug(
-          `[StockService] Broadcasted market data for token ${instrumentToken} to NativeWebSocketGateway`,
-        );
-      } catch (nativeGatewayError) {
-        this.logger.warn(
-          `[StockService] Failed to broadcast to NativeWebSocketGateway: ${nativeGatewayError.message}`,
+          `Failed to cache market data: ${cacheError?.message || cacheError}`,
         );
       }
     } catch (error) {
+      this.logger.error('Error in persistMarketDataColdPath', error);
+    }
+  }
+
+  /**
+   * Full path: realtime forward + async persistence (backward compatible).
+   */
+  async storeMarketData(instrumentToken: number, data: any): Promise<void> {
+    try {
+      await this.forwardRealtimeTick(instrumentToken, data);
+      this.enqueuePersistMarketData(instrumentToken, data);
+    } catch (error) {
       this.logger.error('Error storing market data', error);
-      // Don't throw - allow tick processing to continue
     }
   }
 

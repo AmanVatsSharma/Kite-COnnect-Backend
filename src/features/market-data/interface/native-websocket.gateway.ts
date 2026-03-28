@@ -29,6 +29,7 @@ import { MarketDataStreamService } from '@features/market-data/application/marke
 import {
   shapeMarketTickForMode,
   StreamTickMode,
+  MarketTickEmitOptions,
 } from '@features/market-data/application/tick-shape.util';
 import { validateSetModePayload } from '@shared/utils/ws-validation';
 
@@ -532,7 +533,11 @@ export class NativeWebSocketGateway
   }
 
   // Broadcast market data to native WebSocket clients
-  async broadcastMarketData(instrumentToken: number, data: any) {
+  async broadcastMarketData(
+    instrumentToken: number,
+    data: any,
+    emitOpts?: MarketTickEmitOptions,
+  ) {
     try {
       const subscribedClients = Array.from(
         this.clientSubscriptions.values(),
@@ -565,12 +570,13 @@ export class NativeWebSocketGateway
                 instrumentToken,
                 data: payload,
                 timestamp: new Date().toISOString(),
+                ...(emitOpts?.syntheticLast ? { syntheticLast: true } : {}),
               });
             }
           }
         });
 
-        this.logger.log(
+        this.logger.debug(
           `[NativeWS Gateway] Broadcasted tick ${instrumentToken} to ${subscribedClients.length} clients`,
         );
       }

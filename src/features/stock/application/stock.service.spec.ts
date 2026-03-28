@@ -11,7 +11,7 @@ import { NativeWsService } from '@features/market-data/application/native-ws.ser
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { Subscription } from '@features/market-data/domain/subscription.entity';
-import { KiteConnectService } from '../../services/kite-connect.service';
+import { KiteConnectService } from '@features/kite-connect/application/kite-connect.service';
 import { RedisService } from '@infra/redis/redis.service';
 import { RequestBatchingService } from '@features/market-data/application/request-batching.service';
 import { MarketDataGateway } from '@features/market-data/interface/market-data.gateway';
@@ -63,6 +63,8 @@ describe('StockService', () => {
     getCachedQuote: jest.fn(),
     cacheQuote: jest.fn(),
     cacheMarketData: jest.fn(),
+    set: jest.fn().mockResolvedValue(undefined),
+    get: jest.fn(),
   };
 
   const mockRequestBatchingService = {
@@ -156,6 +158,32 @@ describe('StockService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('storeMarketData forwards realtime then enqueues async persistence', async () => {
+    const forwardSpy = jest
+      .spyOn(service, 'forwardRealtimeTick')
+      .mockResolvedValue(undefined);
+    const enqueueSpy = jest
+      .spyOn(service, 'enqueuePersistMarketData')
+      .mockImplementation(() => {});
+    mockMarketDataRepository.create.mockReturnValue({} as any);
+    mockMarketDataRepository.save.mockResolvedValue({} as any);
+    await service.storeMarketData(26000, {
+      last_price: 100,
+      ohlc: { open: 1, high: 2, low: 0.5, close: 1.5 },
+      volume: 10,
+    });
+    expect(forwardSpy).toHaveBeenCalledWith(
+      26000,
+      expect.objectContaining({ last_price: 100 }),
+    );
+    expect(enqueueSpy).toHaveBeenCalledWith(
+      26000,
+      expect.objectContaining({ last_price: 100 }),
+    );
+    forwardSpy.mockRestore();
+    enqueueSpy.mockRestore();
   });
 
   describe('getInstruments', () => {
