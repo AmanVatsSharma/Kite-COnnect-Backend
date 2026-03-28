@@ -1,3 +1,11 @@
+/**
+ * @file market-data-provider-resolver.service.ts
+ * @module market-data
+ * @description Resolves MarketDataProvider for HTTP and WebSocket (kite/vortex; x-provider accepts falcon/vayu aliases).
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-03-28
+ */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
@@ -7,6 +15,7 @@ import { RedisService } from '@infra/redis/redis.service';
 import { ApiKey } from '@features/auth/domain/api-key.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { normalizeProviderAlias } from '@shared/utils/provider-label.util';
 
 type ProviderName = 'kite' | 'vortex';
 
@@ -30,16 +39,15 @@ export class MarketDataProviderResolverService {
     headers: Record<string, any>,
     apiKey?: string,
   ): Promise<MarketDataProvider> {
-    const headerValue = (
+    const headerRaw = (
       headers?.['x-provider'] ||
       headers?.['X-Provider'] ||
       ''
-    )
-      .toString()
-      .toLowerCase();
-    if (headerValue === 'kite' || headerValue === 'vortex') {
-      this.logger.log(`[Resolver][HTTP] Using header provider=${headerValue}`);
-      return this.getProvider(headerValue as ProviderName);
+    ).toString();
+    const fromHeader = normalizeProviderAlias(headerRaw);
+    if (fromHeader) {
+      this.logger.log(`[Resolver][HTTP] Using header provider=${fromHeader}`);
+      return this.getProvider(fromHeader);
     }
 
     if (apiKey) {
@@ -67,18 +75,16 @@ export class MarketDataProviderResolverService {
       return this.getProvider(global);
     }
 
-    const envName = (
-      this.config.get('DATA_PROVIDER', 'kite') || 'kite'
-    ).toLowerCase() as ProviderName;
+    const envRaw = this.config.get('DATA_PROVIDER', 'kite') || 'kite';
+    const envName: ProviderName =
+      normalizeProviderAlias(String(envRaw)) ?? 'kite';
     this.logger.log(`[Resolver][HTTP] Using env provider=${envName}`);
     return this.getProvider(envName);
   }
 
   // WS uses a single global provider for all connections
   async resolveForWebsocket(): Promise<MarketDataProvider> {
-    const name =
-      (await this.getGlobalProviderName()) ||
-      (this.config.get('DATA_PROVIDER', 'kite') as ProviderName);
+    const name = await this.getResolvedInternalProviderNameForWebsocket();
     this.logger.log(`[Resolver][WS] Using global provider=${name}`);
     const provider = this.getProvider(name);
     // Ensure provider is initialized for WS path
@@ -118,6 +124,15 @@ export class MarketDataProviderResolverService {
     } catch {}
     if (this.inMemoryGlobalProvider) return this.inMemoryGlobalProvider;
     return null;
+  }
+
+  /** Effective internal provider for WS/metrics (global Redis key or normalized DATA_PROVIDER). */
+  async getResolvedInternalProviderNameForWebsocket(): Promise<ProviderName> {
+    const envFallback =
+      normalizeProviderAlias(
+        String(this.config.get('DATA_PROVIDER', 'kite') || 'kite'),
+      ) ?? 'kite';
+    return (await this.getGlobalProviderName()) || envFallback;
   }
 
   private async ensureInitialized(

@@ -21,8 +21,17 @@ Real-time market data streaming (Socket.IO + native WebSocket), provider abstrac
 | `ProviderQueueService` | Redis lock 1/s per endpoint; in-memory fallback |
 | `MarketDataGateway` | Socket.IO `/market-data` |
 | `NativeWsService` | WS `/ws` |
+| `MarketDataWsInterestService` | Ref-counts tokens with active WS subscribers (Socket.IO + native) for optional synthetic tick pulse |
+
+## Environment
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MARKET_DATA_SYNTHETIC_INTERVAL_MS` | `0` (off) | When greater than 0, re-emits last known tick on this interval for subscribed tokens if upstream has been quiet for at least one interval; outbound frames include `syntheticLast: true`. |
 
 ## Changelog
 
+- **2026-03-28 (Falcon parity)** — Kite ticker wrapped (`kite-ticker.facade.ts`): `subscribe(tokens, mode)` calls `setMode` with `ohlcv`→`quote` for upstream. Client payloads use **Falcon** / **Vayu**: Socket.IO `welcome` / `whoami`, Redis `stream:status`, `getStreamingStatus` / health `provider` field. Prometheus labels unchanged (`kite`/`vortex`). `x-provider` and admin global/API-key accept **falcon** / **vayu** aliases. Resolver: `getResolvedInternalProviderNameForWebsocket()`.
+- **2026-03-24** — Tick **hot path**: `forwardRealtimeTick` (Redis `last_tick` + WS broadcast) runs before **async** DB + `cacheMarketData` (`enqueuePersistMarketData` / `setImmediate`) so batches are not serialized on inserts. Per-tick `logger.log` demoted to `debug` on gateways/native WS; Redis `cacheMarketData` / `getCachedMarketData` use `Logger.debug` instead of `console.log`. Optional **`MARKET_DATA_SYNTHETIC_INTERVAL_MS`**: `MarketDataStreamService` pulses last payload with `syntheticLast: true`; metric `market_data_synthetic_tick_total`. `MarketDataWsInterestService` tracks subscriber ref-counts on subscribe/unsubscribe/disconnect (Socket.IO + native `/ws`).
 - **2025-03-23 (Vortex sync)** — Vortex upstream uses up to **3** WebSocket shards × **1000** instruments each (`VORTEX_WS_MAX_SHARDS`, default 3); per-shard mode upgrade on `subscribe` when already subscribed; `getSubscriptionLimit()` returns total upstream capacity. Client `market_data` payloads are **shaped** by subscribed mode (`ltp` / `ohlcv` / `full`) via `tick-shape.util.ts`. Native `/ws` supports **`set_mode`** (parity with Socket.IO). New metrics: `vortex_subscribe_dropped_total`, `vortex_ws_shards_connected`. See `GATEWAYS.md` and `stock/infra/VORTEX_IMPLEMENTATION.md`.
 - **2025-03-23** — Enterprise hardening: cleared subscription batch interval on stream stop; `RequestBatchingService` metrics interval lifecycle; Kite degraded empty returns + `getLTPByPairs` / `primeExchangeMapping`; idempotent ticker handler attachment (`WeakMap`); subscribe/unsub queue caps + drop metrics; structured logging (removed hot-path `console.*`); extended `stream:status` and Prometheus metrics; health snapshot `getMarketDataHealthSnapshot`; docs refreshed (`STREAMING_FLOWCHART.md`, `GATEWAYS.md`, `MARKET_DATA_ARCHITECTURE.md`).
