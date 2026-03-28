@@ -16,6 +16,7 @@ import { ProviderQueueService } from './application/provider-queue.service';
 import { RequestBatchingService } from './application/request-batching.service';
 import { FnoQueryParserService } from './application/fno-query-parser.service';
 import { LtpMemoryCacheService } from './application/ltp-memory-cache.service';
+import { MarketDataWsInterestService } from './application/market-data-ws-interest.service';
 import { MarketDataProvider } from './infra/market-data.provider';
 
 import { MarketData } from './domain/market-data.entity';
@@ -50,6 +51,7 @@ import { ApiKey } from '../auth/domain/api-key.entity'; // Import ApiKey
     RequestBatchingService,
     FnoQueryParserService,
     LtpMemoryCacheService,
+    MarketDataWsInterestService,
     // MarketDataProvider is an interface/abstract class usually, but if it's a provider here:
     // It seems MarketDataProvider is just an interface file. Checked file list: market-data.provider.ts.
     // I will exclude it from providers if it's just an interface.
@@ -64,6 +66,7 @@ import { ApiKey } from '../auth/domain/api-key.entity'; // Import ApiKey
     RequestBatchingService,
     FnoQueryParserService,
     LtpMemoryCacheService,
+    MarketDataWsInterestService,
     TypeOrmModule
   ],
 })
