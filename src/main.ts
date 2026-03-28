@@ -89,7 +89,7 @@ async function bootstrap() {
       );
       logger.warn('1) Set KITE_API_KEY and KITE_API_SECRET in .env');
       logger.warn(
-        '2) Open GET /api/auth/kite/login to obtain the OAuth URL and complete login',
+        '2) Open GET /api/auth/falcon/login to obtain the OAuth URL and complete login',
       );
       logger.warn(
         '3) After callback, ticker will auto-restart with the new access token',
@@ -253,9 +253,9 @@ async function bootstrap() {
     logger.log(`📈 WebSocket available at ws://localhost:${port}/market-data`);
     if (!kiteApiKey || !kiteAccessToken) {
       logger.log(
-        '🟡 Kite is disconnected. Visit http://localhost:' +
+        '🟡 Falcon (Kite) is disconnected. Visit http://localhost:' +
           port +
-          '/api/auth/kite/login to start OAuth',
+          '/api/auth/falcon/login to start OAuth',
       );
     }
   } catch (error) {

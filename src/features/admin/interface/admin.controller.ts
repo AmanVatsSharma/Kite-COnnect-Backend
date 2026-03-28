@@ -7,6 +7,7 @@ import {
   Query,
   Param,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -30,6 +31,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ApiKeyAbuseFlag } from '@features/auth/domain/api-key-abuse-flag.entity';
 import { AbuseDetectionService } from '@features/auth/application/abuse-detection.service';
 import { ConfigService } from '@nestjs/config';
+import {
+  normalizeProviderAlias,
+  internalToClientProviderName,
+} from '@shared/utils/provider-label.util';
 
 @Controller('admin')
 @ApiTags('admin', 'admin-ws')
@@ -408,11 +413,21 @@ export class AdminController {
     summary: 'Set provider for an API key (falcon|vayu or null to inherit)',
   })
   async setApiKeyProvider(
-    @Body() body: { key: string; provider?: 'kite' | 'vortex' | null },
+    @Body() body: { key: string; provider?: string | null },
   ) {
+    let normalized: 'kite' | 'vortex' | null = null;
+    if (body.provider != null && String(body.provider).trim() !== '') {
+      const n = normalizeProviderAlias(body.provider);
+      if (!n) {
+        throw new BadRequestException(
+          'provider must be kite, vortex, falcon, or vayu',
+        );
+      }
+      normalized = n;
+    }
     await this.apiKeyRepo.update(
       { key: body.key },
-      { provider: body.provider ?? null },
+      { provider: normalized },
     );
     return { success: true };
   }
@@ -429,18 +444,26 @@ export class AdminController {
       properties: {
         provider: {
           type: 'string',
-          enum: ['kite', 'vortex'],
-          description: 'Provider to use: "kite" for Falcon, "vortex" for Vayu',
+          enum: ['kite', 'vortex', 'falcon', 'vayu'],
+          description:
+            'Internal or alias: kite/falcon (Falcon), vortex/vayu (Vayu)',
         },
       },
       example: { provider: 'vortex' },
     },
   })
-  async setGlobalProvider(@Body() body: { provider: 'kite' | 'vortex' }) {
-    await this.resolver.setGlobalProviderName(body.provider);
+  async setGlobalProvider(@Body() body: { provider: string }) {
+    const internal = normalizeProviderAlias(body.provider);
+    if (!internal) {
+      throw new BadRequestException(
+        'provider must be kite, vortex, falcon, or vayu',
+      );
+    }
+    await this.resolver.setGlobalProviderName(internal);
     return {
       success: true,
-      message: `Global provider set to ${body.provider}`,
+      message: `Global provider set to ${internal}`,
+      clientProvider: internalToClientProviderName(internal),
     };
   }
 
@@ -452,7 +475,10 @@ export class AdminController {
   })
   async getGlobalProvider() {
     const name = await this.resolver.getGlobalProviderName();
-    return { provider: name };
+    return {
+      provider: name,
+      clientProvider: name ? internalToClientProviderName(name) : null,
+    };
   }
 
   @Post('provider/stream/start')

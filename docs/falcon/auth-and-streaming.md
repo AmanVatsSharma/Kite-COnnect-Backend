@@ -16,7 +16,7 @@ sequenceDiagram
   API-->>API: Save session, cache token, set provider=kite
   API->>WS: Start or reconnect streaming (internal)
   Client->>WS: Connect wss://<host>/market-data or wss://<host>/ws
-  WS-->>Client: Live ticks (provider=falcon internally)
+  WS-->>Client: Live ticks (stream_status uses Falcon|Vayu; Prometheus stays kite|vortex)
 ```
 
 Notes:
