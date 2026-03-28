@@ -17,6 +17,8 @@ module.exports = {
   },
   ignorePatterns: ['.eslintrc.js'],
   rules: {
+    'max-lines': ['warn', { max: 500, skipBlankLines: true, skipComments: true }],
+    'max-lines-per-function': ['warn', { max: 80, skipBlankLines: true, skipComments: true }],
     '@typescript-eslint/interface-name-prefix': 'off',
     '@typescript-eslint/explicit-function-return-type': 'off',
     '@typescript-eslint/explicit-module-boundary-types': 'off',

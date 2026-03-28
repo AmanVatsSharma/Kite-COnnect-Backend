@@ -4,7 +4,14 @@
 
 The primary admin UI is a **Vite + React** single-page app (live polling via TanStack Query) served by Nest at **`/dashboard/`**. It covers the full `/api/admin/*` surface (API keys, provider/stream, WebSocket admin, abuse, audit, debug).
 
-The older one-file UI remains as **`/dashboard/legacy-dashboard.html`** (linked from the new app as “Legacy UI”).
+The older one-file UI remains as **`/dashboard/legacy-dashboard.html`** (linked from the new app as “Legacy UI” and from the status bar).
+
+### Terminal-style shell (React admin)
+
+- **Layout**: Full-width **ticker** (aggregated health, market-data, stream, WS hints), left **icon rail** for routes, **status bar** (IST clock, poll preset, last request round-trip, admin token hint).
+- **Polling**: Choose **Poll** in the status bar: Paused, 1s, 3s, 5s (default), 15s. The choice is persisted in `localStorage` (`admin_dashboard_poll_preset`). Most list/debug queries inherit this interval; shared overview metrics also drive the ticker.
+- **Command palette**: **⌘K** / **Ctrl+K** — jump to any screen or **Refetch all data** (invalidates TanStack Query cache).
+- **Workspace**: Route **`/dashboard/workspace`** — dense multi-panel view of the same live metrics as Overview for at-a-glance ops.
 
 ## React admin (recommended)
 
