@@ -4,7 +4,7 @@
  * @description Prometheus metrics registry and counters/gauges/histograms for HTTP, providers, market stream, Vortex WS.
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2025-03-23
+ * @updated 2026-03-24
  */
 import { Injectable } from '@nestjs/common';
 import {
@@ -45,6 +45,8 @@ export class MetricsService {
   readonly vortexSubscribeDroppedTotal: Counter;
   /** Vortex: count of WebSocket shards currently connected (0–3). */
   readonly vortexWsShardsConnected: Gauge;
+  /** Emitted last-tick refresh ticks when upstream is quiet (synthetic cadence). */
+  readonly marketDataSyntheticTickTotal: Counter;
 
   constructor() {
     collectDefaultMetrics({ register });
@@ -187,6 +189,11 @@ export class MetricsService {
       name: 'vortex_ws_shards_connected',
       help: 'Connected Vortex WebSocket shards (max 3 per access token)',
       labelNames: ['provider'],
+      registers: [register],
+    });
+    this.marketDataSyntheticTickTotal = new Counter({
+      name: 'market_data_synthetic_tick_total',
+      help: 'Synthetic last-tick pulses emitted to WS clients when upstream is quiet',
       registers: [register],
     });
   }

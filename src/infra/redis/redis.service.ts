@@ -719,8 +719,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     data: any,
     ttl: number = 60,
   ): Promise<void> {
-    console.log(
-      `[RedisService] Caching market data for instrument: ${instrumentToken}`,
+    this.logger.debug(
+      `Caching market data for instrument: ${instrumentToken}`,
     );
     const key = `market_data:${instrumentToken}`;
     await this.set(key, data, ttl);
@@ -731,8 +731,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Returns null if Redis is not available or data is not cached
    */
   async getCachedMarketData(instrumentToken: number): Promise<any> {
-    console.log(
-      `[RedisService] Retrieving cached market data for instrument: ${instrumentToken}`,
+    this.logger.debug(
+      `Retrieving cached market data for instrument: ${instrumentToken}`,
     );
     const key = `market_data:${instrumentToken}`;
     return await this.get(key);
