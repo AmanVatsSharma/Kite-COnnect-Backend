@@ -4,9 +4,13 @@
  * @description Shapes full provider ticks for client-requested streaming mode (ltp / ohlcv / full).
  * @author BharatERP
  * @created 2025-03-23
+ * @updated 2026-03-24
  */
 
 export type StreamTickMode = 'ltp' | 'ohlcv' | 'full';
+
+/** Optional flags on outbound `market_data` frames (e.g. synthetic last-tick pulse). */
+export type MarketTickEmitOptions = { syntheticLast?: boolean };
 
 /**
  * Returns a payload appropriate for the subscriber mode (bandwidth / contract sync).

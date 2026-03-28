@@ -13,6 +13,7 @@
  * Endpoint: /market-data
  * Protocol: Socket.IO over WebSocket Secure (WSS)
  * Authentication: Query parameter (?api_key=...) or header (x-api-key)
+ * @updated 2026-03-28 — welcome/whoami use Falcon|Vayu client provider labels from resolver.
  *
  * @class MarketDataGateway
  * @implements OnGatewayConnection, OnGatewayDisconnect
@@ -45,7 +46,10 @@ import { AbuseDetectionService } from '@features/auth/application/abuse-detectio
 import {
   shapeMarketTickForMode,
   StreamTickMode,
+  MarketTickEmitOptions,
 } from '@features/market-data/application/tick-shape.util';
+import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
+import { internalToClientProviderName } from '@shared/utils/provider-label.util';
 
 const PROTOCOL_VERSION = '2.0';
 
@@ -86,6 +90,7 @@ export class MarketDataGateway
     private originAudit: OriginAuditService,
     private metrics: MetricsService,
     private abuseDetection: AbuseDetectionService,
+    private readonly wsInterest: MarketDataWsInterestService,
   ) {}
 
   async onModuleInit() {
@@ -201,7 +206,10 @@ export class MarketDataGateway
         );
         // Unsubscribe from forbidden tokens
         await this.unsubscribeFromInstruments(forbiddenTokens, sub.socketId);
-        forbiddenTokens.forEach((t) => socket.leave(`instrument:${t}`));
+        forbiddenTokens.forEach((t) => {
+          socket.leave(`instrument:${t}`);
+          this.wsInterest.removeInterest(t);
+        });
 
         // Update local state
         sub.instruments = keptTokens;
@@ -403,6 +411,9 @@ export class MarketDataGateway
           'MCX_FO',
         ];
       const usage = await this.apiKeyService.getUsageReport(apiKey);
+      const internal =
+        await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
+      const clientProvider = internalToClientProviderName(internal);
       const instructions = {
         subscribe:
           "socket.emit('subscribe', { instruments: [26000, 'NSE_FO-135938'], mode: 'ltp' })",
@@ -410,7 +421,7 @@ export class MarketDataGateway
       client.emit('welcome', {
         protocol_version: PROTOCOL_VERSION,
         message: 'Welcome to Vedpragya MarketData Solutions',
-        provider: 'Vayu',
+        provider: clientProvider,
         exchanges,
         limits,
         instructions,
@@ -418,8 +429,7 @@ export class MarketDataGateway
           tenant: (client.data as any)?.apiKeyRecord?.tenant_id || 'unknown',
           currentWsConnections: usage?.currentWsConnections || 0,
           httpRequestsThisMinute: usage?.httpRequestsThisMinute || 0,
-          note:
-            'Your API key is enabled for Vayu provider. Exchanges reflect entitlements.',
+          note: `Your API key is enabled for ${clientProvider} provider. Exchanges reflect entitlements.`,
         },
         timestamp: new Date().toISOString(),
       });
@@ -435,6 +445,9 @@ export class MarketDataGateway
     if (subscription) {
       // Unsubscribe from instruments if any
       if (subscription.instruments.length > 0) {
+        for (const t of subscription.instruments) {
+          this.wsInterest.removeInterest(t);
+        }
         await this.unsubscribeFromInstruments(subscription.instruments);
       }
 
@@ -688,6 +701,7 @@ export class MarketDataGateway
       finalPairs = finalPairs.filter((p) => allowed.has(String(p.exchange)));
 
       // Update subscription tracking only with included tokens
+      const priorInstrumentSet = new Set(subscription.instruments);
       const includedTokens = finalPairs.map((p) => p.token);
       subscription.instruments = [
         ...new Set([...subscription.instruments, ...includedTokens]),
@@ -709,6 +723,12 @@ export class MarketDataGateway
       includedTokens.forEach((token) => {
         client.join(`instrument:${token}`);
       });
+
+      for (const token of includedTokens) {
+        if (!priorInstrumentSet.has(token)) {
+          this.wsInterest.addInterest(token);
+        }
+      }
 
       // Ack with details (Vortex: total = shards × 1000 per access token)
       let maxSubs = 1000;
@@ -951,6 +971,7 @@ export class MarketDataGateway
       requestedTokens.forEach((token) => client.leave(`instrument:${token}`));
 
       const removed = Array.from(before).filter((t) => !subscription.instruments.includes(t));
+      removed.forEach((token) => this.wsInterest.removeInterest(token));
       const not_found = requestedTokens.filter((t) => !before.has(t));
       client.emit('unsubscription_confirmed', {
         requested: requestedTokens,
@@ -1136,6 +1157,10 @@ export class MarketDataGateway
       const modes: Record<number, string> = {};
       sub?.modeByInstrument?.forEach((m, t) => (modes[t] = m));
 
+      const internalWho =
+        await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
+      const clientProviderWho = internalToClientProviderName(internalWho);
+
       // Resolve pairs for better diagnostics
       let pairs: string[] = [];
       try {
@@ -1150,7 +1175,7 @@ export class MarketDataGateway
 
       client.emit('whoami', {
         protocol_version: PROTOCOL_VERSION,
-        provider: 'Vayu',
+        provider: clientProviderWho,
         apiKey: {
           tenant: record?.tenant_id || 'unknown',
           httpRequestsThisMinute: usage?.httpRequestsThisMinute || 0,
@@ -1379,6 +1404,7 @@ export class MarketDataGateway
       const sub = this.clientSubscriptions.get(client.id);
       const tokens = sub?.instruments || [];
       if (tokens.length > 0) {
+        tokens.forEach((t) => this.wsInterest.removeInterest(t));
         await this.unsubscribeFromInstruments(tokens, client.id);
         tokens.forEach((t) => client.leave(`instrument:${t}`));
       }
@@ -1494,7 +1520,11 @@ export class MarketDataGateway
    *
    * @performance <5ms broadcast latency for 100 clients
    */
-  async broadcastMarketData(instrumentToken: number, data: any) {
+  async broadcastMarketData(
+    instrumentToken: number,
+    data: any,
+    emitOpts?: MarketTickEmitOptions,
+  ) {
     try {
       const startTime = Date.now();
       const room = `instrument:${instrumentToken}`;
@@ -1511,11 +1541,12 @@ export class MarketDataGateway
           instrumentToken,
           data: payload,
           timestamp: ts,
+          ...(emitOpts?.syntheticLast ? { syntheticLast: true } : {}),
         });
       }
 
       const broadcastTime = Date.now() - startTime;
-      this.logger.log(
+      this.logger.debug(
         `[Gateway] Broadcasted tick ${instrumentToken} to ${sockets.length} clients in ${broadcastTime}ms`,
       );
     } catch (error) {

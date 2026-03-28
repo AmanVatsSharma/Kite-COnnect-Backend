@@ -1,3 +1,11 @@
+/**
+ * @file native-ws.service.ts
+ * @module market-data
+ * @description Native WebSocket /ws endpoint: API key auth, subscriptions, tick broadcast with mode shaping.
+ * @author BharatERP
+ * @created 2025-03-23
+ * @updated 2026-03-24
+ */
 import {
   Injectable,
   Logger,
@@ -13,7 +21,9 @@ import { MarketDataStreamService } from '@features/market-data/application/marke
 import {
   shapeMarketTickForMode,
   StreamTickMode,
+  MarketTickEmitOptions,
 } from '@features/market-data/application/tick-shape.util';
+import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
 import { validateSetModePayload } from '@shared/utils/ws-validation';
 
 interface ClientSubscription {
@@ -43,6 +53,7 @@ export class NativeWsService implements OnModuleDestroy {
     private readonly apiKeyService: ApiKeyService,
     @Inject(forwardRef(() => MarketDataStreamService))
     private readonly streamService: MarketDataStreamService,
+    private readonly wsInterest: MarketDataWsInterestService,
   ) {}
 
   /**
@@ -227,6 +238,9 @@ export class NativeWsService implements OnModuleDestroy {
     if (subscription) {
       // Unsubscribe from instruments
       if (subscription.instruments.length > 0) {
+        for (const t of subscription.instruments) {
+          this.wsInterest.removeInterest(t);
+        }
         await this.unsubscribeFromInstruments(
           subscription.instruments,
           clientId,
@@ -331,6 +345,7 @@ export class NativeWsService implements OnModuleDestroy {
       this.logger.warn('Failed to read streaming status', e as any);
     }
 
+    const prior = new Set(subscription.instruments);
     // Update subscription
     subscription.instruments = [
       ...new Set([...subscription.instruments, ...instruments]),
@@ -338,6 +353,11 @@ export class NativeWsService implements OnModuleDestroy {
     instruments.forEach((token: number) => {
       subscription.modeByInstrument.set(token, mode);
     });
+    for (const token of instruments as number[]) {
+      if (!prior.has(token)) {
+        this.wsInterest.addInterest(token);
+      }
+    }
 
     this.logger.debug(
       `[NativeWsService] Subscribing client ${clientId} count=${instruments.length} mode=${mode}`,
@@ -396,10 +416,16 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
+    const before = new Set(subscription.instruments);
     // Remove instruments
     subscription.instruments = subscription.instruments.filter(
       (token) => !instruments.includes(token),
     );
+
+    const removed = Array.from(before).filter(
+      (t) => !subscription.instruments.includes(t),
+    );
+    removed.forEach((t) => this.wsInterest.removeInterest(t));
 
     // Check if still subscribed globally
     const stillSubscribed = Array.from(this.clientSubscriptions.values()).some(
@@ -593,7 +619,11 @@ export class NativeWsService implements OnModuleDestroy {
   }
 
   // Broadcast market data to native WebSocket clients
-  async broadcastMarketData(instrumentToken: number, data: any) {
+  async broadcastMarketData(
+    instrumentToken: number,
+    data: any,
+    emitOpts?: MarketTickEmitOptions,
+  ) {
     try {
       if (!this.server) {
         this.logger.warn('broadcastMarketData called before WS server init');
@@ -622,12 +652,13 @@ export class NativeWsService implements OnModuleDestroy {
                 instrumentToken,
                 data: payload,
                 timestamp: new Date().toISOString(),
+                ...(emitOpts?.syntheticLast ? { syntheticLast: true } : {}),
               });
             }
           }
         });
 
-        this.logger.log(
+        this.logger.debug(
           `[NativeWS] Broadcasted tick ${instrumentToken} to ${subscribedClients.length} clients`,
         );
       }
