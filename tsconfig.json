@@ -18,7 +18,7 @@
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
     "moduleResolution": "node",
-    "types": ["node"],
+    "types": ["node", "jest"],
     "lib": ["ES2021"],
     "paths": {
       "@infra/*": ["src/infra/*"],

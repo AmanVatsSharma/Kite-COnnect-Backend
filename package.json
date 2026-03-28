@@ -106,6 +106,12 @@
       "ts"
     ],
     "rootDir": "src",
+    "moduleNameMapper": {
+      "^@infra/(.*)$": "<rootDir>/infra/$1",
+      "^@shared/(.*)$": "<rootDir>/shared/$1",
+      "^@features/(.*)$": "<rootDir>/features/$1",
+      "^@config/(.*)$": "<rootDir>/config/$1"
+    },
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
