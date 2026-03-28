@@ -4,6 +4,7 @@
  * @description Orchestrates provider ticker streaming, subscription batching, LTP cache, and Redis stream status.
  * @author BharatERP
  * @created 2025-03-23
+ * @updated 2026-03-28
  */
 import {
   Injectable,
@@ -13,6 +14,7 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { MarketDataProviderResolverService } from '@features/market-data/application/market-data-provider-resolver.service';
 import { MarketDataProvider } from '@features/market-data/infra/market-data.provider';
@@ -20,6 +22,8 @@ import { StockService } from '@features/stock/application/stock.service';
 import { RedisService } from '@infra/redis/redis.service';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
+import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
+import { internalToClientProviderName } from '@shared/utils/provider-label.util';
 
 @Injectable()
 export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
@@ -37,11 +41,18 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   /** Cap queued subscribe entries to limit memory under storms. */
   private readonly SUB_QUEUE_MAX = 50_000;
   private readonly UNSUB_QUEUE_MAX = 50_000;
-  /** Prometheus label for stream metrics (resolved provider). */
-  private streamMetricsProvider = 'unknown';
+  /** Prometheus label for stream metrics (internal: kite | vortex). */
+  private streamMetricsProvider: 'kite' | 'vortex' | 'unknown' = 'unknown';
+  /** Client-visible provider name for stream_status and health (Falcon | Vayu). */
+  private streamClientProviderLabel = 'Falcon';
   /** Attach stream-level ticker handlers once per ticker instance (avoids duplicates on re-init). */
   private readonly tickerStreamHandlersBound = new WeakMap<object, true>();
   private readonly rateLogAt = new Map<string, number>();
+  /** Last raw tick per token (for synthetic pulse shape). */
+  private readonly lastTickPayload = new Map<number, any>();
+  /** Wall-clock ms of last upstream tick per token (real ticks only). */
+  private readonly lastUpstreamAt = new Map<number, number>();
+  private syntheticPulseTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private providerResolver: MarketDataProviderResolverService,
@@ -49,14 +60,66 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     private redisService: RedisService,
     private ltpCache: LtpMemoryCacheService,
     private metrics: MetricsService,
+    private readonly wsInterest: MarketDataWsInterestService,
+    private readonly configService: ConfigService,
   ) {}
 
   async onModuleInit() {
     // Do not auto-start streaming; wait for admin trigger
+    this.startSyntheticPulseIfConfigured();
   }
 
   async onModuleDestroy() {
+    if (this.syntheticPulseTimer) {
+      clearInterval(this.syntheticPulseTimer);
+      this.syntheticPulseTimer = null;
+    }
     await this.stopStreaming();
+  }
+
+  private startSyntheticPulseIfConfigured() {
+    const raw =
+      this.configService.get<string>('MARKET_DATA_SYNTHETIC_INTERVAL_MS') ??
+      process.env.MARKET_DATA_SYNTHETIC_INTERVAL_MS ??
+      '0';
+    const intervalMs = Number(raw);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      return;
+    }
+    this.syntheticPulseTimer = setInterval(() => {
+      void this.runSyntheticPulse(intervalMs);
+    }, intervalMs);
+    this.logger.log(
+      `Synthetic market_data pulse enabled (MARKET_DATA_SYNTHETIC_INTERVAL_MS=${intervalMs})`,
+    );
+  }
+
+  /**
+   * Re-emit last known tick for tokens with WS subscribers when upstream has been
+   * quiet for at least one interval (cadence for UI; not a new market event).
+   */
+  private async runSyntheticPulse(intervalMs: number): Promise<void> {
+    try {
+      const tokens = this.wsInterest.getInterestedTokens();
+      const now = Date.now();
+      for (const token of tokens) {
+        const payload = this.lastTickPayload.get(token);
+        if (!payload) continue;
+        const lastUp = this.lastUpstreamAt.get(token);
+        if (lastUp === undefined) continue;
+        if (now - lastUp < intervalMs) continue;
+        await this.stockService.forwardRealtimeTick(token, payload, {
+          syntheticLast: true,
+        });
+        try {
+          this.metrics.marketDataSyntheticTickTotal.inc();
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (e) {
+      this.logger.warn('Synthetic pulse failed', e as any);
+    }
   }
 
   private rateLimitedLog(
@@ -100,11 +163,11 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
   private async initializeStreaming() {
     try {
-      const providerName =
-        (await this.providerResolver.getGlobalProviderName()) ||
-        (this.providerResolver as any)?.config?.get?.('DATA_PROVIDER') ||
-        'kite';
-      this.streamMetricsProvider = String(providerName).toLowerCase();
+      const internal =
+        await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
+      this.streamMetricsProvider = internal;
+      this.streamClientProviderLabel =
+        internalToClientProviderName(internal);
 
       // Global provider for WS streaming
       const provider = await this.providerResolver.resolveForWebsocket();
@@ -130,7 +193,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             try {
               this.redisService.publish('stream:status', {
                 event: 'connected',
-                provider: this.streamMetricsProvider,
+                provider: this.streamClientProviderLabel,
                 ts: Date.now(),
               });
             } catch {}
@@ -147,7 +210,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             try {
               this.redisService.publish('stream:status', {
                 event: 'disconnected',
-                provider: this.streamMetricsProvider,
+                provider: this.streamClientProviderLabel,
                 ts: Date.now(),
               });
             } catch {}
@@ -164,7 +227,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             try {
               this.redisService.publish('stream:status', {
                 event: 'error',
-                provider: this.streamMetricsProvider,
+                provider: this.streamClientProviderLabel,
                 error: error?.message || 'unknown',
                 ts: Date.now(),
               });
@@ -201,7 +264,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           this.redisService.publish('stream:status', {
             event: 'degraded',
             reason: 'no_ticker',
-            provider: this.streamMetricsProvider,
+            provider: this.streamClientProviderLabel,
             ts: Date.now(),
           });
         } catch {}
@@ -239,17 +302,20 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           }
         } catch {}
 
-        // Store market data in database and broadcast (non-blocking if DB fails)
+        this.lastTickPayload.set(instrumentToken, { ...tick });
+        this.lastUpstreamAt.set(instrumentToken, Date.now());
+
         try {
-          await this.stockService.storeMarketData(instrumentToken, tick);
+          await this.stockService.forwardRealtimeTick(instrumentToken, tick);
         } catch (storeError: any) {
           this.rateLimitedLog(
             'debug',
-            `store_tick_fail:${instrumentToken}`,
-            `Failed to store tick for ${instrumentToken}, continuing: ${storeError?.message || storeError}`,
+            `forward_tick_fail:${instrumentToken}`,
+            `Failed to forward tick for ${instrumentToken}, continuing: ${storeError?.message || storeError}`,
             30_000,
           );
         }
+        this.stockService.enqueuePersistMarketData(instrumentToken, tick);
       }
     } catch (error) {
       this.logger.error('Error handling ticks', error);
@@ -596,12 +662,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   async getMarketDataHealthSnapshot() {
     const provider = await this.providerResolver.resolveForWebsocket();
     const ticker = provider.getTicker?.();
-    const providerName =
-      (await this.providerResolver.getGlobalProviderName()) ||
-      (this.providerResolver as any)?.config?.get?.('DATA_PROVIDER') ||
-      'kite';
+    const internal =
+      await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
     return {
-      provider: String(providerName).toLowerCase(),
+      provider: internalToClientProviderName(internal),
       isStreaming: this.isStreaming,
       wsTickerReady: !!ticker,
       marketDataDegraded: !ticker,
