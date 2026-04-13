@@ -2,9 +2,11 @@
  * @file AuditDebugPage.tsx
  * @module admin-dashboard
  * @description Audit sampling and provider debug endpoints with labeled fields and raw JSON.
+ * @updated 2026-03-28
  */
 
 import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
 import { ErrorInline } from '../components/ErrorInline';
@@ -13,9 +15,29 @@ import { RawJsonDetails } from '../components/RawJsonDetails';
 import { SectionCard } from '../components/section-card';
 import { auditConfigToRows } from '../lib/views/audit-views';
 import { flattenObject } from '../lib/views/flatten';
+import { useRefreshInterval } from '../hooks/useRefreshInterval';
 
 export function AuditDebugPage() {
   const token = getAdminToken();
+  const { refetchInterval, recordFetchLatency } = useRefreshInterval();
+
+  const falconFn = useCallback(async () => {
+    const t0 = performance.now();
+    try {
+      return await admin.getKiteDebug();
+    } finally {
+      recordFetchLatency(Math.round(performance.now() - t0));
+    }
+  }, [recordFetchLatency]);
+
+  const vayuFn = useCallback(async () => {
+    const t0 = performance.now();
+    try {
+      return await admin.getVortexDebug();
+    } finally {
+      recordFetchLatency(Math.round(performance.now() - t0));
+    }
+  }, [recordFetchLatency]);
 
   const audit = useQuery({
     queryKey: ['admin-audit-config'],
@@ -25,16 +47,16 @@ export function AuditDebugPage() {
 
   const falcon = useQuery({
     queryKey: ['admin-debug-falcon'],
-    queryFn: admin.getKiteDebug,
+    queryFn: falconFn,
     enabled: !!token,
-    refetchInterval: 10000,
+    refetchInterval,
   });
 
   const vayu = useQuery({
     queryKey: ['admin-debug-vayu'],
-    queryFn: admin.getVortexDebug,
+    queryFn: vayuFn,
     enabled: !!token,
-    refetchInterval: 10000,
+    refetchInterval,
   });
 
   if (!token) {

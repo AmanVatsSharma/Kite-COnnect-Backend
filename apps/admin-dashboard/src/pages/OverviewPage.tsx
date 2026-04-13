@@ -2,13 +2,10 @@
  * @file OverviewPage.tsx
  * @module admin-dashboard
  * @description Live operational overview with structured metrics and raw JSON fallback.
+ * @updated 2026-03-28
  */
 
-import { useQuery } from '@tanstack/react-query';
 import { NavLink } from 'react-router-dom';
-import { getAdminToken } from '../lib/api-client';
-import * as admin from '../lib/admin-api';
-import * as pub from '../lib/public-api';
 import {
   adminProviderLabel,
   healthOverallStatus,
@@ -24,50 +21,15 @@ import { KeyValueGrid } from '../components/KeyValueGrid';
 import { MetricCard } from '../components/MetricCard';
 import { RawJsonDetails } from '../components/RawJsonDetails';
 import { StatusBadge } from '../components/StatusBadge';
-
-const poll = 5000;
+import { useLiveAdminMetrics } from '../hooks/useLiveAdminMetrics';
+import { useRefreshInterval } from '../hooks/useRefreshInterval';
 
 export function OverviewPage() {
-  const token = getAdminToken();
+  const { presetId, refetchInterval } = useRefreshInterval();
+  const { token, health, mdHealth, stats, globalProv, stream, ws } = useLiveAdminMetrics();
 
-  const health = useQuery({
-    queryKey: ['health'],
-    queryFn: pub.getHealth,
-    refetchInterval: poll,
-  });
-
-  const mdHealth = useQuery({
-    queryKey: ['health-md'],
-    queryFn: pub.getMarketDataHealth,
-    refetchInterval: poll,
-  });
-
-  const stats = useQuery({
-    queryKey: ['stock-stats'],
-    queryFn: pub.getStockStats,
-    refetchInterval: poll,
-  });
-
-  const globalProv = useQuery({
-    queryKey: ['admin-global-provider'],
-    queryFn: admin.getGlobalProvider,
-    enabled: !!token,
-    refetchInterval: poll,
-  });
-
-  const stream = useQuery({
-    queryKey: ['admin-stream-status'],
-    queryFn: admin.getStreamStatus,
-    enabled: !!token,
-    refetchInterval: poll,
-  });
-
-  const ws = useQuery({
-    queryKey: ['admin-ws-status'],
-    queryFn: admin.getWsStatus,
-    enabled: !!token,
-    refetchInterval: poll,
-  });
+  const pollSec = refetchInterval === false ? 0 : Number(refetchInterval) / 1000;
+  const pollLabel = refetchInterval === false ? 'paused (manual)' : `${pollSec}s (${presetId})`;
 
   const hStat = health.data ? healthOverallStatus(health.data) : 'neutral';
   const hBadge =
@@ -83,7 +45,7 @@ export function OverviewPage() {
     <>
       <section className="card">
         <h2>Service health</h2>
-        <p className="muted">Live snapshots every {poll / 1000}s from public endpoints.</p>
+        <p className="muted">Live snapshots every {pollLabel} from public endpoints.</p>
         <div className="overview-strip">
           {hBadge}
           <span className="muted">API</span>

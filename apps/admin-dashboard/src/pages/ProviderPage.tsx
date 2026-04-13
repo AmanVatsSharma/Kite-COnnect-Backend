@@ -28,7 +28,6 @@ export function ProviderPage() {
     queryKey: ['admin-stream-status'],
     queryFn: admin.getStreamStatus,
     enabled: !!token,
-    refetchInterval: 4000,
   });
 
   const setProv = useMutation({
