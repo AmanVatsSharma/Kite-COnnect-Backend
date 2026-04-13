@@ -3,11 +3,19 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 
-import { StockController } from './interface/stock.controller';
+import { StockInstrumentsController } from './interface/stock-instruments.controller';
+import { StockQuotesController } from './interface/stock-quotes.controller';
+import { StockSubscriptionsController } from './interface/stock-subscriptions.controller';
 import { VayuController } from './interface/vayu.controller';
 import { StockService } from './application/stock.service';
 import { VortexProviderService } from './infra/vortex-provider.service';
 import { VortexInstrumentService } from './application/vortex-instrument.service';
+import { VortexInstrumentLtpService } from './application/vortex-instrument-ltp.service';
+import { VortexInstrumentSyncService } from './application/vortex-instrument-sync.service';
+import { VortexInstrumentCleanupService } from './application/vortex-instrument-cleanup.service';
+import { VortexInstrumentCacheService } from './application/vortex-instrument-cache.service';
+import { VortexInstrumentSearchService } from './application/vortex-instrument-search.service';
+import { VortexInstrumentReadService } from './application/vortex-instrument-read.service';
 import { VayuEquityService } from './application/vayu-equity.service';
 import { VayuFutureService } from './application/vayu-future.service';
 import { VayuOptionService } from './application/vayu-option.service';
@@ -40,12 +48,20 @@ import { AdminModule } from '../admin/admin.module';
     forwardRef(() => AdminModule),
   ],
   controllers: [
-    StockController,
+    StockInstrumentsController,
+    StockQuotesController,
+    StockSubscriptionsController,
     VayuController,
   ],
   providers: [
     StockService,
     VortexProviderService,
+    VortexInstrumentLtpService,
+    VortexInstrumentSyncService,
+    VortexInstrumentCleanupService,
+    VortexInstrumentCacheService,
+    VortexInstrumentSearchService,
+    VortexInstrumentReadService,
     VortexInstrumentService,
     VortexValidationCronService,
     VayuEquityService,

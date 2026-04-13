@@ -13,7 +13,7 @@
  * Endpoint: /market-data
  * Protocol: Socket.IO over WebSocket Secure (WSS)
  * Authentication: Query parameter (?api_key=...) or header (x-api-key)
- * @updated 2026-03-28 — welcome/whoami use Falcon|Vayu client provider labels from resolver.
+ * @updated 2026-03-28 — Subscription map extracted to MarketDataGatewaySubscriptionRegistry.
  *
  * @class MarketDataGateway
  * @implements OnGatewayConnection, OnGatewayDisconnect
@@ -50,20 +50,12 @@ import {
 } from '@features/market-data/application/tick-shape.util';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
 import { internalToClientProviderName } from '@shared/utils/provider-label.util';
+import {
+  MarketDataGatewaySubscriptionRegistry,
+  MarketDataClientSubscription,
+} from '@features/market-data/interface/market-data-gateway-subscription.registry';
 
 const PROTOCOL_VERSION = '2.0';
-
-/**
- * Client subscription tracking
- */
-interface ClientSubscription {
-  socketId: string;
-  userId: string;
-  instruments: number[];
-  subscriptionType: 'live' | 'historical' | 'both';
-  modeByInstrument: Map<number, 'ltp' | 'ohlcv' | 'full'>;
-  apiKey?: string;
-}
 
 @WebSocketGateway({
   cors: {
@@ -78,7 +70,6 @@ export class MarketDataGateway
   server: Server;
 
   private readonly logger = new Logger(MarketDataGateway.name);
-  private clientSubscriptions = new Map<string, ClientSubscription>();
   private statusSubscribed = false;
 
   constructor(
@@ -91,6 +82,7 @@ export class MarketDataGateway
     private metrics: MetricsService,
     private abuseDetection: AbuseDetectionService,
     private readonly wsInterest: MarketDataWsInterestService,
+    private readonly subscriptionRegistry: MarketDataGatewaySubscriptionRegistry,
   ) {}
 
   async onModuleInit() {
@@ -118,7 +110,7 @@ export class MarketDataGateway
    * - Instantly unsubscribes from forbidden instruments.
    */
   private async handleApiKeyUpdate(key: string) {
-    const affectedClients = Array.from(this.clientSubscriptions.values()).filter(
+    const affectedClients = Array.from(this.subscriptionRegistry.values()).filter(
       (sub) => sub.apiKey === key,
     );
 
@@ -344,7 +336,7 @@ export class MarketDataGateway
     }
 
     // Initialize client subscription with connection limits per API key (if provided)
-    this.clientSubscriptions.set(client.id, {
+    this.subscriptionRegistry.set(client.id, {
       socketId: client.id,
       userId: (client.handshake.query.userId as string) || 'anonymous',
       instruments: [],
@@ -441,7 +433,7 @@ export class MarketDataGateway
   async handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
 
-    const subscription = this.clientSubscriptions.get(client.id);
+    const subscription = this.subscriptionRegistry.get(client.id);
     if (subscription) {
       // Unsubscribe from instruments if any
       if (subscription.instruments.length > 0) {
@@ -451,7 +443,7 @@ export class MarketDataGateway
         await this.unsubscribeFromInstruments(subscription.instruments);
       }
 
-      this.clientSubscriptions.delete(client.id);
+      this.subscriptionRegistry.delete(client.id);
     }
 
     // Untrack WS connection for API key
@@ -617,7 +609,7 @@ export class MarketDataGateway
         return;
       }
 
-      const subscription = this.clientSubscriptions.get(client.id);
+      const subscription = this.subscriptionRegistry.get(client.id);
       if (!subscription) {
         client.emit('error', { message: 'Client subscription not found' });
         return;
@@ -931,7 +923,7 @@ export class MarketDataGateway
         }
       } catch {}
 
-      const subscription = this.clientSubscriptions.get(client.id);
+      const subscription = this.subscriptionRegistry.get(client.id);
       if (!subscription) {
         client.emit('error', { message: 'Client subscription not found' });
         return;
@@ -958,7 +950,7 @@ export class MarketDataGateway
 
       // Check if any other clients are subscribed to these instruments
       const stillSubscribed = Array.from(
-        this.clientSubscriptions.values(),
+        this.subscriptionRegistry.values(),
       ).some((sub) =>
         sub.instruments.some((token) => requestedTokens.includes(token)),
       );
@@ -1152,7 +1144,7 @@ export class MarketDataGateway
         }
       } catch {}
 
-      const sub = this.clientSubscriptions.get(client.id);
+      const sub = this.subscriptionRegistry.get(client.id);
       const tokens = sub?.instruments || [];
       const modes: Record<number, string> = {};
       sub?.modeByInstrument?.forEach((m, t) => (modes[t] = m));
@@ -1258,7 +1250,7 @@ export class MarketDataGateway
   ) {
     try {
       const { instruments, mode } = body as any;
-      const subscription = this.clientSubscriptions.get(client.id);
+      const subscription = this.subscriptionRegistry.get(client.id);
       if (!subscription) {
         client.emit('error', { code: 'not_connected', message: 'No active subscription context' });
         return;
@@ -1367,7 +1359,7 @@ export class MarketDataGateway
   @SubscribeMessage('list_subscriptions')
   async handleListSubscriptions(@ConnectedSocket() client: Socket) {
     try {
-      const sub = this.clientSubscriptions.get(client.id);
+      const sub = this.subscriptionRegistry.get(client.id);
       const tokens = sub?.instruments || [];
       const modes: Record<number, string> = {};
       sub?.modeByInstrument?.forEach((m, t) => (modes[t] = m));
@@ -1401,7 +1393,7 @@ export class MarketDataGateway
   @SubscribeMessage('unsubscribe_all')
   async handleUnsubscribeAll(@ConnectedSocket() client: Socket) {
     try {
-      const sub = this.clientSubscriptions.get(client.id);
+      const sub = this.subscriptionRegistry.get(client.id);
       const tokens = sub?.instruments || [];
       if (tokens.length > 0) {
         tokens.forEach((t) => this.wsInterest.removeInterest(t));
@@ -1437,7 +1429,7 @@ export class MarketDataGateway
   async handleStatus(@ConnectedSocket() client: Socket) {
     try {
       const stream = await this.streamService.getStreamingStatus();
-      const sub = this.clientSubscriptions.get(client.id);
+      const sub = this.subscriptionRegistry.get(client.id);
       const stats = this.getConnectionStats();
       client.emit('status', {
         protocol_version: PROTOCOL_VERSION,
@@ -1533,7 +1525,7 @@ export class MarketDataGateway
 
       const ts = new Date().toISOString();
       for (const s of sockets) {
-        const sub = this.clientSubscriptions.get(s.id);
+        const sub = this.subscriptionRegistry.get(s.id);
         const mode: StreamTickMode =
           sub?.modeByInstrument?.get(instrumentToken) || 'ltp';
         const payload = shapeMarketTickForMode(data, mode);
@@ -1561,7 +1553,7 @@ export class MarketDataGateway
       { connections: number; totalSubscribedInstruments: number }
     >();
 
-    for (const sub of this.clientSubscriptions.values()) {
+    for (const sub of this.subscriptionRegistry.values()) {
       const apiKey = sub.apiKey || 'anonymous';
       const current = byApiKeyMap.get(apiKey) || {
         connections: 0,
@@ -1581,8 +1573,8 @@ export class MarketDataGateway
     );
 
     return {
-      totalConnections: this.clientSubscriptions.size,
-      subscriptions: Array.from(this.clientSubscriptions.values()).map(
+      totalConnections: this.subscriptionRegistry.size,
+      subscriptions: Array.from(this.subscriptionRegistry.values()).map(
         (sub) => ({
           userId: sub.userId,
           instrumentCount: sub.instruments.length,
