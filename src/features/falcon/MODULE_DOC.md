@@ -25,3 +25,11 @@ Kite credentials: `KITE_API_KEY`, `KITE_ACCESS_TOKEN` or Redis `kite:access_toke
 ## Related docs
 
 - [domain/FALCON_INSTRUMENTS.md](./domain/FALCON_INSTRUMENTS.md)
+
+- **2026-04-14** — Enterprise-grade Falcon expansion:
+  - `FalconProviderAdapter`: added `getQuote()` (5 s cache), `getOHLC()` (5 s cache), `getHistoricalData()` (1 hr cache, `continuous`+`oi` support), `getProfile()` (5 min cache), `getMargins()` (60 s cache) — all with rate limiting and exponential-backoff retries.
+  - `FalconController`: added client-facing `POST /stock/falcon/quote`, `POST /stock/falcon/ohlc`, `GET /stock/falcon/historical/:token`.
+  - `AdminFalconController` (`interface/admin-falcon.controller.ts`): 11 admin endpoints under `/admin/falcon/*` secured by `AdminGuard` for the operator dashboard — profile, margins, stats, instruments list/search/sync, LTP, quote, OHLC, historical.
+  - `FalconModule`: wired `AdminFalconController`, exported `FalconProviderAdapter`, provided `AdminGuard`.
+  - Bug fix: `KiteProviderService.getHistoricalData` and `KiteConnectService.getHistoricalData` were passing args in wrong order (SDK is `(token, interval, from, to, continuous, oi)`).
+  - New DTO: `src/features/falcon/interface/dto/falcon-market-data.dto.ts`.
