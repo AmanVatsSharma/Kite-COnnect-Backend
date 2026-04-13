@@ -1,3 +1,11 @@
+/**
+ * @file falcon.controller.ts
+ * @module falcon
+ * @description Client-facing Falcon (Kite) REST endpoints: instruments, LTP, Quote, OHLC, Historical.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-04-14
+ */
 import {
   Controller,
   Get,
@@ -17,6 +25,7 @@ import { RedisService } from '@infra/redis/redis.service';
 import { randomUUID } from 'crypto';
 import { ApiBadRequestResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from '@shared/guards/api-key.guard';
+import { FalconTokensDto, FalconHistoricalQueryDto } from './dto/falcon-market-data.dto';
 
 @ApiTags('falcon')
 @UseGuards(ApiKeyGuard)

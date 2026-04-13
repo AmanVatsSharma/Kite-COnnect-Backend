@@ -1,17 +1,19 @@
+/**
+ * @file falcon-provider.adapter.ts
+ * @module falcon
+ * @description Resilient adapter around KiteProviderService: per-endpoint rate limiting,
+ *   Redis caching, and exponential-backoff retries for all Falcon market data calls.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-04-14
+ */
 import { Injectable, Logger } from '@nestjs/common';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { RedisService } from '@infra/redis/redis.service';
+import { createHash } from 'crypto';
 
-/**
- * FalconProviderAdapter
- *
- * A thin adapter around KiteProviderService that adds:
- * - Per-endpoint rate limiting aligned to Kite docs
- * - Memory + Redis LTP caching helpers (write-through)
- * - Basic retries on network/transient failures
- *
- * This adapter is used by Falcon REST endpoints. It does not modify the core provider.
- */
+type RateLimitKey = 'quote' | 'ltp' | 'ohlc' | 'historical' | 'profile' | 'margins';
+
 @Injectable()
 export class FalconProviderAdapter {
   private readonly logger = new Logger(FalconProviderAdapter.name);
@@ -22,23 +24,17 @@ export class FalconProviderAdapter {
     private redis: RedisService,
   ) {}
 
-  private async rateLimit(key: 'quote' | 'ltp' | 'ohlc' | 'history') {
+  // ─── internals ────────────────────────────────────────────────────────────
+
+  private async rateLimit(key: RateLimitKey): Promise<void> {
     try {
-      // Defaults based on Kite docs (req/sec)
-      const limits: Record<string, number> = {
-        quote: 1,
-        ltp: 1,
-        ohlc: 1,
-        history: 3,
+      const limits: Record<RateLimitKey, number> = {
+        quote: 1, ltp: 1, ohlc: 1, historical: 3, profile: 1, margins: 1,
       };
-      const rps = limits[key] || 1;
-      const minInterval = Math.floor(1000 / rps);
-      const now = Date.now();
-      const last = this.lastReqAt[key] || 0;
-      const elapsed = now - last;
+      const minInterval = Math.floor(1000 / (limits[key] || 1));
+      const elapsed = Date.now() - (this.lastReqAt[key] || 0);
       if (elapsed < minInterval) {
-        const sleep = minInterval - elapsed;
-        await new Promise((r) => setTimeout(r, sleep));
+        await new Promise((r) => setTimeout(r, minInterval - elapsed));
       }
       this.lastReqAt[key] = Date.now();
     } catch {}
@@ -59,51 +55,142 @@ export class FalconProviderAdapter {
         return await op();
       } catch (e) {
         const retryable = this.isRetryable(e);
-        this.logger.warn(`[FalconAdapter] ${key} attempt ${attempt + 1}/${maxRetries + 1} ${retryable ? '(retryable)' : ''}`, e as any);
+        this.logger.warn(
+          `[FalconAdapter] ${key} attempt ${attempt + 1}/${maxRetries + 1} ${retryable ? '(retryable)' : ''}`,
+          e as any,
+        );
         if (!retryable || attempt === maxRetries) throw e;
-        const backoff = Math.min(1500 * Math.pow(2, attempt), 4000);
-        await new Promise((r) => setTimeout(r, backoff));
+        await new Promise((r) => setTimeout(r, Math.min(1500 * Math.pow(2, attempt), 4000)));
       }
     }
     throw new Error('unreachable');
   }
 
+  private tokensHash(tokens: string[]): string {
+    return createHash('sha1').update([...tokens].sort().join(',')).digest('hex').slice(0, 12);
+  }
+
+  private async getFromRedis<T>(key: string): Promise<T | null> {
+    try {
+      return await this.redis.get<T>(key);
+    } catch {
+      return null;
+    }
+  }
+
+  private async setToRedis(key: string, value: any, ttl: number): Promise<void> {
+    try {
+      await this.redis.set(key, value, ttl);
+    } catch {}
+  }
+
+  // ─── LTP ──────────────────────────────────────────────────────────────────
+
   async getLTP(tokens: string[]): Promise<Record<string, { last_price: number | null }>> {
     await this.rateLimit('ltp');
     const out: Record<string, { last_price: number | null }> = {};
     const cachedHits: string[] = [];
-    // Try Redis cache
     for (const t of tokens) {
-      try {
-        const cache: any = await this.redis.get(`ltp:${t}`);
-        const lp = Number(cache?.last_price);
-        if (Number.isFinite(lp) && lp > 0) {
-          out[t] = { last_price: lp };
-          cachedHits.push(t);
-        }
-      } catch {}
+      const cache = await this.getFromRedis<any>(`ltp:${t}`);
+      const lp = Number(cache?.last_price);
+      if (Number.isFinite(lp) && lp > 0) {
+        out[t] = { last_price: lp };
+        cachedHits.push(t);
+      }
     }
     const remaining = tokens.filter((t) => !cachedHits.includes(t));
     if (!remaining.length) return out;
-    const fresh = await this.withRetry(
-      async () => this.kite.getLTP(remaining),
-      'getLTP',
-    );
+    const fresh = await this.withRetry(() => this.kite.getLTP(remaining), 'getLTP');
     for (const [k, v] of Object.entries<any>(fresh || {})) {
       const lp = Number(v?.last_price);
       out[k] = { last_price: Number.isFinite(lp) && lp > 0 ? lp : null };
       if (Number.isFinite(lp) && lp > 0) {
-        try {
-          await this.redis.set(`ltp:${k}`, { last_price: lp, ts: Date.now() }, 10);
-        } catch {}
+        await this.setToRedis(`ltp:${k}`, { last_price: lp, ts: Date.now() }, 10);
       }
     }
-    // Ensure all present
-    tokens.forEach((t) => {
-      if (!(t in out)) out[t] = { last_price: null };
-    });
+    tokens.forEach((t) => { if (!(t in out)) out[t] = { last_price: null }; });
     return out;
   }
+
+  // ─── Quote ────────────────────────────────────────────────────────────────
+
+  async getQuote(tokens: string[]): Promise<Record<string, any>> {
+    await this.rateLimit('quote');
+    if (!tokens.length) return {};
+    const cacheKey = `falcon:quote:${this.tokensHash(tokens)}`;
+    const cached = await this.getFromRedis<Record<string, any>>(cacheKey);
+    if (cached) return cached;
+    const data = await this.withRetry(() => this.kite.getQuote(tokens), 'getQuote');
+    if (data && typeof data === 'object') {
+      await this.setToRedis(cacheKey, data, 5);
+    }
+    return data || {};
+  }
+
+  // ─── OHLC ─────────────────────────────────────────────────────────────────
+
+  async getOHLC(tokens: string[]): Promise<Record<string, any>> {
+    await this.rateLimit('ohlc');
+    if (!tokens.length) return {};
+    const cacheKey = `falcon:ohlc:${this.tokensHash(tokens)}`;
+    const cached = await this.getFromRedis<Record<string, any>>(cacheKey);
+    if (cached) return cached;
+    const data = await this.withRetry(() => this.kite.getOHLC(tokens), 'getOHLC');
+    if (data && typeof data === 'object') {
+      await this.setToRedis(cacheKey, data, 5);
+    }
+    return data || {};
+  }
+
+  // ─── Historical ───────────────────────────────────────────────────────────
+
+  async getHistoricalData(
+    token: number,
+    from: string,
+    to: string,
+    interval: string,
+    continuous = false,
+    oi = false,
+  ): Promise<any> {
+    await this.rateLimit('historical');
+    const cacheKey = `falcon:hist:${token}:${from}:${to}:${interval}:${continuous ? 1 : 0}:${oi ? 1 : 0}`;
+    const cached = await this.getFromRedis<any>(cacheKey);
+    if (cached) return cached;
+    const data = await this.withRetry(
+      () => this.kite.getHistoricalData(token, from, to, interval, continuous, oi),
+      'getHistoricalData',
+    );
+    if (data) {
+      await this.setToRedis(cacheKey, data, 3600);
+    }
+    return data;
+  }
+
+  // ─── Profile ──────────────────────────────────────────────────────────────
+
+  async getProfile(): Promise<any> {
+    await this.rateLimit('profile');
+    const cacheKey = 'falcon:profile';
+    const cached = await this.getFromRedis<any>(cacheKey);
+    if (cached) return cached;
+    const data = await this.withRetry(() => this.kite.getProfile(), 'getProfile');
+    if (data) {
+      await this.setToRedis(cacheKey, data, 300);
+    }
+    return data;
+  }
+
+  // ─── Margins ──────────────────────────────────────────────────────────────
+
+  async getMargins(segment?: 'equity' | 'commodity'): Promise<any> {
+    await this.rateLimit('margins');
+    const cacheKey = `falcon:margins:${segment || 'all'}`;
+    const cached = await this.getFromRedis<any>(cacheKey);
+    if (cached) return cached;
+    const data = await this.withRetry(() => this.kite.getMargins(segment), 'getMargins');
+    if (data) {
+      await this.setToRedis(cacheKey, data, 60);
+    }
+    return data;
+  }
 }
-
-
