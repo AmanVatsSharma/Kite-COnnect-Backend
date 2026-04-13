@@ -36,7 +36,6 @@ export function WsAdminPage() {
     queryKey: ['admin-ws-status'],
     queryFn: admin.getWsStatus,
     enabled: !!token,
-    refetchInterval: 4000,
   });
 
   const config = useQuery({

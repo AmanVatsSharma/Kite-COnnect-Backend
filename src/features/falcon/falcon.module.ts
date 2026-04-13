@@ -1,5 +1,14 @@
+/**
+ * @file falcon.module.ts
+ * @module falcon
+ * @description Falcon (Kite) instruments feature module.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-03-28
+ */
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { FalconController } from './interface/falcon.controller';
 import { FalconInstrument } from './domain/falcon-instrument.entity';
 import { FalconInstrumentService } from './application/falcon-instrument.service';
@@ -11,6 +20,7 @@ import { MarketDataModule } from '../market-data/market-data.module';
 
 @Module({
   imports: [
+    ScheduleModule,
     TypeOrmModule.forFeature([FalconInstrument]),
     RedisModule,
     forwardRef(() => StockModule),
