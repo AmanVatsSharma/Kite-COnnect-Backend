@@ -5,6 +5,9 @@
  * @author BharatERP
  * @created 2025-01-01
  * @updated 2026-03-28
+ *
+ * Notes:
+ * - refreshSession / isClientInitialized support scheduled Falcon instrument sync.
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -445,6 +448,19 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     } catch {
       return '';
     }
+  }
+
+  /**
+   * Re-load credentials from env/Redis and rebuild the HTTP client.
+   * Call before scheduled work so a fresh OAuth token in Redis is picked up.
+   */
+  async refreshSession(): Promise<void> {
+    await this.initialize();
+  }
+
+  /** True when Kite Connect HTTP client is ready (instruments/quotes APIs). */
+  isClientInitialized(): boolean {
+    return !!this.kite;
   }
 
   // Exposed for debugging via controller

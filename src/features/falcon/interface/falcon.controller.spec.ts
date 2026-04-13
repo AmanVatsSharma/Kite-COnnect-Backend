@@ -1,5 +1,15 @@
+/**
+ * @file falcon.controller.spec.ts
+ * @module falcon
+ * @description Unit tests for FalconController wiring.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-03-28
+ */
+import { CanActivate } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { FalconController } from './controllers/falcon.controller';
+import { FalconController } from './falcon.controller';
+import { ApiKeyGuard } from '@shared/guards/api-key.guard';
 import { FalconInstrumentService } from '@features/falcon/application/falcon-instrument.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
 import { RedisService } from '@infra/redis/redis.service';
@@ -22,6 +32,8 @@ describe('FalconController', () => {
     get: jest.fn().mockResolvedValue(null),
   };
 
+  const allowGuard: CanActivate = { canActivate: () => true };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [FalconController],
@@ -30,7 +42,10 @@ describe('FalconController', () => {
         { provide: FalconProviderAdapter, useValue: mockAdapter },
         { provide: RedisService, useValue: mockRedis },
       ],
-    }).compile();
+    })
+      .overrideGuard(ApiKeyGuard)
+      .useValue(allowGuard)
+      .compile();
 
     controller = module.get<FalconController>(FalconController);
   });
