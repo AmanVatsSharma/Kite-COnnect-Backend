@@ -528,6 +528,78 @@ export class FalconController {
       );
     }
   }
+
+  // ===== Market Data: Quote / OHLC / Historical =====
+
+  @Post('quote')
+  @ApiOperation({ summary: 'Full quote for instrument tokens (OHLC, depth, OI, Greeks)' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async quote(@Body() body: FalconTokensDto) {
+    try {
+      const tokens = (body?.tokens || []).map(String).filter(Boolean);
+      if (!tokens.length) {
+        throw new HttpException({ success: false, message: 'tokens array is required' }, HttpStatus.BAD_REQUEST);
+      }
+      const data = await this.falconAdapter.getQuote(tokens);
+      return { success: true, data, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Falcon quote failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('ohlc')
+  @ApiOperation({ summary: 'OHLC summary for instrument tokens' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async ohlc(@Body() body: FalconTokensDto) {
+    try {
+      const tokens = (body?.tokens || []).map(String).filter(Boolean);
+      if (!tokens.length) {
+        throw new HttpException({ success: false, message: 'tokens array is required' }, HttpStatus.BAD_REQUEST);
+      }
+      const data = await this.falconAdapter.getOHLC(tokens);
+      return { success: true, data, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Falcon OHLC failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('historical/:token')
+  @ApiOperation({ summary: 'Historical candles for a single instrument token' })
+  @ApiQuery({ name: 'from', required: true, example: '2026-04-01' })
+  @ApiQuery({ name: 'to', required: true, example: '2026-04-11' })
+  @ApiQuery({ name: 'interval', required: true, enum: ['minute','3minute','5minute','10minute','15minute','30minute','60minute','day'] })
+  @ApiQuery({ name: 'continuous', required: false, example: false })
+  @ApiQuery({ name: 'oi', required: false, example: false })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async historical(@Param('token') tokenRaw: string, @Query() q: FalconHistoricalQueryDto) {
+    try {
+      const token = Number(tokenRaw);
+      if (!Number.isFinite(token)) {
+        throw new HttpException({ success: false, message: 'Invalid token' }, HttpStatus.BAD_REQUEST);
+      }
+      if (!q.from || !q.to || !q.interval) {
+        throw new HttpException({ success: false, message: 'from, to, and interval are required' }, HttpStatus.BAD_REQUEST);
+      }
+      const continuous = String(q.continuous || '').toLowerCase() === 'true';
+      const oi = String(q.oi || '').toLowerCase() === 'true';
+      const data = await this.falconAdapter.getHistoricalData(token, q.from, q.to, q.interval, continuous, oi);
+      return { success: true, data, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Falcon historical data failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }
 
 function strokeSafeNumber(v: string): number {
