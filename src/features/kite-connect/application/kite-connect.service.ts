@@ -121,11 +121,12 @@ export class KiteConnectService implements OnModuleInit {
         throw new Error('Kite Connect not initialized');
       }
 
+      // SDK signature: (instrument_token, interval, from_date, to_date, continuous, oi)
       const historicalData = await this.kite.getHistoricalData(
         instrumentToken,
+        interval,
         fromDate,
         toDate,
-        interval,
         continuous,
         oi,
       );

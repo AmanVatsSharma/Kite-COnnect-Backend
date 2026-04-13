@@ -4,10 +4,12 @@
  * @description Kite Connect HTTP + ticker provider implementing MarketDataProvider; ticker wrapped for stream mode parity with Vortex (ohlcv → quote).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-03-28
+ * @updated 2026-04-14
  *
  * Notes:
  * - refreshSession / isClientInitialized support scheduled Falcon instrument sync.
+ * - getHistoricalData: SDK param order is (token, interval, from, to, continuous, oi).
+ * - getProfile / getMargins: Kite account info endpoints.
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -205,6 +207,8 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     fromDate: string,
     toDate: string,
     interval: string,
+    continuous = false,
+    oi = false,
   ): Promise<any> {
     try {
       if (!this.kite) {
@@ -213,15 +217,48 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         );
         return null;
       }
+      // SDK signature: (instrument_token, interval, from_date, to_date, continuous, oi)
       const historicalData = await this.kite.getHistoricalData(
         instrumentToken,
+        interval,
         fromDate,
         toDate,
-        interval,
+        continuous,
+        oi,
       );
       return historicalData;
     } catch (error) {
       this.logger.error('[Kite] Failed to fetch historical data', error as any);
+      throw error;
+    }
+  }
+
+  async getProfile(): Promise<any> {
+    try {
+      if (!this.kite) {
+        this.logger.warn(
+          '[Kite] getProfile: client not initialized (degraded). Returning null.',
+        );
+        return null;
+      }
+      return await (this.kite as any).getProfile();
+    } catch (error) {
+      this.logger.error('[Kite] Failed to fetch profile', error as any);
+      throw error;
+    }
+  }
+
+  async getMargins(segment?: 'equity' | 'commodity'): Promise<any> {
+    try {
+      if (!this.kite) {
+        this.logger.warn(
+          '[Kite] getMargins: client not initialized (degraded). Returning null.',
+        );
+        return null;
+      }
+      return await (this.kite as any).getMargins(segment);
+    } catch (error) {
+      this.logger.error('[Kite] Failed to fetch margins', error as any);
       throw error;
     }
   }
