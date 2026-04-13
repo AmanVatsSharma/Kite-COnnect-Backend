@@ -24,6 +24,7 @@ const navItems = [
   { to: '/ws', label: 'WS admin', abbr: 'WS' },
   { to: '/abuse', label: 'Abuse', abbr: 'Abu' },
   { to: '/audit', label: 'Audit', abbr: 'Aud' },
+  { to: '/falcon', label: 'Falcon (Kite)', abbr: 'Fal' },
   { to: '/auth', label: 'Auth', abbr: 'Ath' },
   { to: '/console', label: 'Console', abbr: 'Con' },
   { to: '/settings', label: 'Settings', abbr: 'Set' },
