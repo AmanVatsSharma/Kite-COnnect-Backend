@@ -1,6 +1,16 @@
+/**
+ * @file ApiKeysPage.tsx
+ * @module admin-dashboard
+ * @description API key CRUD, limits, usage, and provider overrides.
+ * @author BharatERP
+ * @created 2026-03-28
+ * @updated 2026-03-28
+ */
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { getAdminToken } from '../lib/api-client';
+import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import * as admin from '../lib/admin-api';
 import type { ApiKeyRow, ApiKeyUsageItem } from '../lib/types';
 import { ErrorInline } from '../components/ErrorInline';
@@ -13,6 +23,7 @@ import { flattenObject } from '../lib/views/flatten';
 export function ApiKeysPage() {
   const token = getAdminToken();
   const qc = useQueryClient();
+  const { refetchInterval, recordFetchLatency } = useRefreshInterval();
   const [page, setPage] = useState(1);
   const [nk, setNk] = useState({ key: '', tenant_id: 'default', rate_limit_per_minute: 600, connection_limit: 2000 });
   const [limitKey, setLimitKey] = useState('');
@@ -21,12 +32,35 @@ export function ApiKeysPage() {
   const [prov, setProv] = useState<'kite' | 'vortex' | 'inherit'>('inherit');
   const [detailKey, setDetailKey] = useState('');
 
-  const keys = useQuery({ queryKey: ['admin-apikeys'], queryFn: admin.listApiKeys, enabled: !!token });
+  const listKeys = useCallback(async () => {
+    const t0 = performance.now();
+    try {
+      return await admin.listApiKeys();
+    } finally {
+      recordFetchLatency(Math.round(performance.now() - t0));
+    }
+  }, [recordFetchLatency]);
+
+  const listUsagePage = useCallback(async () => {
+    const t0 = performance.now();
+    try {
+      return await admin.listApiKeysUsage(page, 25);
+    } finally {
+      recordFetchLatency(Math.round(performance.now() - t0));
+    }
+  }, [page, recordFetchLatency]);
+
+  const keys = useQuery({
+    queryKey: ['admin-apikeys'],
+    queryFn: listKeys,
+    enabled: !!token,
+    refetchInterval,
+  });
   const usage = useQuery({
     queryKey: ['admin-apikeys-usage', page],
-    queryFn: () => admin.listApiKeysUsage(page, 25),
+    queryFn: listUsagePage,
     enabled: !!token,
-    refetchInterval: 15000,
+    refetchInterval,
   });
 
   const create = useMutation({
@@ -166,7 +200,7 @@ export function ApiKeysPage() {
         <h2>All keys</h2>
         {keys.isError && <p className="err">{(keys.error as Error).message}</p>}
         {keys.data && (
-          <table>
+          <table className="terminal-table">
             <thead>
               <tr>
                 <th>Key</th>
@@ -273,7 +307,7 @@ export function ApiKeysPage() {
               Page {usage.data.page} of {Math.max(1, Math.ceil(usage.data.total / usage.data.pageSize))} —{' '}
               {usage.data.total} keys total
             </p>
-            <table>
+            <table className="terminal-table">
               <thead>
                 <tr>
                   <th>Key</th>

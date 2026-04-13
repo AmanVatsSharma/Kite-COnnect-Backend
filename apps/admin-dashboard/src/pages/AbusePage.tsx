@@ -2,10 +2,12 @@
  * @file AbusePage.tsx
  * @module admin-dashboard
  * @description Abuse flags list, lookup, and manual block with badges and structured detail.
+ * @author BharatERP
+ * @updated 2026-03-28
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
 import type { AbuseFlag } from '../lib/types';
@@ -14,10 +16,12 @@ import { KeyValueGrid } from '../components/KeyValueGrid';
 import { RawJsonDetails } from '../components/RawJsonDetails';
 import { StatusBadge } from '../components/StatusBadge';
 import { abuseFlagFromUnknown, abuseRiskVariant } from '../lib/views/abuse-views';
+import { useRefreshInterval } from '../hooks/useRefreshInterval';
 
 export function AbusePage() {
   const token = getAdminToken();
   const qc = useQueryClient();
+  const { refetchInterval, recordFetchLatency } = useRefreshInterval();
   const [page, setPage] = useState(1);
   const [blockedFilter, setBlockedFilter] = useState<boolean | undefined>(undefined);
   const [lookupKey, setLookupKey] = useState('');
@@ -25,11 +29,20 @@ export function AbusePage() {
   const [blockReason, setBlockReason] = useState('');
   const [unblockKey, setUnblockKey] = useState('');
 
+  const fetchFlags = useCallback(async () => {
+    const t0 = performance.now();
+    try {
+      return await admin.listAbuseFlags(page, 40, blockedFilter);
+    } finally {
+      recordFetchLatency(Math.round(performance.now() - t0));
+    }
+  }, [page, blockedFilter, recordFetchLatency]);
+
   const list = useQuery({
     queryKey: ['admin-abuse', page, blockedFilter],
-    queryFn: () => admin.listAbuseFlags(page, 40, blockedFilter),
+    queryFn: fetchFlags,
     enabled: !!token,
-    refetchInterval: 20000,
+    refetchInterval,
   });
 
   const one = useQuery({
@@ -106,7 +119,7 @@ export function AbusePage() {
         </div>
         <ErrorInline message={list.isError ? (list.error as Error).message : null} />
         {list.data && (
-          <table>
+          <table className="terminal-table">
             <thead>
               <tr>
                 <th>API key</th>

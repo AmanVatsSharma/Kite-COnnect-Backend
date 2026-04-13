@@ -1,7 +1,10 @@
 /**
  * @file overview-views.ts
  * @module admin-dashboard
- * @description Parse health / stats payloads for structured Overview UI.
+ * @description Parse health / stats payloads for structured Overview UI and ticker.
+ * @author BharatERP
+ * @created 2026-03-28
+ * @updated 2026-03-28
  */
 
 import { flattenObject, type KvRow } from './flatten';
@@ -110,4 +113,50 @@ export function wsStatusSummaryRows(data: unknown): KvRow[] {
   if (o.redis_ok !== undefined) rows.push({ label: 'Redis', value: o.redis_ok ? 'OK' : 'Issue' });
   if (Array.isArray(o.subscriptions)) rows.push({ label: 'Subscription groups', value: String(o.subscriptions.length) });
   return rows;
+}
+
+/** Compact labels for the terminal ticker (IST-oriented copy handled by caller). */
+export function buildTickerSegments(input: {
+  health: unknown;
+  mdHealth: unknown;
+  stats: unknown;
+  globalProv: unknown;
+  stream: unknown;
+  ws: unknown;
+  hasAdminToken: boolean;
+}): string[] {
+  const parts: string[] = [];
+  const hs = healthOverallStatus(input.health);
+  parts.push(hs === 'ok' ? 'HEALTH OK' : hs === 'bad' ? 'HEALTH FAIL' : 'HEALTH WARN');
+
+  if (input.mdHealth && typeof input.mdHealth === 'object') {
+    const md = input.mdHealth as Record<string, unknown>;
+    if (md.provider != null) parts.push(`MD provider ${String(md.provider)}`);
+  }
+
+  if (input.stats && typeof input.stats === 'object') {
+    const s = input.stats as Record<string, unknown>;
+    if (typeof s.instruments === 'number') parts.push(`Inst ${s.instruments}`);
+    if (typeof s.activeSubscriptions === 'number') parts.push(`Subs ${s.activeSubscriptions}`);
+  }
+
+  if (!input.hasAdminToken) {
+    parts.push('ADMIN token unset — live provider stream gated');
+    return parts;
+  }
+
+  parts.push(`Global ${adminProviderLabel(input.globalProv)}`);
+
+  if (input.stream && typeof input.stream === 'object') {
+    const st = input.stream as Record<string, unknown>;
+    const on = st.isStreaming === true;
+    parts.push(on ? 'STREAM ON' : 'STREAM OFF');
+  }
+
+  if (input.ws && typeof input.ws === 'object') {
+    const w = input.ws as Record<string, unknown>;
+    if (typeof w.connections === 'number') parts.push(`WS ${w.connections} conn`);
+  }
+
+  return parts;
 }
