@@ -8,6 +8,7 @@ import { AuthModule } from '../auth/auth.module'; // Import AuthModule
 import { AdminModule } from '../admin/admin.module';
 
 import { MarketDataGateway } from './interface/market-data.gateway';
+import { MarketDataGatewaySubscriptionRegistry } from './interface/market-data-gateway-subscription.registry';
 import { NativeWebSocketGateway } from './interface/native-websocket.gateway';
 import { MarketDataStreamService } from './application/market-data-stream.service';
 import { MarketDataProviderResolverService } from './application/market-data-provider-resolver.service';
@@ -42,6 +43,7 @@ import { ApiKey } from '../auth/domain/api-key.entity'; // Import ApiKey
     forwardRef(() => AdminModule),
   ],
   providers: [
+    MarketDataGatewaySubscriptionRegistry,
     MarketDataStreamService,
     MarketDataProviderResolverService,
     MarketDataGateway,
