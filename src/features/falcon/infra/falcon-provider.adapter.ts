@@ -17,7 +17,6 @@ type RateLimitKey = 'quote' | 'ltp' | 'ohlc' | 'historical' | 'profile' | 'margi
 @Injectable()
 export class FalconProviderAdapter {
   private readonly logger = new Logger(FalconProviderAdapter.name);
-  private lastReqAt: Record<string, number> = {};
 
   constructor(
     private kite: KiteProviderService,
@@ -26,17 +25,25 @@ export class FalconProviderAdapter {
 
   // ─── internals ────────────────────────────────────────────────────────────
 
+  /**
+   * Distributed rate limiting via Redis SET NX PX (tryAcquireLock).
+   * Works correctly under multi-instance horizontal scale.
+   * Falls back gracefully (fail-open) when Redis is unavailable.
+   */
   private async rateLimit(key: RateLimitKey): Promise<void> {
     try {
       const limits: Record<RateLimitKey, number> = {
         quote: 1, ltp: 1, ohlc: 1, historical: 3, profile: 1, margins: 1,
       };
-      const minInterval = Math.floor(1000 / (limits[key] || 1));
-      const elapsed = Date.now() - (this.lastReqAt[key] || 0);
-      if (elapsed < minInterval) {
-        await new Promise((r) => setTimeout(r, minInterval - elapsed));
+      const rps = limits[key] || 1;
+      const lockTtlMs = Math.floor(1000 / rps);
+      const lockKey = `falcon:rl:http:${key}`;
+      const deadline = Date.now() + 5000;
+      let acquired = false;
+      while (!acquired && Date.now() < deadline) {
+        acquired = await this.redis.tryAcquireLock(lockKey, lockTtlMs).catch(() => true); // fail-open
+        if (!acquired) await new Promise((r) => setTimeout(r, 50));
       }
-      this.lastReqAt[key] = Date.now();
     } catch {}
   }
 

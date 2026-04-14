@@ -41,6 +41,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   /** Cap queued subscribe entries to limit memory under storms. */
   private readonly SUB_QUEUE_MAX = 50_000;
   private readonly UNSUB_QUEUE_MAX = 50_000;
+  /** Kite upstream WebSocket limit: max 3000 instruments per connection. */
+  private readonly KITE_UPSTREAM_INSTRUMENT_LIMIT = 3000;
   /** Prometheus label for stream metrics (internal: kite | vortex). */
   private streamMetricsProvider: 'kite' | 'vortex' | 'unknown' = 'unknown';
   /** Client-visible provider name for stream_status and health (Falcon | Vayu). */
@@ -477,36 +479,74 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
       // Process subscriptions
       if (this.subscriptionQueue.size > 0) {
-        const subscriptions = Array.from(this.subscriptionQueue.entries());
-        const tokensToSubscribe = subscriptions.map(([token]) => token);
+        let subscriptions = Array.from(this.subscriptionQueue.entries());
 
-        // Group by mode for efficient batching
-        const modeGroups = new Map<string, number[]>();
-        subscriptions.forEach(([token, sub]) => {
-          if (!modeGroups.has(sub.mode)) {
-            modeGroups.set(sub.mode, []);
+        // Enforce Kite upstream 3000-instrument limit
+        if (provider.providerName === 'kite') {
+          const capacity = this.KITE_UPSTREAM_INSTRUMENT_LIMIT - this.subscribedInstruments.size;
+          if (capacity <= 0) {
+            this.logger.warn(
+              `[StreamBatching] Kite upstream limit (${this.KITE_UPSTREAM_INSTRUMENT_LIMIT}) reached; dropping ${subscriptions.length} queued tokens`,
+            );
+            this.metrics.marketDataStreamQueueDroppedTotal
+              .labels('kite_upstream_limit')
+              .inc(subscriptions.length);
+            this.subscriptionQueue.clear();
+            subscriptions = [];
+          } else if (subscriptions.length > capacity) {
+            const dropped = subscriptions.length - capacity;
+            this.logger.warn(
+              `[StreamBatching] Kite upstream limit: capping ${subscriptions.length} to ${capacity} (dropping ${dropped})`,
+            );
+            this.metrics.marketDataStreamQueueDroppedTotal
+              .labels('kite_upstream_limit')
+              .inc(dropped);
+            subscriptions = subscriptions.slice(0, capacity);
+            // Re-sync queue to only allowed entries
+            const allowedTokens = new Set(subscriptions.map(([t]) => t));
+            for (const [t] of this.subscriptionQueue) {
+              if (!allowedTokens.has(t)) this.subscriptionQueue.delete(t);
+            }
           }
-          modeGroups.get(sub.mode)!.push(token);
-        });
-
-        // Subscribe by mode groups with chunking
-        for (const [mode, tokens] of modeGroups) {
-          this.logger.log(
-            `[StreamBatching] Subscribing ${tokens.length} tokens with mode=${mode} to provider`,
-          );
-          for (let i = 0; i < tokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
-            const chunk = tokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
-            ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
-          }
-          tokens.forEach((token) => {
-            this.subscribedInstruments.add(token);
-          });
         }
 
-        this.logger.log(
-          `[StreamBatching] Processed ${tokensToSubscribe.length} subscriptions in ${modeGroups.size} mode groups`,
-        );
+        if (subscriptions.length > 0) {
+          const tokensToSubscribe = subscriptions.map(([token]) => token);
+
+          // Group by mode for efficient batching
+          const modeGroups = new Map<string, number[]>();
+          subscriptions.forEach(([token, sub]) => {
+            if (!modeGroups.has(sub.mode)) {
+              modeGroups.set(sub.mode, []);
+            }
+            modeGroups.get(sub.mode)!.push(token);
+          });
+
+          // Subscribe by mode groups with chunking
+          for (const [mode, tokens] of modeGroups) {
+            this.logger.log(
+              `[StreamBatching] Subscribing ${tokens.length} tokens with mode=${mode} to provider`,
+            );
+            for (let i = 0; i < tokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
+              const chunk = tokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
+              ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
+            }
+            tokens.forEach((token) => {
+              this.subscribedInstruments.add(token);
+            });
+          }
+
+          this.logger.log(
+            `[StreamBatching] Processed ${tokensToSubscribe.length} subscriptions in ${modeGroups.size} mode groups`,
+          );
+        }
         this.subscriptionQueue.clear();
+        // Update Kite subscribed instruments gauge
+        if (provider.providerName === 'kite') {
+          try {
+            this.metrics.kiteTickerSubscribedInstruments.set(this.subscribedInstruments.size);
+          } catch {}
+        }
       }
 
       // Process unsubscriptions
@@ -524,6 +564,12 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           `[StreamBatching] Processed ${tokensToUnsubscribe.length} unsubscriptions`,
         );
         this.unsubscriptionQueue.clear();
+        // Update gauge after unsubscriptions too
+        if (provider.providerName === 'kite') {
+          try {
+            this.metrics.kiteTickerSubscribedInstruments.set(this.subscribedInstruments.size);
+          } catch {}
+        }
       }
     } catch (error) {
       this.logger.error(
@@ -686,6 +732,11 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       marketDataDegraded: snapshot.marketDataDegraded,
       queues: snapshot.queues,
     };
+  }
+
+  /** Current count of instruments subscribed on the upstream ticker. */
+  getSubscribedInstrumentCount(): number {
+    return this.subscribedInstruments.size;
   }
 
   // Expose queue sizes for backpressure monitoring

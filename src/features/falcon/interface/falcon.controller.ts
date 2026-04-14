@@ -4,7 +4,7 @@
  * @description Client-facing Falcon (Kite) REST endpoints: instruments, LTP, Quote, OHLC, Historical.
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-14
+ * @updated 2026-04-14 — added instruments/export (NDJSON stream) and instruments/resolve (symbol→token)
  */
 import {
   Controller,
@@ -108,6 +108,89 @@ export class FalconController {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
         { success: false, message: 'Failed to fetch Falcon instruments', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('instruments/export')
+  @ApiOperation({ summary: 'Stream all Falcon instruments as NDJSON (chunked transfer encoding)' })
+  @ApiQuery({ name: 'exchange', required: false })
+  @ApiQuery({ name: 'instrument_type', required: false })
+  @ApiQuery({ name: 'segment', required: false })
+  @ApiQuery({ name: 'is_active', required: false })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async exportInstruments(
+    @Res() res: Response,
+    @Query('exchange') exchange?: string,
+    @Query('instrument_type') instrument_type?: string,
+    @Query('segment') segment?: string,
+    @Query('is_active') is_active_raw?: string,
+  ) {
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Cache-Control', 'no-cache');
+    const PAGE = 1000;
+    let offset = 0;
+    const is_active =
+      String(is_active_raw || '').toLowerCase() === 'true'
+        ? true
+        : String(is_active_raw || '').toLowerCase() === 'false'
+        ? false
+        : undefined;
+    try {
+      for (;;) {
+        const { instruments } = await this.falconInstruments.getFalconInstruments({
+          exchange,
+          instrument_type,
+          segment,
+          is_active,
+          limit: PAGE,
+          offset,
+        });
+        if (!instruments.length) break;
+        for (const inst of instruments) {
+          res.write(JSON.stringify(inst) + '\n');
+        }
+        if (instruments.length < PAGE) break;
+        offset += PAGE;
+      }
+    } catch (e: any) {
+      // Best-effort: write error as final NDJSON line then close
+      try {
+        res.write(JSON.stringify({ error: true, message: e?.message || 'unknown' }) + '\n');
+      } catch {}
+    } finally {
+      res.end();
+    }
+  }
+
+  @Get('instruments/resolve')
+  @ApiOperation({ summary: 'Resolve trading symbols to Falcon instrument tokens' })
+  @ApiQuery({ name: 'symbols', required: true, example: 'RELIANCE,NIFTY,SBIN' })
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async resolveSymbols(
+    @Query('symbols') symbolsRaw?: string,
+    @Query('exchange') exchange?: string,
+  ) {
+    const symbols = String(symbolsRaw || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!symbols.length) {
+      throw new HttpException(
+        { success: false, message: 'symbols query param is required (comma-separated)' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    try {
+      const data = await this.falconInstruments.resolveSymbolsToTokens(symbols, exchange);
+      return { success: true, data };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Symbol resolution failed', error: (error as any)?.message || 'unknown' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

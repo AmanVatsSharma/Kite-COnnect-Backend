@@ -4,15 +4,18 @@
  * @description Kite Connect HTTP + ticker provider implementing MarketDataProvider; ticker wrapped for stream mode parity with Vortex (ohlcv → quote).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-14 — added updateApiCredentials/getConfigStatus for runtime credential management
+ * @updated 2026-04-14 — exponential-backoff reconnect, resolveExchanges(), Redis pub/sub events, kite reconnect metrics
  *
  * Notes:
  * - refreshSession / isClientInitialized support scheduled Falcon instrument sync.
  * - getHistoricalData: SDK param order is (token, interval, from, to, continuous, oi).
  * - getProfile / getMargins: Kite account info endpoints.
+ * - resolveExchanges: queries falcon_instruments DB, caches result in Redis 24h.
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, In } from 'typeorm';
 import { RedisService } from '@infra/redis/redis.service';
 import { AppConfigService } from '@infra/app-config/app-config.service';
 import {
@@ -22,10 +25,27 @@ import {
   TickerLike,
 } from '@features/market-data/infra/market-data.provider';
 import { MetricsService } from '@infra/observability/metrics.service';
+import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.entity';
 import { KiteConnect } from 'kiteconnect';
 import { wrapKiteTickerForStreaming } from '@features/kite-connect/infra/kite-ticker.facade';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { KiteTicker } = require('kiteconnect');
+
+/** Kite segment → Vortex-style exchange label (used by resolveExchanges). */
+const SEGMENT_TO_EXCHANGE: Record<string, string> = {
+  NSE: 'NSE_EQ',
+  BSE: 'BSE_EQ',
+  NFO: 'NSE_FO',
+  'NFO-FUT': 'NSE_FO',
+  'NFO-OPT': 'NSE_FO',
+  MCX: 'MCX_FO',
+  'MCX-FUT': 'MCX_FO',
+  'MCX-OPT': 'MCX_FO',
+  CDS: 'NSE_CUR',
+  'CDS-FUT': 'NSE_CUR',
+  'CDS-OPT': 'NSE_CUR',
+  BFO: 'BSE_FO',
+};
 
 @Injectable()
 export class KiteProviderService implements OnModuleInit, MarketDataProvider {
@@ -34,7 +54,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   private ticker: TickerLike | undefined;
   private isConnected = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 10;
   private disableReconnect = false;
   private currentApiKey: string | null = null;
   private currentAccessToken: string | null = null;
@@ -44,12 +64,18 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     status?: any;
     time: string;
   } | null = null;
+  private reconnectCount = 0;
+
+  /** Identify this as the kite provider for stream service limit enforcement. */
+  readonly providerName = 'kite';
 
   constructor(
     private configService: ConfigService,
     private redisService: RedisService,
     private metrics: MetricsService,
     private appConfig: AppConfigService,
+    @InjectRepository(FalconInstrument)
+    private falconInstrumentRepo: Repository<FalconInstrument>,
   ) {}
 
   async onModuleInit() {
@@ -305,6 +331,67 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     }
   }
 
+  /**
+   * Resolve numeric instrument tokens to Vortex-style exchange labels.
+   * Uses falcon_instruments DB with a 24-hour Redis cache per token.
+   * Falls back to 'NSE_EQ' for tokens not found in DB.
+   */
+  async resolveExchanges(tokens: string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (!tokens?.length) return result;
+
+    const uncached: string[] = [];
+    // Check Redis cache first
+    for (const tok of tokens) {
+      try {
+        const cached = await this.redisService.get<string>(`falcon:tok:exchange:${tok}`);
+        if (cached) {
+          result.set(tok, cached);
+        } else {
+          uncached.push(tok);
+        }
+      } catch {
+        uncached.push(tok);
+      }
+    }
+
+    if (!uncached.length) return result;
+
+    // DB lookup for uncached tokens
+    try {
+      const numericTokens = uncached.map(Number).filter((n) => Number.isFinite(n));
+      if (numericTokens.length) {
+        const rows = await this.falconInstrumentRepo.find({
+          where: { instrument_token: In(numericTokens) },
+          select: ['instrument_token', 'segment', 'exchange'],
+        });
+        for (const row of rows) {
+          const tok = String(row.instrument_token);
+          const exchange =
+            SEGMENT_TO_EXCHANGE[row.segment] ??
+            SEGMENT_TO_EXCHANGE[row.exchange] ??
+            'NSE_EQ';
+          result.set(tok, exchange);
+          // Cache in Redis
+          this.redisService
+            .set(`falcon:tok:exchange:${tok}`, exchange, 86400)
+            .catch(() => {});
+        }
+      }
+    } catch (err) {
+      this.logger.warn('[Kite] resolveExchanges DB lookup failed', err as any);
+    }
+
+    // Default fallback for anything still unresolved
+    for (const tok of uncached) {
+      if (!result.has(tok)) {
+        result.set(tok, 'NSE_EQ');
+      }
+    }
+
+    return result;
+  }
+
   private refreshDegradedMetric() {
     try {
       const degraded = this.kite ? 0 : 1;
@@ -334,6 +421,8 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       this.reconnectAttempts = 0;
       this.disableReconnect = false;
       this.logger.log('[Kite] Ticker connected');
+      this.metrics.marketDataStreamTickerConnected.labels('kite').set(1);
+      this.publishStreamStatus('connect');
     });
     inner.on('ticks', (ticks: any[]) => {
       this.logger.debug?.(`[Kite] Received ${ticks?.length || 0} ticks`);
@@ -343,6 +432,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       this.logger.warn(
         '[Kite] Ticker disconnected ' + this.stringifyArgs(args),
       );
+      this.metrics.marketDataStreamTickerConnected.labels('kite').set(0);
       if (this.disableReconnect) {
         this.logger.warn(
           '[Kite] Reconnect disabled due to previous auth errors',
@@ -353,11 +443,21 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         this.logger.warn(
           `[Kite] Max reconnect attempts (${this.maxReconnectAttempts}) reached; stopping`,
         );
+        this.metrics.kiteTickerReconnectTotal.labels('max_attempts').inc();
+        this.publishStreamStatus('provider_halted');
         return;
       }
       this.reconnectAttempts++;
-      const delayMs =
-        1000 + Math.floor(Math.random() * 2000) + this.reconnectAttempts * 500;
+      this.reconnectCount++;
+      this.metrics.kiteTickerReconnectTotal.labels('reconnecting').inc();
+      this.publishStreamStatus('disconnect');
+      // Exponential backoff with jitter: min(30s, 1s * 2^attempts) + rand(0-1s)
+      const base = Math.min(30_000, 1000 * Math.pow(2, this.reconnectAttempts));
+      const jitter = Math.floor(Math.random() * 1000);
+      const delayMs = base + jitter;
+      this.logger.log(
+        `[Kite] Reconnecting in ${delayMs}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+      );
       setTimeout(() => {
         try {
           inner.connect();
@@ -392,6 +492,8 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       this.logger.error('[Kite] Ticker error: ' + pretty);
       if (this.isAuthError(error)) {
         this.disableReconnect = true;
+        this.metrics.kiteTickerReconnectTotal.labels('auth_error').inc();
+        this.publishStreamStatus('auth_error');
         this.logger.warn(
           '[Kite] Disabling reconnect due to authentication error. Visit /api/auth/falcon/login to re-authenticate.',
         );
@@ -413,6 +515,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         } catch {}
       }
       this.ticker = undefined as any;
+      // Reset reconnect state so fresh connection starts cleanly
+      this.reconnectAttempts = 0;
+      this.disableReconnect = false;
       const ticker = this.initializeTicker();
       try {
         ticker?.connect?.();
@@ -436,6 +541,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     return this.isConnected;
   }
 
+  getReconnectCount(): number {
+    return this.reconnectCount;
+  }
+
   private isAuthError(error: any): boolean {
     const msg = (error?.message || error?.toString?.() || '')
       .toString()
@@ -450,6 +559,18 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       msg.includes('401') ||
       msg.includes('403')
     );
+  }
+
+  private publishStreamStatus(event: string): void {
+    try {
+      this.redisService
+        .publish('stream:status', {
+          event,
+          provider: 'kite',
+          ts: new Date().toISOString(),
+        })
+        .catch(() => {});
+    } catch {}
   }
 
   private formatError(error: any): string {
@@ -569,6 +690,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     return {
       connected: this.isConnected,
       reconnectAttempts: this.reconnectAttempts,
+      reconnectCount: this.reconnectCount,
       disableReconnect: this.disableReconnect,
       hasApiKey: !!this.currentApiKey,
       hasAccessToken: !!this.currentAccessToken,

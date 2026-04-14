@@ -378,8 +378,8 @@ export class MarketDataGateway
       const record: any = (client.data as any)?.apiKeyRecord;
       const limits: Record<string, any> = {
         connection: record?.connection_limit || 3,
-        maxUpstreamInstruments: 1000,
-        maxSubscriptionsPerSocket: 1000,
+        maxUpstreamInstruments: Number(process.env.KITE_TICKER_INSTRUMENT_LIMIT ?? 3000),
+        maxSubscriptionsPerSocket: record?.ws_max_instruments ?? Number(process.env.WS_MAX_INSTRUMENTS ?? 3000),
       };
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
@@ -389,7 +389,7 @@ export class MarketDataGateway
         }
         const v = (provider as any)?.getVortexWsLimits?.() ?? null;
         if (v) {
-          limits.maxSubscriptionsPerSocket = v.perSocket;
+          limits.maxSubscriptionsPerSocket = record?.ws_max_instruments ?? v.perSocket;
           limits.maxVortexShards = v.maxShards;
           limits.maxVortexInstruments = v.total;
         }
@@ -692,6 +692,37 @@ export class MarketDataGateway
       const forbiddenPairs = finalPairs.filter((p) => !allowed.has(String(p.exchange)));
       finalPairs = finalPairs.filter((p) => allowed.has(String(p.exchange)));
 
+      // Enforce per-connection instrument subscription cap
+      const maxInstruments =
+        (record?.ws_max_instruments != null && Number.isFinite(record.ws_max_instruments) && record.ws_max_instruments > 0)
+          ? record.ws_max_instruments
+          : Number(process.env.WS_MAX_INSTRUMENTS ?? 3000);
+      const currentInstrumentCount = subscription.instruments.length;
+      const newTokens = finalPairs.map((p) => p.token).filter((t) => !new Set(subscription.instruments).has(t));
+      const capacity = maxInstruments - currentInstrumentCount;
+      if (capacity <= 0 && newTokens.length > 0) {
+        client.emit('error', {
+          code: 'instrument_limit_exceeded',
+          message: `Max ${maxInstruments} instruments per connection. Currently at ${currentInstrumentCount}.`,
+          rejected_tokens: newTokens,
+          limit: maxInstruments,
+          current: currentInstrumentCount,
+        });
+        finalPairs = finalPairs.filter((p) => new Set(subscription.instruments).has(p.token));
+      } else if (newTokens.length > capacity) {
+        const allowed = newTokens.slice(0, capacity);
+        const rejected = newTokens.slice(capacity);
+        client.emit('error', {
+          code: 'instrument_limit_exceeded',
+          message: `Max ${maxInstruments} instruments per connection. ${rejected.length} token(s) rejected.`,
+          rejected_tokens: rejected,
+          limit: maxInstruments,
+          current: currentInstrumentCount,
+        });
+        const allowedSet = new Set([...subscription.instruments, ...allowed]);
+        finalPairs = finalPairs.filter((p) => allowedSet.has(p.token));
+      }
+
       // Update subscription tracking only with included tokens
       const priorInstrumentSet = new Set(subscription.instruments);
       const includedTokens = finalPairs.map((p) => p.token);
@@ -722,8 +753,8 @@ export class MarketDataGateway
         }
       }
 
-      // Ack with details (Vortex: total = shards × 1000 per access token)
-      let maxSubs = 1000;
+      // Ack with details (Vortex: total = shards × 1000 per access token; Kite: 3000 upstream)
+      let maxSubs = Number(process.env.KITE_TICKER_INSTRUMENT_LIMIT ?? 3000);
       try {
         const lim = (provider as any)?.getSubscriptionLimit?.();
         if (Number.isFinite(lim) && lim > 0) maxSubs = lim;
@@ -761,9 +792,10 @@ export class MarketDataGateway
         mode,
         limits: {
           maxUpstreamInstruments: maxSubs,
+          maxSubscriptionsPerSocket: maxInstruments,
+          currentSubscriptions: subscription.instruments.length,
           ...(vortexLimits
             ? {
-                maxSubscriptionsPerSocket: vortexLimits.perSocket,
                 maxVortexShards: vortexLimits.maxShards,
                 maxVortexInstruments: vortexLimits.total,
               }
@@ -1127,8 +1159,8 @@ export class MarketDataGateway
         ];
       const limits: Record<string, any> = {
         connection: record?.connection_limit || 3,
-        maxUpstreamInstruments: 1000,
-        maxSubscriptionsPerSocket: 1000,
+        maxUpstreamInstruments: Number(process.env.KITE_TICKER_INSTRUMENT_LIMIT ?? 3000),
+        maxSubscriptionsPerSocket: record?.ws_max_instruments ?? Number(process.env.WS_MAX_INSTRUMENTS ?? 3000),
       };
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
@@ -1138,7 +1170,7 @@ export class MarketDataGateway
         }
         const v = (provider as any)?.getVortexWsLimits?.() ?? null;
         if (v) {
-          limits.maxSubscriptionsPerSocket = v.perSocket;
+          limits.maxSubscriptionsPerSocket = record?.ws_max_instruments ?? v.perSocket;
           limits.maxVortexShards = v.maxShards;
           limits.maxVortexInstruments = v.total;
         }

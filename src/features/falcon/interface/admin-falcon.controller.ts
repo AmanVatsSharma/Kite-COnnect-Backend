@@ -6,7 +6,7 @@
  *   secured by x-admin-token so the admin dashboard can call it directly.
  * @author BharatERP
  * @created 2026-04-14
- * @updated 2026-04-14
+ * @updated 2026-04-14 — added ticker restart/status, instruments export/resolve endpoints
  */
 import {
   Controller,
@@ -16,15 +16,18 @@ import {
   Query,
   Param,
   Patch,
+  Res,
   UseGuards,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiOperation, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '@features/admin/guards/admin.guard';
 import { FalconInstrumentService } from '@features/falcon/application/falcon-instrument.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
+import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
 import { RedisService } from '@infra/redis/redis.service';
 import { FalconTokensDto, FalconHistoricalQueryDto } from './dto/falcon-market-data.dto';
 
@@ -38,6 +41,7 @@ export class AdminFalconController {
     private readonly adapter: FalconProviderAdapter,
     private readonly redis: RedisService,
     private readonly kiteProvider: KiteProviderService,
+    private readonly streamService: MarketDataStreamService,
   ) {}
 
   // ─── Config ───────────────────────────────────────────────────────────────
@@ -69,6 +73,46 @@ export class AdminFalconController {
     } catch (error) {
       throw new HttpException(
         { success: false, message: 'Failed to update Falcon config', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // ─── Ticker Control ───────────────────────────────────────────────────────
+
+  @Post('ticker/restart')
+  @ApiOperation({ summary: 'Restart Kite WebSocket ticker (resets reconnect counter)' })
+  async restartTicker() {
+    try {
+      await this.kiteProvider.restartTicker();
+      return { success: true, message: 'Kite ticker restarted successfully' };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Failed to restart Kite ticker', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('ticker/status')
+  @ApiOperation({ summary: 'Kite ticker health: connection state, reconnect count, upstream subscription utilization' })
+  async tickerStatus() {
+    try {
+      const debug = this.kiteProvider.getDebugStatus();
+      const subscribedCount = this.streamService.getSubscribedInstrumentCount();
+      const upstreamLimit = 3000;
+      return {
+        success: true,
+        data: {
+          ...debug,
+          subscribedInstruments: subscribedCount,
+          upstreamLimit,
+          utilizationPct: Math.round((subscribedCount / upstreamLimit) * 100),
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Failed to fetch ticker status', error: (error as any)?.message || 'unknown' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -172,6 +216,79 @@ export class AdminFalconController {
     } catch (error) {
       throw new HttpException(
         { success: false, message: 'Search failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('instruments/export')
+  @ApiOperation({ summary: 'Stream all Falcon instruments as NDJSON (chunked transfer encoding)' })
+  @ApiQuery({ name: 'exchange', required: false })
+  @ApiQuery({ name: 'instrument_type', required: false })
+  @ApiQuery({ name: 'segment', required: false })
+  @ApiQuery({ name: 'is_active', required: false })
+  async exportInstruments(
+    @Res() res: Response,
+    @Query('exchange') exchange?: string,
+    @Query('instrument_type') instrument_type?: string,
+    @Query('segment') segment?: string,
+    @Query('is_active') is_active_raw?: string,
+  ) {
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Cache-Control', 'no-cache');
+    const PAGE = 1000;
+    let offset = 0;
+    const is_active =
+      String(is_active_raw || '').toLowerCase() === 'true'
+        ? true
+        : String(is_active_raw || '').toLowerCase() === 'false'
+        ? false
+        : undefined;
+    try {
+      for (;;) {
+        const { instruments } = await this.instruments.getFalconInstruments({
+          exchange,
+          instrument_type,
+          segment,
+          is_active,
+          limit: PAGE,
+          offset,
+        });
+        if (!instruments.length) break;
+        for (const inst of instruments) {
+          res.write(JSON.stringify(inst) + '\n');
+        }
+        if (instruments.length < PAGE) break;
+        offset += PAGE;
+      }
+    } catch (e: any) {
+      try {
+        res.write(JSON.stringify({ error: true, message: e?.message || 'unknown' }) + '\n');
+      } catch {}
+    } finally {
+      res.end();
+    }
+  }
+
+  @Get('instruments/resolve')
+  @ApiOperation({ summary: 'Resolve trading symbols to Falcon instrument tokens' })
+  @ApiQuery({ name: 'symbols', required: true, example: 'RELIANCE,NIFTY' })
+  @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
+  async resolveSymbols(@Query('symbols') symbolsRaw?: string, @Query('exchange') exchange?: string) {
+    const symbols = String(symbolsRaw || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!symbols.length) {
+      throw new HttpException({ success: false, message: 'symbols is required' }, HttpStatus.BAD_REQUEST);
+    }
+    try {
+      const data = await this.instruments.resolveSymbolsToTokens(symbols, exchange);
+      return { success: true, data };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Symbol resolution failed', error: (error as any)?.message || 'unknown' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

@@ -35,6 +35,7 @@ import {
   normalizeProviderAlias,
   internalToClientProviderName,
 } from '@shared/utils/provider-label.util';
+import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
 
 @Controller('admin')
 @ApiTags('admin', 'admin-ws')
@@ -54,6 +55,7 @@ export class AdminController {
     private gateway: MarketDataGateway,
     private abuseDetection: AbuseDetectionService,
     private configService: ConfigService,
+    private wsInterest: MarketDataWsInterestService,
   ) {}
 
   @Post('apikeys')
@@ -83,6 +85,12 @@ export class AdminController {
           description:
             'Optional per-API-key set_mode RPS limit (falls back to WS_MODE_RPS when omitted)',
         },
+        ws_max_instruments: {
+          type: 'number',
+          example: 500,
+          description:
+            'Optional max instruments per WebSocket connection for this key (null = global default of 3000)',
+        },
         allowed_exchanges: {
           type: 'array',
           items: { type: 'string' },
@@ -103,6 +111,7 @@ export class AdminController {
       ws_subscribe_rps?: number;
       ws_unsubscribe_rps?: number;
       ws_mode_rps?: number;
+      ws_max_instruments?: number;
       allowed_exchanges?: string[];
     },
   ) {
@@ -127,6 +136,8 @@ export class AdminController {
           : null,
       ws_mode_rps:
         typeof body.ws_mode_rps === 'number' ? body.ws_mode_rps : null,
+      ws_max_instruments:
+        typeof body.ws_max_instruments === 'number' ? body.ws_max_instruments : null,
       metadata: Object.keys(metadata).length > 0 ? metadata : null,
     });
     const saved = await this.apiKeyRepo.save(entity);
@@ -141,6 +152,7 @@ export class AdminController {
         ws_subscribe_rps: saved.ws_subscribe_rps,
         ws_unsubscribe_rps: saved.ws_unsubscribe_rps,
         ws_mode_rps: saved.ws_mode_rps,
+        ws_max_instruments: saved.ws_max_instruments,
       },
       metadata: saved.metadata,
     });
@@ -174,6 +186,7 @@ export class AdminController {
         ws_subscribe_rps: { type: 'number' },
         ws_unsubscribe_rps: { type: 'number' },
         ws_mode_rps: { type: 'number' },
+        ws_max_instruments: { type: 'number', description: 'Max instruments per WS connection (null = global default)' },
         allowed_exchanges: { type: 'array', items: { type: 'string' } },
       },
       required: ['key'],
@@ -188,6 +201,7 @@ export class AdminController {
       ws_subscribe_rps?: number | null;
       ws_unsubscribe_rps?: number | null;
       ws_mode_rps?: number | null;
+      ws_max_instruments?: number | null;
       allowed_exchanges?: string[];
     },
   ) {
@@ -206,6 +220,9 @@ export class AdminController {
     }
     if (body.ws_mode_rps !== undefined) {
       patch.ws_mode_rps = body.ws_mode_rps;
+    }
+    if (body.ws_max_instruments !== undefined) {
+      patch.ws_max_instruments = body.ws_max_instruments;
     }
 
     // Handle allowed_exchanges update via metadata
@@ -252,6 +269,7 @@ export class AdminController {
           ws_subscribe_rps: entity.ws_subscribe_rps,
           ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
           ws_mode_rps: entity.ws_mode_rps,
+          ws_max_instruments: entity.ws_max_instruments,
           allowed_exchanges: entity.metadata?.exchanges,
         }
       : patch;
@@ -289,6 +307,7 @@ export class AdminController {
       ws_subscribe_rps: entity.ws_subscribe_rps,
       ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
       ws_mode_rps: entity.ws_mode_rps,
+      ws_max_instruments: entity.ws_max_instruments,
       allowed_exchanges: entity.metadata?.exchanges,
     };
 
@@ -331,6 +350,7 @@ export class AdminController {
       ws_subscribe_rps: entity.ws_subscribe_rps,
       ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
       ws_mode_rps: entity.ws_mode_rps,
+      ws_max_instruments: entity.ws_max_instruments,
       allowed_exchanges: entity.metadata?.exchanges,
     };
 
@@ -385,6 +405,7 @@ export class AdminController {
             ws_subscribe_rps: entity.ws_subscribe_rps,
             ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
             ws_mode_rps: entity.ws_mode_rps,
+            ws_max_instruments: entity.ws_max_instruments,
             allowed_exchanges: entity.metadata?.exchanges,
           },
           usage,
@@ -521,7 +542,15 @@ export class AdminController {
   })
   async streamStatus() {
     const status = await this.stream.getStreamingStatus();
-    return status;
+    const kiteSubscribedInstruments = this.stream.getSubscribedInstrumentCount?.() ?? null;
+    return {
+      ...status,
+      kiteSubscribedInstruments,
+      kiteUpstreamLimit: 3000,
+      kiteUtilizationPct: kiteSubscribedInstruments != null
+        ? Math.round((kiteSubscribedInstruments / 3000) * 100)
+        : null,
+    };
   }
 
   // ===== WS Admin: Status =====
@@ -539,6 +568,15 @@ export class AdminController {
       provider: streaming,
       redis_ok: true,
     };
+  }
+
+  @Get('ws/instruments/top')
+  @ApiOperation({ summary: 'Top N most-subscribed instruments by WS client ref count' })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  async topInstruments(@Query('limit') limitRaw?: string) {
+    const limit = Math.max(1, Math.min(200, parseInt(String(limitRaw || '50')) || 50));
+    const data = this.wsInterest.getTopInstruments(limit);
+    return { success: true, data };
   }
 
   // ===== WS Admin: Config =====
