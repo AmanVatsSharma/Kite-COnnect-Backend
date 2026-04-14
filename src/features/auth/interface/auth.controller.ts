@@ -60,8 +60,14 @@ export class AuthController {
     },
   })
   async login(@Res() res: Response) {
-    const apiKey = this.configService.get<string>('KITE_API_KEY');
-    const apiSecret = this.configService.get<string>('KITE_API_SECRET');
+    const redisApiKey = this.redisService.isRedisAvailable()
+      ? await this.redisService.get<string>('config:kite:api_key').catch(() => null)
+      : null;
+    const redisApiSecret = this.redisService.isRedisAvailable()
+      ? await this.redisService.get<string>('config:kite:api_secret').catch(() => null)
+      : null;
+    const apiKey = redisApiKey || this.configService.get<string>('KITE_API_KEY');
+    const apiSecret = redisApiSecret || this.configService.get<string>('KITE_API_SECRET');
     if (!apiKey || !apiSecret)
       throw new BadRequestException('Falcon API creds not configured');
 
@@ -98,8 +104,14 @@ export class AuthController {
     @Query('request_token') requestToken: string,
     @Query('state') state: string,
   ) {
-    const apiKey = this.configService.get<string>('KITE_API_KEY');
-    const apiSecret = this.configService.get<string>('KITE_API_SECRET');
+    const redisApiKey = this.redisService.isRedisAvailable()
+      ? await this.redisService.get<string>('config:kite:api_key').catch(() => null)
+      : null;
+    const redisApiSecret = this.redisService.isRedisAvailable()
+      ? await this.redisService.get<string>('config:kite:api_secret').catch(() => null)
+      : null;
+    const apiKey = redisApiKey || this.configService.get<string>('KITE_API_KEY');
+    const apiSecret = redisApiSecret || this.configService.get<string>('KITE_API_SECRET');
     if (!apiKey || !apiSecret)
       throw new BadRequestException('Falcon API creds not configured');
 
@@ -221,7 +233,10 @@ export class VortexAuthController {
     },
   })
   async login(@Res() res: Response) {
-    const appId = this.configService.get<string>('VORTEX_APP_ID');
+    const redisAppId = this.redisService.isRedisAvailable()
+      ? await this.redisService.get<string>('config:vortex:app_id').catch(() => null)
+      : null;
+    const appId = redisAppId || this.configService.get<string>('VORTEX_APP_ID');
     if (!appId)
       throw new BadRequestException(
         'Vayu applicationId (VORTEX_APP_ID) not configured',

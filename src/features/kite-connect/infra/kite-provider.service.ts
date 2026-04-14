@@ -54,9 +54,20 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     await this.initialize();
   }
 
+  private static readonly REDIS_API_KEY = 'config:kite:api_key';
+  private static readonly REDIS_API_SECRET = 'config:kite:api_secret';
+  private static readonly CONFIG_TTL = 365 * 24 * 3600; // 1 year
+
   async initialize(): Promise<void> {
     try {
-      const apiKey = this.configService.get('KITE_API_KEY');
+      // Prefer Redis override (set via admin endpoint), then env var
+      let apiKey = this.configService.get<string>('KITE_API_KEY');
+      if (this.redisService?.isRedisAvailable?.()) {
+        try {
+          const redisApiKey = await this.redisService.get<string>(KiteProviderService.REDIS_API_KEY);
+          if (redisApiKey) apiKey = redisApiKey;
+        } catch {}
+      }
       // Prefer dynamic token from Redis, then env var set by OAuth
       let accessToken = this.configService.get('KITE_ACCESS_TOKEN');
       if (!accessToken && this.redisService?.isRedisAvailable?.()) {
@@ -485,6 +496,64 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     } catch {
       return '';
     }
+  }
+
+  /**
+   * Persist a new API key (and optional secret) to Redis so they survive restarts.
+   * Immediately re-initializes the KiteConnect client with the new key.
+   */
+  async updateApiCredentials(apiKey: string, apiSecret?: string): Promise<void> {
+    if (!apiKey?.trim()) throw new Error('API key cannot be empty');
+    try {
+      if (this.redisService?.isRedisAvailable?.()) {
+        await this.redisService.set(KiteProviderService.REDIS_API_KEY, apiKey.trim(), KiteProviderService.CONFIG_TTL);
+        if (apiSecret?.trim()) {
+          await this.redisService.set(KiteProviderService.REDIS_API_SECRET, apiSecret.trim(), KiteProviderService.CONFIG_TTL);
+        }
+      }
+      this.currentApiKey = apiKey.trim();
+      if (this.currentAccessToken) {
+        this.kite = new KiteConnect({ api_key: this.currentApiKey, access_token: this.currentAccessToken });
+      } else {
+        // no access token yet — leave kite undefined until OAuth completes
+        this.kite = undefined;
+      }
+      this.logger.log('[Kite] API credentials updated via admin endpoint');
+      this.refreshDegradedMetric();
+    } catch (error) {
+      this.logger.error('[Kite] Failed to update API credentials', error as any);
+      throw error;
+    }
+  }
+
+  /** Return masked config status for the admin dashboard. */
+  async getConfigStatus() {
+    let hasRedisApiKey = false;
+    let hasRedisApiSecret = false;
+    if (this.redisService?.isRedisAvailable?.()) {
+      try {
+        hasRedisApiKey = !!(await this.redisService.get<string>(KiteProviderService.REDIS_API_KEY));
+        hasRedisApiSecret = !!(await this.redisService.get<string>(KiteProviderService.REDIS_API_SECRET));
+      } catch {}
+    }
+    const envApiKey = this.configService.get<string>('KITE_API_KEY');
+    const envApiSecret = this.configService.get<string>('KITE_API_SECRET');
+    return {
+      apiKey: {
+        masked: this.mask(this.currentApiKey),
+        hasValue: !!this.currentApiKey,
+        source: hasRedisApiKey ? 'redis' : (envApiKey ? 'env' : 'none'),
+      },
+      apiSecret: {
+        hasValue: hasRedisApiSecret || !!envApiSecret,
+        source: hasRedisApiSecret ? 'redis' : (envApiSecret ? 'env' : 'none'),
+      },
+      accessToken: {
+        masked: this.mask(this.currentAccessToken),
+        hasValue: !!this.currentAccessToken,
+      },
+      initialized: !!this.kite,
+    };
   }
 
   /**

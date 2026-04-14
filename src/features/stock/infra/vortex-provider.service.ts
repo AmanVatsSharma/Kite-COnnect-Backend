@@ -63,6 +63,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   private accessToken: string | null = null;
   private wsConnected = false;
   private reconnectAttempts = 0;
+  // Runtime config overrides (persisted to Redis, survive restarts)
+  private vortexApiKeyOverride: string | null = null;
+  private vortexBaseUrlOverride: string | null = null;
+  private vortexWsUrlOverride: string | null = null;
+  private vortexAppIdOverride: string | null = null;
   private readonly maxReconnectAttempts = 8;
   private readonly maxSubscriptionsPerSocket = 1000;
   /** Mirrors VortexShardedTicker maxShards after initializeTicker(). */
@@ -224,6 +229,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   ) {}
 
   async onModuleInit() {
+    await this.loadConfigOverrides();
     await this.initialize();
     // Auto-load saved access token on startup
     await this.loadSavedToken();
@@ -237,8 +243,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   async initialize(): Promise<void> {
     try {
       // For now, we do not fail if creds are missing; the provider stays in degraded mode
-      const apiKey = this.configService.get('VORTEX_API_KEY');
-      const baseUrl = this.configService.get('VORTEX_BASE_URL');
+      const apiKey = this.vortexApiKeyOverride || this.configService.get('VORTEX_API_KEY');
+      const baseUrl = this.vortexBaseUrlOverride || this.configService.get('VORTEX_BASE_URL');
       if (!apiKey || !baseUrl) {
         this.logger.warn(
           '[Vortex] API key or base URL not configured. REST methods will return empty.',
@@ -893,7 +899,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   initializeTicker(): TickerLike {
     if (this.ticker) return this.ticker;
     const streamUrl =
-      this.configService.get('VORTEX_WS_URL') || 'wss://wire.rupeezy.in/ws';
+      this.vortexWsUrlOverride || this.configService.get('VORTEX_WS_URL') || 'wss://wire.rupeezy.in/ws';
     this.logger.log(
       `[Vortex] Using WebSocket URL: ${streamUrl.replace(/auth_token=[^&]*/, 'auth_token=***')}`,
     );
@@ -989,7 +995,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   }
 
   private authHeaders(): Record<string, string> {
-    const apiKey = this.configService.get('VORTEX_API_KEY') || '';
+    const apiKey = this.vortexApiKeyOverride || this.configService.get('VORTEX_API_KEY') || '';
     const bearer = this.accessToken || '';
     const h: Record<string, string> = { 'x-api-key': apiKey };
     if (bearer) h['Authorization'] = `Bearer ${bearer}`;
@@ -1406,6 +1412,94 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     } catch (e) {
       this.logger.debug('[Vortex] warmHotsetOnce failed', e as any);
     }
+  }
+
+  /** Load Redis-persisted config overrides into instance fields before initialize(). */
+  private async loadConfigOverrides(): Promise<void> {
+    if (!this.redisService?.isRedisAvailable?.()) return;
+    try {
+      const [apiKey, baseUrl, wsUrl, appId] = await Promise.all([
+        this.redisService.get<string>('config:vortex:api_key').catch(() => null),
+        this.redisService.get<string>('config:vortex:base_url').catch(() => null),
+        this.redisService.get<string>('config:vortex:ws_url').catch(() => null),
+        this.redisService.get<string>('config:vortex:app_id').catch(() => null),
+      ]);
+      if (apiKey) this.vortexApiKeyOverride = apiKey;
+      if (baseUrl) this.vortexBaseUrlOverride = baseUrl;
+      if (wsUrl) this.vortexWsUrlOverride = wsUrl;
+      if (appId) this.vortexAppIdOverride = appId;
+    } catch {}
+  }
+
+  private static readonly CONFIG_TTL = 365 * 24 * 3600; // 1 year
+
+  /** Persist Vortex credential overrides to Redis and reinitialize provider. */
+  async updateApiCredentials(params: {
+    apiKey?: string;
+    baseUrl?: string;
+    wsUrl?: string;
+    appId?: string;
+  }): Promise<void> {
+    const { apiKey, baseUrl, wsUrl, appId } = params;
+    const ttl = VortexProviderService.CONFIG_TTL;
+    if (apiKey?.trim()) {
+      this.vortexApiKeyOverride = apiKey.trim();
+      if (this.redisService?.isRedisAvailable?.()) await this.redisService.set('config:vortex:api_key', apiKey.trim(), ttl);
+    }
+    if (baseUrl?.trim()) {
+      this.vortexBaseUrlOverride = baseUrl.trim();
+      if (this.redisService?.isRedisAvailable?.()) await this.redisService.set('config:vortex:base_url', baseUrl.trim(), ttl);
+    }
+    if (wsUrl?.trim()) {
+      this.vortexWsUrlOverride = wsUrl.trim();
+      if (this.redisService?.isRedisAvailable?.()) await this.redisService.set('config:vortex:ws_url', wsUrl.trim(), ttl);
+    }
+    if (appId?.trim()) {
+      this.vortexAppIdOverride = appId.trim();
+      if (this.redisService?.isRedisAvailable?.()) await this.redisService.set('config:vortex:app_id', appId.trim(), ttl);
+    }
+    // Re-init HTTP client if key or baseUrl changed
+    if (apiKey || baseUrl) {
+      await this.initialize();
+    }
+    this.logger.log('[Vortex] API credentials updated via admin endpoint');
+  }
+
+  /** Return masked config status for the admin dashboard. */
+  async getConfigStatus() {
+    const envApiKey = this.configService.get<string>('VORTEX_API_KEY');
+    const envBaseUrl = this.configService.get<string>('VORTEX_BASE_URL');
+    const envWsUrl = this.configService.get<string>('VORTEX_WS_URL');
+    const envAppId = this.configService.get<string>('VORTEX_APP_ID');
+    return {
+      apiKey: {
+        masked: this.maskCred(this.vortexApiKeyOverride || envApiKey || null),
+        hasValue: !!(this.vortexApiKeyOverride || envApiKey),
+        source: this.vortexApiKeyOverride ? 'redis' : (envApiKey ? 'env' : 'none'),
+      },
+      baseUrl: {
+        value: this.vortexBaseUrlOverride || envBaseUrl || null,
+        source: this.vortexBaseUrlOverride ? 'redis' : (envBaseUrl ? 'env' : 'none'),
+      },
+      wsUrl: {
+        value: this.vortexWsUrlOverride || envWsUrl || 'wss://wire.rupeezy.in/ws',
+        source: this.vortexWsUrlOverride ? 'redis' : (envWsUrl ? 'env' : 'default'),
+      },
+      appId: {
+        masked: this.maskCred(this.vortexAppIdOverride || envAppId || null),
+        hasValue: !!(this.vortexAppIdOverride || envAppId),
+        source: this.vortexAppIdOverride ? 'redis' : (envAppId ? 'env' : 'none'),
+      },
+      initialized: !!this.http,
+      hasAccessToken: !!this.accessToken,
+    };
+  }
+
+  private maskCred(v: string | null): string | null {
+    if (!v) return null;
+    const s = String(v);
+    if (s.length <= 6) return '****';
+    return `${s.slice(0, 2)}****${s.slice(-4)}`;
   }
 
   private async loadSavedToken(): Promise<void> {

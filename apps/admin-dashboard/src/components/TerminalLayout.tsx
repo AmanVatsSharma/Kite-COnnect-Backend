@@ -4,6 +4,7 @@
  * @description Bloomberg-style shell: ticker, icon rail, status bar, command palette (⌘K).
  * @author BharatERP
  * @created 2026-03-28
+ * @updated 2026-04-14
  */
 
 import { NavLink, Outlet } from 'react-router-dom';
@@ -13,21 +14,21 @@ import { useAuthAlert } from '../hooks/useAuthAlert';
 import type { PollPresetId } from '../lib/poll-presets';
 import { POLL_PRESET_ORDER } from '../lib/poll-presets';
 import { useRefreshInterval } from '../hooks/useRefreshInterval';
+import { useLiveAdminMetrics } from '../hooks/useLiveAdminMetrics';
 import { TickerStrip } from './TickerStrip';
 import { CommandPalette } from './CommandPalette';
 
 const navItems = [
-  { to: '/', label: 'Overview', abbr: 'Ovw' },
-  { to: '/workspace', label: 'Workspace', abbr: 'Wsp' },
-  { to: '/keys', label: 'API keys', abbr: 'Key' },
-  { to: '/provider', label: 'Provider', abbr: 'Prv' },
-  { to: '/ws', label: 'WS admin', abbr: 'WS' },
-  { to: '/abuse', label: 'Abuse', abbr: 'Abu' },
-  { to: '/audit', label: 'Audit', abbr: 'Aud' },
-  { to: '/falcon', label: 'Falcon (Kite)', abbr: 'Fal' },
-  { to: '/auth', label: 'Auth', abbr: 'Ath' },
-  { to: '/console', label: 'Console', abbr: 'Con' },
-  { to: '/settings', label: 'Settings', abbr: 'Set' },
+  { to: '/', label: 'Command', abbr: 'CMD' },
+  { to: '/keys', label: 'API Keys', abbr: 'KEYS' },
+  { to: '/provider', label: 'Provider', abbr: 'PROV' },
+  { to: '/ws', label: 'WS Admin', abbr: 'WS' },
+  { to: '/abuse', label: 'Security', abbr: 'SEC' },
+  { to: '/audit', label: 'Audit', abbr: 'AUD' },
+  { to: '/falcon', label: 'Falcon', abbr: 'FAL' },
+  { to: '/auth', label: 'Auth', abbr: 'AUTH' },
+  { to: '/console', label: 'Console', abbr: 'CON' },
+  { to: '/settings', label: 'Settings', abbr: 'SET' },
 ];
 
 function formatIstTime(d: Date): string {
@@ -43,6 +44,7 @@ function formatIstTime(d: Date): string {
 
 function StatusBar() {
   const { presetId, setPresetId, lastFetchLatencyMs, refetchInterval } = useRefreshInterval();
+  const { token, stream, ws } = useLiveAdminMetrics();
   const [clock, setClock] = useState(() => formatIstTime(new Date()));
 
   useEffect(() => {
@@ -50,16 +52,19 @@ function StatusBar() {
     return () => window.clearInterval(id);
   }, []);
 
-  const tokenHint = getAdminToken() ? 'token set' : 'no token';
+  const tokenHint = getAdminToken() ? 'token ✓' : 'no token';
+  const streamData = stream.data as Record<string, unknown> | undefined;
+  const wsData = ws.data as Record<string, unknown> | undefined;
+  const isStreaming = streamData?.isStreaming === true;
+  const wsConns = typeof wsData?.connections === 'number' ? wsData.connections : null;
+  const providerName = streamData?.providerName ?? streamData?.connectedTo ?? null;
 
   return (
     <footer className="terminal-statusbar">
       <span className="terminal-mono" title="Asia/Kolkata">
         IST {clock}
       </span>
-      <span className="terminal-statusbar__sep" aria-hidden>
-        │
-      </span>
+      <span className="terminal-statusbar__sep" aria-hidden>│</span>
       <label className="terminal-statusbar__poll">
         <span className="muted">Poll</span>
         <select
@@ -74,28 +79,36 @@ function StatusBar() {
           ))}
         </select>
       </label>
-      <span className="terminal-statusbar__sep" aria-hidden>
-        │
-      </span>
-      <span className="muted" title="Last measured client round-trip for a live query">
+      <span className="terminal-statusbar__sep" aria-hidden>│</span>
+      <span className="muted" title="Last measured client round-trip">
         RT {lastFetchLatencyMs != null ? `${lastFetchLatencyMs}ms` : '—'}
       </span>
-      <span className="terminal-statusbar__sep" aria-hidden>
-        │
-      </span>
-      <span className="muted" title="Active refetch interval">
-        {refetchInterval === false ? 'manual refresh' : `${Number(refetchInterval) / 1000}s`}
-      </span>
-      <span className="terminal-statusbar__sep" aria-hidden>
-        │
-      </span>
+      {token && (
+        <>
+          <span className="terminal-statusbar__sep" aria-hidden>│</span>
+          <span className="sb-live-chip">
+            <span className={`dot ${isStreaming ? 'dot--live' : 'dot--off'}`} />
+            {isStreaming
+              ? `LIVE${providerName ? ` · ${String(providerName).toUpperCase()}` : ''}`
+              : 'STREAM OFF'}
+          </span>
+          {wsConns !== null && (
+            <>
+              <span className="terminal-statusbar__sep" aria-hidden>│</span>
+              <span className="sb-live-chip">
+                <span className={`dot ${wsConns > 0 ? 'dot--live' : 'dot--off'}`} />
+                {wsConns} WS
+              </span>
+            </>
+          )}
+        </>
+      )}
+      <span className="terminal-statusbar__sep" aria-hidden>│</span>
       <span className={`terminal-statusbar__token ${getAdminToken() ? 'ok' : 'warn'}`}>{tokenHint}</span>
-      <span className="terminal-statusbar__sep" aria-hidden>
-        │
-      </span>
-      <span className="muted">⌘K palette</span>
+      <span className="terminal-statusbar__sep" aria-hidden>│</span>
+      <span className="muted">⌘K</span>
       <a className="terminal-statusbar__legacy" href={`${import.meta.env.BASE_URL}legacy-dashboard.html`}>
-        Legacy UI
+        Legacy
       </a>
     </footer>
   );
