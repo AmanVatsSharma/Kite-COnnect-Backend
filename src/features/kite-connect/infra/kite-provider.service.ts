@@ -4,7 +4,7 @@
  * @description Kite Connect HTTP + ticker provider implementing MarketDataProvider; ticker wrapped for stream mode parity with Vortex (ohlcv → quote).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-14
+ * @updated 2026-04-14 — added updateApiCredentials/getConfigStatus for runtime credential management
  *
  * Notes:
  * - refreshSession / isClientInitialized support scheduled Falcon instrument sync.
@@ -14,6 +14,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '@infra/redis/redis.service';
+import { AppConfigService } from '@infra/app-config/app-config.service';
 import {
   MarketDataProvider,
   MarketDataExchangeToken,
@@ -48,6 +49,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     private configService: ConfigService,
     private redisService: RedisService,
     private metrics: MetricsService,
+    private appConfig: AppConfigService,
   ) {}
 
   async onModuleInit() {
@@ -56,18 +58,15 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
 
   private static readonly REDIS_API_KEY = 'config:kite:api_key';
   private static readonly REDIS_API_SECRET = 'config:kite:api_secret';
-  private static readonly CONFIG_TTL = 365 * 24 * 3600; // 1 year
 
   async initialize(): Promise<void> {
     try {
-      // Prefer Redis override (set via admin endpoint), then env var
+      // Prefer DB override (set via admin endpoint), then env var
       let apiKey = this.configService.get<string>('KITE_API_KEY');
-      if (this.redisService?.isRedisAvailable?.()) {
-        try {
-          const redisApiKey = await this.redisService.get<string>(KiteProviderService.REDIS_API_KEY);
-          if (redisApiKey) apiKey = redisApiKey;
-        } catch {}
-      }
+      try {
+        const dbApiKey = await this.appConfig.get(KiteProviderService.REDIS_API_KEY);
+        if (dbApiKey) apiKey = dbApiKey;
+      } catch {}
       // Prefer dynamic token from Redis, then env var set by OAuth
       let accessToken = this.configService.get('KITE_ACCESS_TOKEN');
       if (!accessToken && this.redisService?.isRedisAvailable?.()) {
@@ -505,11 +504,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   async updateApiCredentials(apiKey: string, apiSecret?: string): Promise<void> {
     if (!apiKey?.trim()) throw new Error('API key cannot be empty');
     try {
-      if (this.redisService?.isRedisAvailable?.()) {
-        await this.redisService.set(KiteProviderService.REDIS_API_KEY, apiKey.trim(), KiteProviderService.CONFIG_TTL);
-        if (apiSecret?.trim()) {
-          await this.redisService.set(KiteProviderService.REDIS_API_SECRET, apiSecret.trim(), KiteProviderService.CONFIG_TTL);
-        }
+      await this.appConfig.set(KiteProviderService.REDIS_API_KEY, apiKey.trim());
+      if (apiSecret?.trim()) {
+        await this.appConfig.set(KiteProviderService.REDIS_API_SECRET, apiSecret.trim());
       }
       this.currentApiKey = apiKey.trim();
       if (this.currentAccessToken) {
@@ -528,25 +525,23 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
 
   /** Return masked config status for the admin dashboard. */
   async getConfigStatus() {
-    let hasRedisApiKey = false;
-    let hasRedisApiSecret = false;
-    if (this.redisService?.isRedisAvailable?.()) {
-      try {
-        hasRedisApiKey = !!(await this.redisService.get<string>(KiteProviderService.REDIS_API_KEY));
-        hasRedisApiSecret = !!(await this.redisService.get<string>(KiteProviderService.REDIS_API_SECRET));
-      } catch {}
-    }
+    let hasDbApiKey = false;
+    let hasDbApiSecret = false;
+    try {
+      hasDbApiKey = !!(await this.appConfig.get(KiteProviderService.REDIS_API_KEY));
+      hasDbApiSecret = !!(await this.appConfig.get(KiteProviderService.REDIS_API_SECRET));
+    } catch {}
     const envApiKey = this.configService.get<string>('KITE_API_KEY');
     const envApiSecret = this.configService.get<string>('KITE_API_SECRET');
     return {
       apiKey: {
         masked: this.mask(this.currentApiKey),
         hasValue: !!this.currentApiKey,
-        source: hasRedisApiKey ? 'redis' : (envApiKey ? 'env' : 'none'),
+        source: hasDbApiKey ? 'db' : (envApiKey ? 'env' : 'none'),
       },
       apiSecret: {
-        hasValue: hasRedisApiSecret || !!envApiSecret,
-        source: hasRedisApiSecret ? 'redis' : (envApiSecret ? 'env' : 'none'),
+        hasValue: hasDbApiSecret || !!envApiSecret,
+        source: hasDbApiSecret ? 'db' : (envApiSecret ? 'env' : 'none'),
       },
       accessToken: {
         masked: this.mask(this.currentAccessToken),
