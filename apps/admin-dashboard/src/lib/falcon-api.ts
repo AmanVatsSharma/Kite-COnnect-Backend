@@ -18,6 +18,24 @@ import type {
 
 const admin = { admin: true as const };
 
+export interface FalconConfigStatus {
+  apiKey: { masked: string | null; hasValue: boolean; source: 'redis' | 'env' | 'none' };
+  apiSecret: { hasValue: boolean; source: 'redis' | 'env' | 'none' };
+  accessToken: { masked: string | null; hasValue: boolean };
+  initialized: boolean;
+}
+
+export function getFalconConfig() {
+  return apiFetch<FalconConfigStatus>('/api/admin/falcon/config', { ...admin });
+}
+
+export function updateFalconConfig(body: { apiKey: string; apiSecret?: string }) {
+  return apiFetch<{ success: boolean; message: string }>(
+    '/api/admin/falcon/config',
+    { ...admin, method: 'PATCH', body: JSON.stringify(body) },
+  );
+}
+
 export function getFalconProfile() {
   return apiFetch<KiteProfile>('/api/admin/falcon/profile', { ...admin });
 }

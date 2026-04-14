@@ -190,6 +190,28 @@ export function getVortexDebug() {
   return apiFetch<Record<string, unknown>>('/api/admin/debug/vayu', { ...admin });
 }
 
+// ─── Vayu (Vortex) config ─────────────────────────────────────────────────────
+
+export interface VayuConfigStatus {
+  apiKey: { masked: string | null; hasValue: boolean; source: 'db' | 'env' | 'none' };
+  baseUrl: { value: string | null; source: 'db' | 'env' | 'none' };
+  wsUrl: { value: string | null; source: 'db' | 'env' | 'default' };
+  appId: { masked: string | null; hasValue: boolean; source: 'db' | 'env' | 'none' };
+  initialized: boolean;
+  hasAccessToken: boolean;
+}
+
+export function getVayuConfig() {
+  return apiFetch<VayuConfigStatus>('/api/admin/vayu/config', { ...admin });
+}
+
+export function updateVayuConfig(body: { apiKey?: string; baseUrl?: string; wsUrl?: string; appId?: string }) {
+  return apiFetch<{ success: boolean; message: string }>(
+    '/api/admin/vayu/config',
+    { ...admin, method: 'PATCH', body: JSON.stringify(body) },
+  );
+}
+
 export function getAuditConfig() {
   return apiFetch<AuditConfig>('/api/admin/audit/config', { ...admin });
 }

@@ -43,7 +43,7 @@ function formatIstTime(d: Date): string {
 }
 
 function StatusBar() {
-  const { presetId, setPresetId, lastFetchLatencyMs, refetchInterval } = useRefreshInterval();
+  const { presetId, setPresetId, lastFetchLatencyMs } = useRefreshInterval();
   const { token, stream, ws } = useLiveAdminMetrics();
   const [clock, setClock] = useState(() => formatIstTime(new Date()));
 
