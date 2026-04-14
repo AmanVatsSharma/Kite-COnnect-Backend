@@ -37,3 +37,9 @@ Kite credentials: `KITE_API_KEY`, `KITE_ACCESS_TOKEN` or Redis `kite:access_toke
   - `FalconModule`: wired `AdminFalconController`, exported `FalconProviderAdapter`, provided `AdminGuard`.
   - Bug fix: `KiteProviderService.getHistoricalData` and `KiteConnectService.getHistoricalData` were passing args in wrong order (SDK is `(token, interval, from, to, continuous, oi)`).
   - New DTO: `src/features/falcon/interface/dto/falcon-market-data.dto.ts`.
+
+- **2026-04-14** — B2B scalability hardening:
+  - `FalconInstrumentService`: `populateSymbolCache()` writes `falcon:sym2tok:{EXCHANGE}:{SYMBOL}` Redis keys (TTL 86400 s) after every sync; `resolveSymbolsToTokens(symbols, exchange?)` resolves symbol strings to numeric tokens via Redis cache → DB fallback.
+  - `FalconController`: `GET /stock/falcon/instruments/export` streams all matching instruments as NDJSON (chunked transfer, 1000-row pages); `GET /stock/falcon/instruments/resolve` resolves comma-separated trading symbols to tokens.
+  - `AdminFalconController`: `POST /admin/falcon/ticker/restart` and `GET /admin/falcon/ticker/status` (includes subscribedInstruments, upstreamLimit 3000, utilizationPct); `GET /admin/falcon/instruments/export` and `GET /admin/falcon/instruments/resolve` (admin-protected mirrors).
+  - `FalconProviderAdapter`: replaced in-process `lastReqAt` rate limiter with Redis distributed lock (`falcon:rl:http:{key}` via `tryAcquireLock`) — works correctly under multi-instance horizontal scale; fail-open when Redis unavailable.

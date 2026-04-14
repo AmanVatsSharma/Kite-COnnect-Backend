@@ -313,6 +313,13 @@ export class FalconInstrumentService implements OnModuleInit {
         }
       }
 
+      // Populate Redis symbol → token cache for WS resolution
+      try {
+        await this.populateSymbolCache(payloads);
+      } catch (e) {
+        this.logger.warn('[FalconInstrumentService] Symbol cache population failed (non-fatal)', e as Error);
+      }
+
       this.logger.log(
         `[FalconInstrumentService] Sync completed. Synced: ${synced}, Updated: ${updated}`,
       );
@@ -324,6 +331,81 @@ export class FalconInstrumentService implements OnModuleInit {
       );
       return { synced, updated, reconciled };
     }
+  }
+
+  /**
+   * Populate Redis symbol → token cache: falcon:sym2tok:{EXCHANGE}:{SYMBOL} = instrument_token.
+   * TTL: 86400s (refreshed on each sync). Used by resolveSymbolsToTokens for fast WS resolution.
+   */
+  private async populateSymbolCache(instruments: FalconInstrument[]): Promise<void> {
+    if (!instruments.length) return;
+    const CHUNK = 500;
+    let count = 0;
+    for (let i = 0; i < instruments.length; i += CHUNK) {
+      const batch = instruments.slice(i, i + CHUNK);
+      await Promise.all(
+        batch.map((inst) =>
+          Promise.resolve(
+            this.redis.set(
+              `falcon:sym2tok:${inst.exchange.toUpperCase()}:${inst.tradingsymbol.toUpperCase()}`,
+              inst.instrument_token,
+              86400,
+            ),
+          ).catch(() => {}),
+        ),
+      );
+      count += batch.length;
+    }
+    this.logger.log(`[FalconInstrumentService] Symbol cache populated: ${count} entries`);
+  }
+
+  /**
+   * Resolve trading symbols to Kite instrument tokens.
+   * Tries Redis cache first; falls back to DB query.
+   * Returns { symbol: token | null } — null when symbol not found.
+   */
+  async resolveSymbolsToTokens(
+    symbols: string[],
+    exchange?: string,
+  ): Promise<Record<string, number | null>> {
+    const result: Record<string, number | null> = {};
+    if (!symbols.length) return result;
+
+    for (const sym of symbols) {
+      const upperSym = sym.toUpperCase();
+      let token: number | null = null;
+
+      // Try Redis cache first
+      if (exchange) {
+        try {
+          const cached = await this.redis.get<number>(
+            `falcon:sym2tok:${exchange.toUpperCase()}:${upperSym}`,
+          );
+          if (cached != null && Number.isFinite(Number(cached))) {
+            token = Number(cached);
+          }
+        } catch {}
+      }
+
+      // DB fallback
+      if (token == null) {
+        try {
+          const where: FindOptionsWhere<FalconInstrument> = {
+            tradingsymbol: upperSym,
+            is_active: true,
+          };
+          if (exchange) where.exchange = exchange.toUpperCase();
+          const row = await this.falconInstrumentRepo.findOne({
+            where,
+            select: ['instrument_token'],
+          });
+          token = row?.instrument_token ?? null;
+        } catch {}
+      }
+
+      result[sym] = token;
+    }
+    return result;
   }
 
   /**

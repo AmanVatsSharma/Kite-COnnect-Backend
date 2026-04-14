@@ -23,6 +23,8 @@ export type MarketDataExchangeToken = {
 // Implementations must be resilient: never crash the app; always log failures clearly; return
 // empty data or safe no-ops when unconfigured.
 export interface MarketDataProvider {
+  /** Provider identifier used for limit enforcement and metrics. */
+  readonly providerName?: string;
   initialize(): Promise<void>;
   getInstruments(exchange?: string, opts?: any): Promise<any[]>;
   getQuote(tokens: string[]): Promise<Record<string, any>>;

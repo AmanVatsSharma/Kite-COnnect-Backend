@@ -40,4 +40,17 @@ export class MarketDataWsInterestService {
   getInterestCount(instrumentToken: number): number {
     return this.refCount.get(Number(instrumentToken)) || 0;
   }
+
+  /** Top N most-subscribed instruments sorted by subscriber count descending. */
+  getTopInstruments(limit: number): Array<{ token: number; subscribers: number }> {
+    return [...this.refCount.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([token, subscribers]) => ({ token, subscribers }));
+  }
+
+  /** Total number of instruments with at least one subscriber. */
+  getTotalInterested(): number {
+    return this.refCount.size;
+  }
 }

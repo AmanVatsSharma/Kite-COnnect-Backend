@@ -1,10 +1,10 @@
 /**
  * @file metrics.service.ts
  * @module infra/observability
- * @description Prometheus metrics registry and counters/gauges/histograms for HTTP, providers, market stream, Vortex WS.
+ * @description Prometheus metrics registry and counters/gauges/histograms for HTTP, providers, market stream, Vortex WS, Kite ticker.
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-03-24
+ * @updated 2026-04-14
  */
 import { Injectable } from '@nestjs/common';
 import {
@@ -47,6 +47,10 @@ export class MetricsService {
   readonly vortexWsShardsConnected: Gauge;
   /** Emitted last-tick refresh ticks when upstream is quiet (synthetic cadence). */
   readonly marketDataSyntheticTickTotal: Counter;
+  /** Kite ticker reconnect events by reason: reconnecting | auth_error | max_attempts. */
+  readonly kiteTickerReconnectTotal: Counter;
+  /** Current number of instruments subscribed upstream on the Kite WebSocket (max 3000). */
+  readonly kiteTickerSubscribedInstruments: Gauge;
 
   constructor() {
     collectDefaultMetrics({ register });
@@ -194,6 +198,17 @@ export class MetricsService {
     this.marketDataSyntheticTickTotal = new Counter({
       name: 'market_data_synthetic_tick_total',
       help: 'Synthetic last-tick pulses emitted to WS clients when upstream is quiet',
+      registers: [register],
+    });
+    this.kiteTickerReconnectTotal = new Counter({
+      name: 'kite_ticker_reconnect_total',
+      help: 'Kite WebSocket ticker reconnect/disconnect events by reason',
+      labelNames: ['reason'],
+      registers: [register],
+    });
+    this.kiteTickerSubscribedInstruments = new Gauge({
+      name: 'kite_ticker_subscribed_instruments',
+      help: 'Number of instruments currently subscribed on the Kite upstream WebSocket (max 3000)',
       registers: [register],
     });
   }

@@ -43,6 +43,10 @@ export class ApiKey {
   @Column({ type: 'int', nullable: true })
   ws_mode_rps: number | null;
 
+  /** Maximum instruments a single WS connection for this key may subscribe to. null = use global default. */
+  @Column({ type: 'int', nullable: true })
+  ws_max_instruments: number | null;
+
   @Column({ type: 'json', nullable: true })
   metadata: any;
 
