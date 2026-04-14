@@ -4,6 +4,8 @@ Provider-facing **Kite (Falcon)** instrument catalog: `falcon_instruments`, sync
 
 ## Changelog
 
+- **2026-04-14** — Full Vayu-parity: added 14 new endpoints to `FalconController` (`/stock/falcon/*`) and 13 new service methods to `FalconInstrumentService`: `getOptionsChain`, `getUnderlyingFutures`, `autocompleteFno`, `getMcxOptions`, `getPopularInstruments`, `deleteInactiveInstruments`, `deleteByFilter`, `clearFalconCache`, `getCachedStats`, `startSyncAlwaysAsync`; controller adds `GET /options/chain/:symbol`, `GET /underlyings/:symbol/futures`, `GET /underlyings/:symbol/options`, `GET /fno/autocomplete`, `GET /mcx-options`, `GET /instruments/popular`, `GET /instruments/cached-stats`, `POST /instruments/sync/start`, `DELETE /instruments/inactive`, `DELETE /instruments`, `POST /cache/clear`, `GET /validate-instruments/status`, `POST /validate-instruments/stream`, `POST /validate-instruments/export`; injected `RedisService` into `FalconInstrumentService` for async-sync job tracking and stats caching; fixed spec to pass new constructor arg.
+
 - **2026-03-28** — Daily scheduled sync (`SchedulerRegistry` + `cron`), configurable via `FALCON_INSTRUMENTS_*` env vars; `refreshSession` preflight on Kite; batched `upsert` for `falcon_instruments` and `instrument_mappings`; post-sync reconciliation (`is_active=false` for tokens missing from latest dump); `KiteProviderService.refreshSession` / `isClientInitialized` for cron safety; unit tests in `application/falcon-instrument.service.spec.ts`.
 
 ## Environment

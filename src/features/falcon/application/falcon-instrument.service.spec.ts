@@ -53,6 +53,7 @@ describe('FalconInstrumentService', () => {
       addCronJob: jest.fn(),
     } as unknown as SchedulerRegistry;
     const falconAdapter = {} as FalconProviderAdapter;
+    const redisService = { get: jest.fn(), set: jest.fn(), del: jest.fn() } as any;
     service = new FalconInstrumentService(
       falconRepo as unknown as Repository<FalconInstrument>,
       mappingRepo as unknown as Repository<InstrumentMapping>,
@@ -60,6 +61,7 @@ describe('FalconInstrumentService', () => {
       falconAdapter,
       config,
       schedulerRegistry,
+      redisService,
     );
   });
 
