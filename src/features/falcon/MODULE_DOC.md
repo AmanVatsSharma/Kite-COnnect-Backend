@@ -28,6 +28,8 @@ Kite credentials: `KITE_API_KEY`, `KITE_ACCESS_TOKEN` or Redis `kite:access_toke
 
 - [domain/FALCON_INSTRUMENTS.md](./domain/FALCON_INSTRUMENTS.md)
 
+- **2026-04-14** — Runtime credential management: added `GET /api/admin/falcon/config` + `PATCH /api/admin/falcon/config` endpoints to `AdminFalconController`; added `updateApiCredentials(apiKey, apiSecret?)` + `getConfigStatus()` to `KiteProviderService`; `AuthController` (Kite login/callback) now reads API key/secret from `app_configs` DB table before env vars; FalconPage.tsx gains "Falcon API Credentials" section (collapsible) for updating without SSH.
+
 - **2026-04-14** — Enterprise-grade Falcon expansion:
   - `FalconProviderAdapter`: added `getQuote()` (5 s cache), `getOHLC()` (5 s cache), `getHistoricalData()` (1 hr cache, `continuous`+`oi` support), `getProfile()` (5 min cache), `getMargins()` (60 s cache) — all with rate limiting and exponential-backoff retries.
   - `FalconController`: added client-facing `POST /stock/falcon/quote`, `POST /stock/falcon/ohlc`, `GET /stock/falcon/historical/:token`.

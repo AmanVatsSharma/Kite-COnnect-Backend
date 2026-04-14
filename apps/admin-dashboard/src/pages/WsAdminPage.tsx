@@ -216,179 +216,141 @@ export function WsAdminPage() {
         )}
       </div>
 
-      <section className="card">
-        <h2>WS status</h2>
-        <ErrorInline message={status.isError ? (status.error as Error).message : null} />
-        {status.data && (
-          <>
-            {typeof conn === 'number' && (
-              <div className="metric-grid" style={{ marginBottom: 12 }}>
-                <MetricCard label="Connections" value={String(conn)} />
-                {typeof (status.data as Record<string, unknown>).redis_ok === 'boolean' && (
-                  <MetricCard
-                    label="Redis"
-                    value={
-                      (status.data as Record<string, unknown>).redis_ok ? (
-                        <StatusBadge variant="ok">OK</StatusBadge>
-                      ) : (
-                        <StatusBadge variant="bad">Issue</StatusBadge>
-                      )
-                    }
-                  />
-                )}
+      {/* ── Config + Actions grid ─────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {/* WS status + config */}
+        <div className="panel">
+          <div className="panel__head">
+            <span className="panel__title">WS STATUS &amp; CONFIG</span>
+          </div>
+          <div className="panel__body">
+            <ErrorInline message={status.isError ? (status.error as Error).message : null} />
+            {statusExtra.map((r) => (
+              <div key={r.label} className="stat-row">
+                <span className="stat-row__label">{r.label}</span>
+                <span className="stat-row__value">{String(r.value)}</span>
               </div>
+            ))}
+            <ErrorInline message={config.isError ? (config.error as Error).message : null} />
+            {config.data && (
+              <>
+                <div className="panel-section-title" style={{ marginTop: 6 }}>RATE LIMITS (env)</div>
+                {wsConfigToRows(config.data).map((r) => (
+                  <div key={r.label} className="stat-row">
+                    <span className="stat-row__label">{r.label}</span>
+                    <span className="stat-row__value">{String(r.value)}</span>
+                  </div>
+                ))}
+              </>
             )}
-            <KeyValueGrid rows={statusExtra.map((r) => ({ label: r.label, value: r.value }))} />
-            <RawJsonDetails value={status.data} summary="Technical details (raw JSON)" />
-          </>
-        )}
-      </section>
-
-      <section className="card">
-        <h2>WS config</h2>
-        <ErrorInline message={config.isError ? (config.error as Error).message : null} />
-        {config.data && (
-          <>
-            <KeyValueGrid rows={wsConfigToRows(config.data).map((r) => ({ label: r.label, value: r.value }))} />
-            <RawJsonDetails value={config.data} summary="Technical details (raw JSON)" />
-          </>
-        )}
-        <h3 style={{ marginTop: 16 }}>Update process env rate limits</h3>
-        <div className="row">
-          <div>
-            <label>subscribe_rps</label>
-            <input value={subRpsVal} onChange={(e) => setSubRps(e.target.value)} placeholder="10" />
-          </div>
-          <div>
-            <label>unsubscribe_rps</label>
-            <input value={unsubRpsVal} onChange={(e) => setUnsubRps(e.target.value)} />
-          </div>
-          <div>
-            <label>mode_rps</label>
-            <input value={modeRpsVal} onChange={(e) => setModeRps(e.target.value)} />
+            <div className="panel-section-title" style={{ marginTop: 6 }}>UPDATE RATE LIMITS</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 4 }}>
+              {[['Sub RPS', subRpsVal, setSubRps], ['Unsub RPS', unsubRpsVal, setUnsubRps], ['Mode RPS', modeRpsVal, setModeRps]] as const}
+              {([['Sub RPS', subRpsVal, (v: string) => setSubRps(v)], ['Unsub RPS', unsubRpsVal, (v: string) => setUnsubRps(v)], ['Mode RPS', modeRpsVal, (v: string) => setModeRps(v)]] as Array<[string, string, (v: string) => void]>).map(([lbl, val, set]) => (
+                <div key={lbl}>
+                  <label style={{ fontSize: 10, marginBottom: 2 }}>{lbl}</label>
+                  <input value={val} onChange={(e) => set(e.target.value)} style={{ fontSize: 11, padding: '4px 6px' }} />
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="btn-xs"
+              style={{ marginTop: 6 }}
+              disabled={setRps.isPending}
+              onClick={() => setRps.mutate({
+                subscribe_rps: subRpsVal.trim() !== '' ? Number(subRpsVal) : undefined,
+                unsubscribe_rps: unsubRpsVal.trim() !== '' ? Number(unsubRpsVal) : undefined,
+                mode_rps: modeRpsVal.trim() !== '' ? Number(modeRpsVal) : undefined,
+              })}
+            >
+              {setRps.isPending ? 'Saving…' : 'Apply rate limits'}
+            </button>
           </div>
         </div>
-        <button
-          type="button"
-          className="btn"
-          disabled={setRps.isPending}
-          onClick={() =>
-            setRps.mutate({
-              subscribe_rps: subRpsVal.trim() !== '' ? Number(subRpsVal) : undefined,
-              unsubscribe_rps: unsubRpsVal.trim() !== '' ? Number(unsubRpsVal) : undefined,
-              mode_rps: modeRpsVal.trim() !== '' ? Number(modeRpsVal) : undefined,
-            })
-          }
-        >
-          Apply rate limits
-        </button>
-      </section>
 
-      <section className="card">
-        <h2>Entitlements</h2>
-        <div className="row">
-          <div>
-            <label>API key</label>
-            <input value={entKey} onChange={(e) => setEntKey(e.target.value)} />
+        {/* Right column: Entitlements + Blocklist + Flush */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* Entitlements */}
+          <div className="panel">
+            <div className="panel__head"><span className="panel__title">EXCHANGE ENTITLEMENTS</span></div>
+            <div className="panel__body">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+                <div>
+                  <label style={{ fontSize: 10, marginBottom: 2 }}>API Key</label>
+                  <input value={entKey} onChange={(e) => setEntKey(e.target.value)} style={{ fontSize: 11, padding: '4px 6px' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, marginBottom: 2 }}>Exchanges (comma)</label>
+                  <input value={entEx} onChange={(e) => setEntEx(e.target.value)} style={{ fontSize: 11, padding: '4px 6px' }} />
+                </div>
+              </div>
+              <button type="button" className="btn-xs" disabled={ent.isPending || !entKey}
+                onClick={() => ent.mutate({ apiKey: entKey, exchanges: entEx.split(',').map((s) => s.trim()).filter(Boolean) })}>
+                {ent.isPending ? 'Saving…' : 'Save entitlements'}
+              </button>
+            </div>
           </div>
-          <div>
-            <label>Exchanges (comma)</label>
-            <input value={entEx} onChange={(e) => setEntEx(e.target.value)} />
-          </div>
-        </div>
-        <button
-          type="button"
-          className="btn"
-          disabled={ent.isPending || !entKey}
-          onClick={() =>
-            ent.mutate({
-              apiKey: entKey,
-              exchanges: entEx
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-        >
-          Save entitlements
-        </button>
-      </section>
 
-      <section className="card">
-        <h2>Blocklist (JSON body)</h2>
-        <p className="muted">Optional: tokens[], exchanges[], apiKey, tenant_id, reason</p>
-        <textarea value={blJson} onChange={(e) => setBlJson(e.target.value)} />
-        <button
-          type="button"
-          className="btn"
-          disabled={block.isPending}
-          onClick={() => {
-            try {
-              block.mutate(JSON.parse(blJson));
-            } catch {
-              alert('Invalid JSON');
-            }
-          }}
-        >
-          Add blocklist entries
-        </button>
-      </section>
-
-      <section className="card">
-        <h2>Flush caches</h2>
-        <input value={flushCaches} onChange={(e) => setFlushCaches(e.target.value)} />
-        <button
-          type="button"
-          className="btn"
-          style={{ marginLeft: 8 }}
-          disabled={flush.isPending}
-          onClick={() =>
-            flush.mutate(
-              flushCaches
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            )
-          }
-        >
-          Flush
-        </button>
-      </section>
-
-      <section className="card">
-        <h2>Namespace broadcast</h2>
-        <div className="row">
-          <div>
-            <label>event</label>
-            <input value={bcEvent} onChange={(e) => setBcEvent(e.target.value)} />
-          </div>
-          <div>
-            <label>room (optional)</label>
-            <input value={bcRoom} onChange={(e) => setBcRoom(e.target.value)} />
+          {/* Blocklist + Flush side-by-side */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="panel">
+              <div className="panel__head"><span className="panel__title">BLOCKLIST (JSON)</span></div>
+              <div className="panel__body">
+                <p style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4 }}>tokens[], exchanges[], apiKey, tenant_id, reason</p>
+                <textarea value={blJson} onChange={(e) => setBlJson(e.target.value)} style={{ minHeight: 60, fontSize: 10, padding: '4px 6px', width: '100%' }} />
+                <button type="button" className="btn-xs" style={{ marginTop: 4 }} disabled={block.isPending}
+                  onClick={() => { try { block.mutate(JSON.parse(blJson)); } catch { alert('Invalid JSON'); } }}>
+                  {block.isPending ? '…' : 'Add entries'}
+                </button>
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel__head"><span className="panel__title">FLUSH CACHES</span></div>
+              <div className="panel__body">
+                <p style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4 }}>Comma: last_tick, exchange_map, ws_counters</p>
+                <input value={flushCaches} onChange={(e) => setFlushCaches(e.target.value)} style={{ fontSize: 11, padding: '4px 6px', marginBottom: 6, width: '100%' }} />
+                <button type="button" className="btn-xs btn-xs--danger" disabled={flush.isPending}
+                  onClick={() => flush.mutate(flushCaches.split(',').map((s) => s.trim()).filter(Boolean))}>
+                  {flush.isPending ? 'Flushing…' : '⚡ Flush'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-        <label>payload (JSON)</label>
-        <textarea value={bcPayload} onChange={(e) => setBcPayload(e.target.value)} />
-        <button
-          type="button"
-          className="btn"
-          disabled={broadcast.isPending}
-          onClick={() => {
-            try {
-              broadcast.mutate({
-                event: bcEvent,
-                room: bcRoom || undefined,
-                payload: JSON.parse(bcPayload) as object,
-              });
-            } catch {
-              alert('Invalid payload JSON');
-            }
-          }}
-        >
-          Broadcast
-        </button>
-        {broadcast.data && <RawJsonDetails value={broadcast.data} summary="Broadcast response (raw JSON)" />}
-      </section>
+      </div>
+
+      {/* ── Namespace broadcast ───────────────────────────── */}
+      <div className="panel" style={{ flexShrink: 0 }}>
+        <div className="panel__head"><span className="panel__title">NAMESPACE BROADCAST</span></div>
+        <div className="panel__body">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 8, marginBottom: 6 }}>
+            <div>
+              <label style={{ fontSize: 10, marginBottom: 2 }}>Event</label>
+              <input value={bcEvent} onChange={(e) => setBcEvent(e.target.value)} style={{ fontSize: 11, padding: '4px 6px' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, marginBottom: 2 }}>Room (optional)</label>
+              <input value={bcRoom} onChange={(e) => setBcRoom(e.target.value)} style={{ fontSize: 11, padding: '4px 6px' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, marginBottom: 2 }}>Payload (JSON)</label>
+              <input value={bcPayload} onChange={(e) => setBcPayload(e.target.value)} style={{ fontSize: 11, padding: '4px 6px', fontFamily: 'monospace' }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button type="button" className="btn-xs" disabled={broadcast.isPending}
+              onClick={() => { try { broadcast.mutate({ event: bcEvent, room: bcRoom || undefined, payload: JSON.parse(bcPayload) as object }); } catch { alert('Invalid JSON'); } }}>
+              {broadcast.isPending ? 'Sending…' : '📡 Broadcast'}
+            </button>
+            {broadcast.data && (
+              <span style={{ fontSize: 10, color: 'var(--ok)' }}>
+                {(broadcast.data as Record<string, unknown>).success ? 'Sent ✓' : JSON.stringify(broadcast.data)}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
     </>
   );
 }

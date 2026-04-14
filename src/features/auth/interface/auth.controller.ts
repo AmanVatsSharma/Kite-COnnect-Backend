@@ -22,6 +22,7 @@ import {
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
+import { AppConfigService } from '@infra/app-config/app-config.service';
 import axios from 'axios';
 import { VortexProviderService } from '@features/stock/infra/vortex-provider.service';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
@@ -40,6 +41,7 @@ export class AuthController {
     private kiteProvider: KiteProviderService,
     private streamService: MarketDataStreamService,
     private resolver: MarketDataProviderResolverService,
+    private appConfig: AppConfigService,
     @InjectRepository(KiteSession)
     private kiteSessionRepo: Repository<KiteSession>,
   ) {}
@@ -60,14 +62,10 @@ export class AuthController {
     },
   })
   async login(@Res() res: Response) {
-    const redisApiKey = this.redisService.isRedisAvailable()
-      ? await this.redisService.get<string>('config:kite:api_key').catch(() => null)
-      : null;
-    const redisApiSecret = this.redisService.isRedisAvailable()
-      ? await this.redisService.get<string>('config:kite:api_secret').catch(() => null)
-      : null;
-    const apiKey = redisApiKey || this.configService.get<string>('KITE_API_KEY');
-    const apiSecret = redisApiSecret || this.configService.get<string>('KITE_API_SECRET');
+    const dbApiKey = await this.appConfig.get('config:kite:api_key').catch(() => null);
+    const dbApiSecret = await this.appConfig.get('config:kite:api_secret').catch(() => null);
+    const apiKey = dbApiKey || this.configService.get<string>('KITE_API_KEY');
+    const apiSecret = dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
     if (!apiKey || !apiSecret)
       throw new BadRequestException('Falcon API creds not configured');
 
@@ -104,14 +102,10 @@ export class AuthController {
     @Query('request_token') requestToken: string,
     @Query('state') state: string,
   ) {
-    const redisApiKey = this.redisService.isRedisAvailable()
-      ? await this.redisService.get<string>('config:kite:api_key').catch(() => null)
-      : null;
-    const redisApiSecret = this.redisService.isRedisAvailable()
-      ? await this.redisService.get<string>('config:kite:api_secret').catch(() => null)
-      : null;
-    const apiKey = redisApiKey || this.configService.get<string>('KITE_API_KEY');
-    const apiSecret = redisApiSecret || this.configService.get<string>('KITE_API_SECRET');
+    const dbApiKey = await this.appConfig.get('config:kite:api_key').catch(() => null);
+    const dbApiSecret = await this.appConfig.get('config:kite:api_secret').catch(() => null);
+    const apiKey = dbApiKey || this.configService.get<string>('KITE_API_KEY');
+    const apiSecret = dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
     if (!apiKey || !apiSecret)
       throw new BadRequestException('Falcon API creds not configured');
 
@@ -196,6 +190,7 @@ export class VortexAuthController {
     private vortexProvider: VortexProviderService,
     private streamService: MarketDataStreamService,
     private resolver: MarketDataProviderResolverService,
+    private appConfig: AppConfigService,
     @InjectRepository(VortexSession)
     private vortexSessionRepo: Repository<VortexSession>,
   ) {}
@@ -233,10 +228,8 @@ export class VortexAuthController {
     },
   })
   async login(@Res() res: Response) {
-    const redisAppId = this.redisService.isRedisAvailable()
-      ? await this.redisService.get<string>('config:vortex:app_id').catch(() => null)
-      : null;
-    const appId = redisAppId || this.configService.get<string>('VORTEX_APP_ID');
+    const dbAppId = await this.appConfig.get('config:vortex:app_id').catch(() => null);
+    const appId = dbAppId || this.configService.get<string>('VORTEX_APP_ID');
     if (!appId)
       throw new BadRequestException(
         'Vayu applicationId (VORTEX_APP_ID) not configured',
@@ -280,19 +273,15 @@ export class VortexAuthController {
         `[Vayu] Callback received with auth parameter: ${auth ? 'present' : 'missing'}`,
       );
 
-      const redisAppId = this.redisService.isRedisAvailable()
-        ? await this.redisService.get<string>('config:vortex:app_id').catch(() => null)
-        : null;
-      const redisApiKey = this.redisService.isRedisAvailable()
-        ? await this.redisService.get<string>('config:vortex:api_key').catch(() => null)
-        : null;
-      const redisBaseUrl = this.redisService.isRedisAvailable()
-        ? await this.redisService.get<string>('config:vortex:base_url').catch(() => null)
-        : null;
-      const appId = redisAppId || this.configService.get<string>('VORTEX_APP_ID');
-      const apiKey = redisApiKey || this.configService.get<string>('VORTEX_API_KEY');
+      const [dbAppId, dbApiKey, dbBaseUrl] = await Promise.all([
+        this.appConfig.get('config:vortex:app_id').catch(() => null),
+        this.appConfig.get('config:vortex:api_key').catch(() => null),
+        this.appConfig.get('config:vortex:base_url').catch(() => null),
+      ]);
+      const appId = dbAppId || this.configService.get<string>('VORTEX_APP_ID');
+      const apiKey = dbApiKey || this.configService.get<string>('VORTEX_API_KEY');
       const baseUrl = (
-        redisBaseUrl || this.configService.get<string>('VORTEX_BASE_URL') ||
+        dbBaseUrl || this.configService.get<string>('VORTEX_BASE_URL') ||
         'https://vortex-api.rupeezy.in/v2'
       ).replace(/\/$/, '');
       const createSessionUrl = `${baseUrl}/user/session`;
