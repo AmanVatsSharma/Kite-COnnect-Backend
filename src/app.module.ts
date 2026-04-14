@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { getDatabaseConfig } from './config/database.config';
 
 import { RedisModule } from '@infra/redis/redis.module';
+import { AppConfigModule } from '@infra/app-config/app-config.module';
 import { AuthModule } from './features/auth/auth.module';
 import { AdminModule } from './features/admin/admin.module';
 import { MarketDataModule } from './features/market-data/market-data.module';
@@ -29,6 +30,7 @@ import { ObservabilityModule } from './infra/observability/observability.module'
     }),
     ObservabilityModule,
     RedisModule,
+    AppConfigModule,
     AuthModule,
     AdminModule,
     MarketDataModule,

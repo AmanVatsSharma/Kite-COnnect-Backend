@@ -11,6 +11,7 @@ import { VortexInstrument } from '@features/stock/domain/vortex-instrument.entit
 import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.entity';
 import { RequestAuditLog } from '@features/admin/domain/request-audit-log.entity';
 import { ApiKeyAbuseFlag } from '@features/auth/domain/api-key-abuse-flag.entity';
+import { AppConfig } from '@infra/app-config/app-config.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -33,6 +34,7 @@ export const getDatabaseConfig = (
     FalconInstrument,
     RequestAuditLog,
     ApiKeyAbuseFlag,
+    AppConfig,
   ],
   // In production, prefer running migrations over synchronize
   // Override with DB_SYNCHRONIZE=true only for development
