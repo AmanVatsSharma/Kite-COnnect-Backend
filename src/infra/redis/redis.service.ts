@@ -763,4 +763,37 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     const key = `quotes:${tokens.join(',')}`;
     return await this.get(key);
   }
+
+  /**
+   * Scan-and-delete all keys matching a glob pattern.
+   * Uses SCAN to avoid blocking; safe on large keyspaces.
+   * Returns the number of deleted keys (0 if Redis unavailable).
+   */
+  async scanDelete(pattern: string): Promise<number> {
+    if (!this.isConnected || !this.client) {
+      this.logger.warn(`[RedisService] scanDelete() called but Redis not available - pattern: ${pattern}`);
+      return 0;
+    }
+    try {
+      let cursor = 0;
+      let deleted = 0;
+      do {
+        const reply: any = await (this.client as any).scan(cursor, {
+          MATCH: pattern,
+          COUNT: 100,
+        });
+        cursor = reply.cursor ?? reply[0] ?? 0;
+        const keys: string[] = reply.keys ?? reply[1] ?? [];
+        if (keys.length) {
+          await (this.client as any).del(keys);
+          deleted += keys.length;
+        }
+      } while (cursor !== 0);
+      this.logger.log(`[RedisService] scanDelete(${pattern}): deleted ${deleted} keys`);
+      return deleted;
+    } catch (error) {
+      this.logger.error(`[RedisService] scanDelete(${pattern}) failed`, error);
+      return 0;
+    }
+  }
 }

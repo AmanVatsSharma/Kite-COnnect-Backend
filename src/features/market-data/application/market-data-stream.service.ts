@@ -481,12 +481,13 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       if (this.subscriptionQueue.size > 0) {
         let subscriptions = Array.from(this.subscriptionQueue.entries());
 
-        // Enforce Kite upstream 3000-instrument limit
+        // Enforce Kite upstream instrument limit (dynamic: 3000 × numShards via provider.getSubscriptionLimit())
         if (provider.providerName === 'kite') {
-          const capacity = this.KITE_UPSTREAM_INSTRUMENT_LIMIT - this.subscribedInstruments.size;
+          const limit = provider.getSubscriptionLimit?.() ?? this.KITE_UPSTREAM_INSTRUMENT_LIMIT;
+          const capacity = limit - this.subscribedInstruments.size;
           if (capacity <= 0) {
             this.logger.warn(
-              `[StreamBatching] Kite upstream limit (${this.KITE_UPSTREAM_INSTRUMENT_LIMIT}) reached; dropping ${subscriptions.length} queued tokens`,
+              `[StreamBatching] Kite upstream limit (${limit}) reached; dropping ${subscriptions.length} queued tokens`,
             );
             this.metrics.marketDataStreamQueueDroppedTotal
               .labels('kite_upstream_limit')
@@ -496,7 +497,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           } else if (subscriptions.length > capacity) {
             const dropped = subscriptions.length - capacity;
             this.logger.warn(
-              `[StreamBatching] Kite upstream limit: capping ${subscriptions.length} to ${capacity} (dropping ${dropped})`,
+              `[StreamBatching] Kite upstream limit: capping ${subscriptions.length} to ${capacity} (dropping ${dropped}, limit=${limit})`,
             );
             this.metrics.marketDataStreamQueueDroppedTotal
               .labels('kite_upstream_limit')

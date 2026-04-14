@@ -15,6 +15,13 @@ Kite Connect HTTP client + WebSocket ticker provider. Implements the `MarketData
   - `providerName = 'kite'` added to `MarketDataProvider` interface implementation.
   - `FalconInstrument` repository injected via `TypeOrmModule.forFeature([FalconInstrument])` in `kite-connect.module.ts`.
 
+- **2026-04-14** — Multi-shard Kite WebSocket (Phase 2):
+  - New `KiteShardedTicker` (`infra/kite-sharded-ticker.ts`): manages N independent `KiteTicker` instances sharing one access token; per-shard exponential-backoff reconnect; aggregated event emitter; `subscribe/unsubscribe/setMode` route tokens to correct shard via `tokenToShard` Map; `getShardStatus()` and `getSubscriptionLimit()` (maxShards × 3000).
+  - `KiteProviderService` now always uses `KiteShardedTicker`; `KITE_WS_MAX_SHARDS` env var (default 1) controls shard count.
+  - `getSubscriptionLimit(): number` and `getShardStatus(): KiteShardStatus[]` added to `KiteProviderService`.
+  - `getDebugStatus()` now includes `shardCount`, `subscriptionLimit`, `shards` array.
+  - `MarketDataProvider` interface extended with optional `getSubscriptionLimit?()` and `getShardStatus?()`.
+
 ## Key files
 
 - `application/kite-connect.service.ts` — Legacy REST wrapper (maintained for backward compatibility)
@@ -27,3 +34,4 @@ Kite Connect HTTP client + WebSocket ticker provider. Implements the `MarketData
 |----------|-------------|
 | `KITE_API_KEY` | Kite Connect API key (required) |
 | `KITE_ACCESS_TOKEN` | OAuth access token; falls back to Redis `kite:access_token` |
+| `KITE_WS_MAX_SHARDS` | Max concurrent Kite WebSocket connections (default `1`; each shard holds up to 3000 instruments) |

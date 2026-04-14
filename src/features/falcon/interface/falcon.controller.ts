@@ -26,7 +26,7 @@ import { RedisService } from '@infra/redis/redis.service';
 import { randomUUID } from 'crypto';
 import { ApiBadRequestResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from '@shared/guards/api-key.guard';
-import { FalconTokensDto, FalconHistoricalQueryDto } from './dto/falcon-market-data.dto';
+import { FalconTokensDto, FalconHistoricalQueryDto, FalconBatchHistoricalDto } from './dto/falcon-market-data.dto';
 
 @ApiTags('falcon')
 @UseGuards(ApiKeyGuard)
@@ -650,6 +650,26 @@ export class FalconController {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
         { success: false, message: 'Falcon OHLC failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('historical/batch')
+  @ApiOperation({ summary: 'Batch historical candles for up to 10 tokens in a single call' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async historicalBatch(@Body() body: FalconBatchHistoricalDto) {
+    try {
+      const requests = (body?.requests || []).slice(0, 10);
+      if (!requests.length) {
+        throw new HttpException({ success: false, message: 'requests array is required (max 10)' }, HttpStatus.BAD_REQUEST);
+      }
+      const data = await this.falconAdapter.getBatchHistoricalData(requests);
+      return { success: true, data, count: Object.keys(data).length, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Batch historical failed', error: (error as any)?.message || 'unknown' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

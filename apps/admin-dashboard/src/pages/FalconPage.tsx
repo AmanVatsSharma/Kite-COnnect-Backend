@@ -2,9 +2,9 @@
  * @file FalconPage.tsx
  * @module admin-dashboard
  * @description Falcon (Kite) operator page — dense terminal layout: account status, stream control,
- *   instrument browser, market data explorer, historical candlestick charts.
+ *   instrument browser, market data explorer, historical candlestick charts, shard status, options chain.
  * @author BharatERP
- * @updated 2026-04-14
+ * @updated 2026-04-14 — added multi-shard status panel and options chain explorer
  */
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -94,6 +94,7 @@ export function FalconPage() {
   const streamStatus = useQuery({ queryKey: ['admin-stream-status'], queryFn: admin.getStreamStatus, enabled: !!token, refetchInterval });
   const stats = useQuery({ queryKey: ['falcon-stats'], queryFn: falcon.getFalconStats, enabled: !!token });
   const falconConfig = useQuery({ queryKey: ['falcon-config'], queryFn: falcon.getFalconConfig, enabled: !!token });
+  const shardStatus = useQuery({ queryKey: ['falcon-shard-status'], queryFn: falcon.getFalconShardStatus, enabled: !!token, refetchInterval });
 
   const setProvMut = useMutation({
     mutationFn: () => admin.setGlobalProvider('kite'),
@@ -212,6 +213,36 @@ export function FalconPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => { setCfgErr(e?.message || 'Update failed'); setCfgMsg(null); },
   });
+
+  // Options chain explorer
+  const [optSymbol, setOptSymbol] = useState('');
+  const [optLtpOnly, setOptLtpOnly] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [optData, setOptData] = useState<any>(null);
+  const [optError, setOptError] = useState<string | null>(null);
+  const [optLoading, setOptLoading] = useState(false);
+  const [optExpiry, setOptExpiry] = useState('');
+  const [flushMsg, setFlushMsg] = useState<string | null>(null);
+
+  const fetchOptionsChain = async () => {
+    if (!optSymbol.trim()) return;
+    setOptError(null); setOptLoading(true); setOptData(null); setOptExpiry('');
+    try {
+      const result = await falcon.getFalconOptionsChainAdmin(optSymbol.trim().toUpperCase(), optLtpOnly);
+      setOptData(result);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) { setOptError(e?.message || 'Request failed'); }
+    finally { setOptLoading(false); }
+  };
+
+  const handleFlushOptions = async () => {
+    setFlushMsg(null);
+    try {
+      await falcon.flushFalconCache({ type: 'options', symbol: optSymbol.trim().toUpperCase() || undefined });
+      setFlushMsg('Options cache flushed');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) { setFlushMsg(`Flush failed: ${e?.message ?? ''}`); }
+  };
 
   if (!token) {
     return <section className="card"><p className="err">Add an admin token in Settings.</p></section>;
@@ -388,6 +419,59 @@ export function FalconPage() {
             </div>
           </div>
         </div>
+
+        {/* ── Shard Status + Capacity ─────────────────────────── */}
+        {(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const sd = shardStatus.data as any;
+          if (!sd) return null;
+          const { shards = [], totalCapacity = 3000, used = 0, remaining = 0, utilizationPct = 0 } = sd;
+          const barColor = utilizationPct >= 90 ? 'var(--bad)' : utilizationPct >= 70 ? 'var(--warn)' : 'var(--ok)';
+          return (
+            <div className="panel" style={{ flexShrink: 0 }}>
+              <div className="panel__head">
+                <span className="panel__title">WS SHARD STATUS</span>
+                <span className="panel__title-val">{shards.length} shard{shards.length !== 1 ? 's' : ''} · {used.toLocaleString()}/{totalCapacity.toLocaleString()} tokens</span>
+              </div>
+              <div className="panel__body">
+                {/* Capacity bar */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+                    <span style={{ color: 'var(--muted)' }}>CAPACITY UTILIZATION</span>
+                    <span style={{ color: barColor, fontWeight: 600 }}>{utilizationPct.toFixed(1)}% · {remaining.toLocaleString()} remaining</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: barColor, transition: 'width 0.4s ease', borderRadius: 3 }} />
+                  </div>
+                </div>
+                {/* Per-shard cards */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {shards.map((shard: any) => (
+                    <div key={shard.index} style={{ flex: '1 1 160px', minWidth: 140, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '6px 10px', background: 'rgba(0,0,0,0.18)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>SHARD {shard.index}</span>
+                        <span className={`cc-chip ${shard.isConnected ? 'cc-chip--ok' : 'cc-chip--bad'}`} style={{ fontSize: 8, padding: '1px 6px' }}>
+                          {shard.isConnected ? 'LIVE' : shard.disableReconnect ? 'HALTED' : 'DOWN'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>
+                        <span style={{ color: 'var(--text)' }}>{(shard.subscribedCount ?? 0).toLocaleString()}</span> / 3,000 tokens
+                      </div>
+                      {/* mini bar */}
+                      <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.06)', overflow: 'hidden', marginBottom: 4 }}>
+                        <div style={{ height: '100%', width: `${Math.min(((shard.subscribedCount ?? 0) / 3000) * 100, 100)}%`, background: shard.isConnected ? 'var(--ok)' : 'var(--bad)', borderRadius: 2 }} />
+                      </div>
+                      <div style={{ fontSize: 9, color: 'var(--muted)' }}>reconnects: {shard.reconnectCount ?? 0} · attempts: {shard.reconnectAttempts ?? 0}</div>
+                    </div>
+                  ))}
+                  {shards.length === 0 && (
+                    <div style={{ fontSize: 10, color: 'var(--muted)', padding: '4px 0' }}>No shard data — Kite ticker not initialized.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── Credentials panel ──────────────────────────────── */}
         <div className="panel" style={{ flexShrink: 0 }}>
@@ -666,6 +750,92 @@ export function FalconPage() {
             )}
             {histCandles && histCandles.length === 0 && (
               <p style={{ fontSize: 10, color: 'var(--muted)' }}>No candle data returned.</p>
+            )}
+          </div>
+        </div>
+
+        {/* ── Options Chain Explorer ───────────────────────────── */}
+        <div className="panel" style={{ flexShrink: 0 }}>
+          <div className="panel__head">
+            <span className="panel__title">OPTIONS CHAIN EXPLORER</span>
+            {optData && (
+              <span className="panel__title-val">
+                {optData.symbol} · {(optData.strikes ?? []).length} strikes
+                {optData.fromCache ? ' · CACHED' : ' · FRESH'}
+              </span>
+            )}
+          </div>
+          <div className="panel__body">
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+              <input
+                placeholder="Symbol (e.g. NIFTY)"
+                value={optSymbol}
+                onChange={(e) => setOptSymbol(e.target.value.toUpperCase())}
+                onKeyDown={(e) => { if (e.key === 'Enter') void fetchOptionsChain(); }}
+                style={{ fontSize: 11, padding: '3px 7px', width: 130, fontFamily: 'ui-monospace,monospace' }}
+              />
+              <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 10, cursor: 'pointer' }}>
+                <input type="checkbox" checked={optLtpOnly} onChange={(e) => setOptLtpOnly(e.target.checked)} />
+                LTP only
+              </label>
+              <button type="button" className="btn-xs btn-xs--ok" onClick={() => void fetchOptionsChain()} disabled={optLoading || !optSymbol.trim()}>
+                {optLoading ? 'Loading…' : '▶ Load Chain'}
+              </button>
+              {optData && (
+                <button type="button" className="btn-xs btn-xs--bad" onClick={() => void handleFlushOptions()} title="Flush Redis cache for this symbol">
+                  ✕ Flush Cache
+                </button>
+              )}
+              {optData?.expiries?.length > 0 && (
+                <select
+                  value={optExpiry}
+                  onChange={(e) => setOptExpiry(e.target.value)}
+                  style={{ fontSize: 11, padding: '3px 6px', marginLeft: 'auto' }}
+                >
+                  <option value="">All expiries</option>
+                  {(optData.expiries as string[]).map((exp: string) => (
+                    <option key={exp} value={exp}>{exp}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {flushMsg && (
+              <p style={{ fontSize: 10, color: flushMsg.startsWith('Flush failed') ? 'var(--bad)' : 'var(--ok)', marginBottom: 6 }}>{flushMsg}</p>
+            )}
+            <ErrorInline message={optError} />
+            {optData && (
+              <div style={{ overflowX: 'auto', maxHeight: 400, overflowY: 'auto' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th className="cell-num">STRIKE</th>
+                      <th>CE TOKEN</th>
+                      <th className="cell-num">CE LTP</th>
+                      <th>PE TOKEN</th>
+                      <th className="cell-num">PE LTP</th>
+                      {!optLtpOnly && <th>EXPIRY</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(optData.strikes ?? [])
+                      .filter((s: any) => !optExpiry || s.expiry === optExpiry)
+                      .slice(0, 200)
+                      .map((s: any, idx: number) => (
+                        <tr key={idx}>
+                          <td className="cell-num" style={{ fontWeight: 600 }}>{fmt(s.strike)}</td>
+                          <td><span className="cell-key" style={{ maxWidth: 90 }}>{s.ceToken ?? '—'}</span></td>
+                          <td className="cell-num" style={{ color: 'var(--price-up)' }}>{s.ceLtp != null ? fmtRs(s.ceLtp) : '—'}</td>
+                          <td><span className="cell-key" style={{ maxWidth: 90 }}>{s.peToken ?? '—'}</span></td>
+                          <td className="cell-num" style={{ color: 'var(--price-down)' }}>{s.peLtp != null ? fmtRs(s.peLtp) : '—'}</td>
+                          {!optLtpOnly && <td className="cell-muted">{s.expiry ?? '—'}</td>}
+                        </tr>
+                      ))}
+                    {(optData.strikes ?? []).length === 0 && (
+                      <tr><td colSpan={5} className="cell-muted" style={{ textAlign: 'center', padding: '12px 8px' }}>No strikes found</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>

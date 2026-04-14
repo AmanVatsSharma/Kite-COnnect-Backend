@@ -2,13 +2,14 @@
  * @file WsAdminPage.tsx
  * @module admin-dashboard
  * @description WebSocket admin: live connections monitor, status/config, forms.
- * @updated 2026-04-14
+ * @updated 2026-04-14 — added Kite shard capacity display
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
+import * as falcon from '../lib/falcon-api';
 import { ErrorInline } from '../components/ErrorInline';
 import { wsStatusSummaryRows } from '../lib/views/overview-views';
 import { wsConfigToRows } from '../lib/views/ws-config-views';
@@ -33,12 +34,20 @@ export function WsAdminPage() {
     queryKey: ['admin-ws-status'],
     queryFn: admin.getWsStatus,
     enabled: !!token,
+    refetchInterval: 5000,
   });
 
   const config = useQuery({
     queryKey: ['admin-ws-config'],
     queryFn: admin.getWsConfig,
     enabled: !!token,
+  });
+
+  const kiteShards = useQuery({
+    queryKey: ['admin-kite-shard-capacity'],
+    queryFn: falcon.getFalconShardStatus,
+    enabled: !!token,
+    refetchInterval: 5000,
   });
 
   const rateBaseline = useMemo(() => {
@@ -239,6 +248,38 @@ export function WsAdminPage() {
                 ))}
               </>
             )}
+            {/* Kite WS Capacity (from shard status) */}
+            {kiteShards.data && (() => {
+              const sd = kiteShards.data as falcon.FalconShardStatusResponse;
+              const pct = sd.utilizationPct ?? 0;
+              const barColor = pct >= 90 ? 'var(--bad)' : pct >= 70 ? 'var(--warn)' : 'var(--ok)';
+              return (
+                <>
+                  <div className="panel-section-title" style={{ marginTop: 6 }}>KITE WS CAPACITY</div>
+                  <div style={{ marginTop: 4, marginBottom: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+                      <span style={{ color: 'var(--muted)' }}>{sd.shards.length} shard{sd.shards.length !== 1 ? 's' : ''} · {(sd.used ?? 0).toLocaleString()} / {(sd.totalCapacity ?? 3000).toLocaleString()}</span>
+                      <span style={{ color: barColor, fontWeight: 600 }}>{pct.toFixed(1)}%</span>
+                    </div>
+                    <div style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: barColor, transition: 'width 0.4s', borderRadius: 3 }} />
+                    </div>
+                    {sd.shards.length > 1 && (
+                      <details style={{ marginTop: 4 }}>
+                        <summary style={{ fontSize: 9, color: 'var(--muted)', cursor: 'pointer' }}>Shard breakdown</summary>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                          {sd.shards.map((s) => (
+                            <div key={s.index} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, border: '1px solid rgba(255,255,255,0.08)', color: s.isConnected ? 'var(--ok)' : 'var(--bad)' }}>
+                              S{s.index}: {(s.subscribedCount ?? 0).toLocaleString()}/3000 {s.isConnected ? '●' : '○'}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
             <div className="panel-section-title" style={{ marginTop: 6 }}>UPDATE RATE LIMITS</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 4 }}>
               {[['Sub RPS', subRpsVal, setSubRps], ['Unsub RPS', unsubRpsVal, setUnsubRps], ['Mode RPS', modeRpsVal, setModeRps]] as const}

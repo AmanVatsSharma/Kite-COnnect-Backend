@@ -45,6 +45,17 @@ export interface MarketDataProvider {
   // Streaming
   initializeTicker(): any;
   getTicker(): any;
+  /** Total upstream instrument capacity (e.g. 3000 × shards for Kite, 1000 × shards for Vortex). */
+  getSubscriptionLimit?(): number;
+  /** Per-shard health status for multi-shard providers. Returns empty array for single-shard. */
+  getShardStatus?(): Array<{
+    index: number;
+    isConnected: boolean;
+    subscribedCount: number;
+    reconnectAttempts: number;
+    reconnectCount: number;
+    disableReconnect: boolean;
+  }>;
 }
 
 // A minimal ticker-like interface (duck-typed) used by the streaming layer. Providers should

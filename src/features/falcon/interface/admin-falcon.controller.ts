@@ -6,12 +6,13 @@
  *   secured by x-admin-token so the admin dashboard can call it directly.
  * @author BharatERP
  * @created 2026-04-14
- * @updated 2026-04-14 — added ticker restart/status, instruments export/resolve endpoints
+ * @updated 2026-04-14 — added ticker restart/status/shards, instruments export/resolve, batch historical, options chain, cache flush
  */
 import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
   Query,
   Param,
@@ -22,14 +23,14 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiOperation, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '@features/admin/guards/admin.guard';
 import { FalconInstrumentService } from '@features/falcon/application/falcon-instrument.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
 import { RedisService } from '@infra/redis/redis.service';
-import { FalconTokensDto, FalconHistoricalQueryDto } from './dto/falcon-market-data.dto';
+import { FalconTokensDto, FalconHistoricalQueryDto, FalconBatchHistoricalDto } from './dto/falcon-market-data.dto';
 
 @ApiTags('admin-falcon')
 @ApiSecurity('admin')
@@ -385,6 +386,25 @@ export class AdminFalconController {
     }
   }
 
+  @Post('historical/batch')
+  @ApiOperation({ summary: 'Batch historical candles for up to 10 tokens in a single call' })
+  async adminHistoricalBatch(@Body() body: FalconBatchHistoricalDto) {
+    try {
+      const requests = (body?.requests || []).slice(0, 10);
+      if (!requests.length) {
+        throw new HttpException({ success: false, message: 'requests array is required (max 10)' }, HttpStatus.BAD_REQUEST);
+      }
+      const data = await this.adapter.getBatchHistoricalData(requests);
+      return { success: true, data, count: Object.keys(data).length, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Batch historical failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Get('historical/:token')
   @ApiOperation({ summary: 'Historical candles for a single instrument token' })
   @ApiQuery({ name: 'from', required: true, example: '2026-04-01' })
@@ -409,6 +429,93 @@ export class AdminFalconController {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
         { success: false, message: 'Historical data failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // ─── Multi-Shard Status ───────────────────────────────────────────────────
+
+  @Get('ticker/shards')
+  @ApiOperation({ summary: 'Per-shard Kite WebSocket status and total capacity' })
+  async shardStatus() {
+    try {
+      const shards = this.kiteProvider.getShardStatus();
+      const limit = this.kiteProvider.getSubscriptionLimit();
+      const used = this.streamService.getSubscribedInstrumentCount();
+      return {
+        success: true,
+        data: {
+          shards,
+          totalCapacity: limit,
+          used,
+          remaining: Math.max(0, limit - used),
+          utilizationPct: limit > 0 ? Math.round((used / limit) * 100) : 0,
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Failed to fetch shard status', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // ─── Options Chain Admin ──────────────────────────────────────────────────
+
+  @Get('options/chain/:symbol')
+  @ApiOperation({ summary: 'Options chain for an underlying symbol (admin view, with Redis cache)' })
+  @ApiParam({ name: 'symbol', required: true, example: 'NIFTY' })
+  @ApiQuery({ name: 'ltp_only', required: false })
+  async adminOptionsChain(
+    @Param('symbol') symbol: string,
+    @Query('ltp_only') ltpOnlyRaw?: string,
+  ) {
+    try {
+      if (!symbol) {
+        throw new HttpException({ success: false, message: 'symbol is required' }, HttpStatus.BAD_REQUEST);
+      }
+      const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true';
+      return await this.instruments.getOptionsChain(symbol, ltpOnly);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Options chain failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // ─── Cache Management ─────────────────────────────────────────────────────
+
+  @Delete('cache/flush')
+  @ApiOperation({ summary: 'Flush Falcon Redis caches: options, ltp, or historical by token' })
+  async flushCache(
+    @Body() body: { type: 'options' | 'ltp' | 'historical'; symbol?: string; token?: number },
+  ) {
+    try {
+      const { type, symbol, token } = body || {};
+      if (!type) {
+        throw new HttpException({ success: false, message: 'type is required (options|ltp|historical)' }, HttpStatus.BAD_REQUEST);
+      }
+      let deleted = 0;
+      if (type === 'options') {
+        const sym = String(symbol || '').toUpperCase();
+        if (!sym) throw new HttpException({ success: false, message: 'symbol required for options cache flush' }, HttpStatus.BAD_REQUEST);
+        deleted += await this.redis.scanDelete(`falcon:options:chain:${sym}*`);
+      } else if (type === 'ltp' && token) {
+        await this.redis.del(`ltp:${token}`);
+        deleted = 1;
+      } else if (type === 'historical' && token) {
+        deleted += await this.redis.scanDelete(`falcon:hist:${token}:*`);
+      } else {
+        throw new HttpException({ success: false, message: 'Provide symbol (options) or token (ltp|historical)' }, HttpStatus.BAD_REQUEST);
+      }
+      return { success: true, deleted, type, symbol, token };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Cache flush failed', error: (error as any)?.message || 'unknown' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

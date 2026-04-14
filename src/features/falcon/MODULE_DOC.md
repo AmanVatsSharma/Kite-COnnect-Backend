@@ -43,3 +43,12 @@ Kite credentials: `KITE_API_KEY`, `KITE_ACCESS_TOKEN` or Redis `kite:access_toke
   - `FalconController`: `GET /stock/falcon/instruments/export` streams all matching instruments as NDJSON (chunked transfer, 1000-row pages); `GET /stock/falcon/instruments/resolve` resolves comma-separated trading symbols to tokens.
   - `AdminFalconController`: `POST /admin/falcon/ticker/restart` and `GET /admin/falcon/ticker/status` (includes subscribedInstruments, upstreamLimit 3000, utilizationPct); `GET /admin/falcon/instruments/export` and `GET /admin/falcon/instruments/resolve` (admin-protected mirrors).
   - `FalconProviderAdapter`: replaced in-process `lastReqAt` rate limiter with Redis distributed lock (`falcon:rl:http:{key}` via `tryAcquireLock`) — works correctly under multi-instance horizontal scale; fail-open when Redis unavailable.
+
+- **2026-04-14** — Phase 2: Smart historical caching, batch endpoint, options chain cache, admin controls:
+  - `FalconProviderAdapter`: `historicalTtl(interval, to)` replaces flat 1 hr TTL — 60 s for 1-min interval today, up to 86400 s for day-interval historical past dates; `getBatchHistoricalData(requests)` fetches up to 10 tokens in parallel (3-at-a-time, ~3 RPS pacing).
+  - `FalconInstrumentService`: Redis cache for `getOptionsChain()` — `falcon:options:chain:{SYM}[:ltp]`, TTL 60 s during market hours (9:15–15:30 IST Mon–Fri) or 300 s otherwise; `isMarketHours()` helper.
+  - `FalconController` (`/stock/falcon/*`): `POST /stock/falcon/historical/batch` for batch candle fetch.
+  - `AdminFalconController` additions: `GET /admin/falcon/ticker/shards` (per-shard WS capacity), `GET /admin/falcon/options/chain/:symbol` (admin options chain), `DELETE /admin/falcon/cache/flush` (options/ltp/historical cache flush via `RedisService.scanDelete`), `POST /admin/falcon/historical/batch`.
+  - `RedisService`: added `scanDelete(pattern)` for wildcard key deletion (SCAN + DEL loop).
+  - `MarketDataStreamService`: dynamic upstream limit via `provider.getSubscriptionLimit?.() ?? 3000` instead of hardcoded constant.
+  - Admin dashboard: `FalconPage` gains multi-shard status panel (per-shard cards + capacity bar) and Options Chain Explorer; `WsAdminPage` shows Kite WS capacity bar; new functions in `falcon-api.ts`.
