@@ -244,6 +244,31 @@ export function FalconPage() {
     }
   };
 
+  // ── Falcon credentials config ──
+  const falconConfig = useQuery({
+    queryKey: ['falcon-config'],
+    queryFn: falcon.getFalconConfig,
+    enabled: !!token,
+  });
+  const [cfgApiKey, setCfgApiKey] = useState('');
+  const [cfgApiSecret, setCfgApiSecret] = useState('');
+  const [cfgMsg, setCfgMsg] = useState<string | null>(null);
+  const [cfgErr, setCfgErr] = useState<string | null>(null);
+  const cfgMut = useMutation({
+    mutationFn: () => falcon.updateFalconConfig({ apiKey: cfgApiKey, apiSecret: cfgApiSecret || undefined }),
+    onSuccess: (data: any) => {
+      setCfgMsg(data?.message ?? 'Updated');
+      setCfgErr(null);
+      setCfgApiKey('');
+      setCfgApiSecret('');
+      void qc.invalidateQueries({ queryKey: ['falcon-config'] });
+    },
+    onError: (e: any) => {
+      setCfgErr(e?.message || 'Update failed');
+      setCfgMsg(null);
+    },
+  });
+
   // ─────────────────────────────────────────────────────────────────────────
 
   if (!token) {
@@ -270,8 +295,57 @@ export function FalconPage() {
 
   const statsData = stats.data as any;
 
+  const cfgData = falconConfig.data as any;
+
   return (
     <>
+      {/* ── 0. Falcon API Credentials ── */}
+      <SectionCard title="Falcon API Credentials" collapsible defaultOpen={!cfgData?.apiKey?.hasValue}>
+        <p style={{ fontSize: 12, marginBottom: 10, color: '#888' }}>
+          Update your Kite API Key / Secret without SSH. Stored in the database; override persists across restarts.
+          After updating, re-authenticate at <strong>/api/auth/falcon/login</strong> to get a new access token.
+        </p>
+        {cfgData && (
+          <KeyValueGrid rows={[
+            { label: 'API Key', value: `${cfgData.apiKey?.masked ?? '—'} (source: ${cfgData.apiKey?.source ?? '?'})` },
+            { label: 'API Secret', value: `${cfgData.apiSecret?.hasValue ? 'Set' : 'Not set'} (source: ${cfgData.apiSecret?.source ?? '?'})` },
+            { label: 'Access Token', value: cfgData.accessToken?.masked ?? '—' },
+            { label: 'Client Init', value: cfgData.initialized ? 'Yes' : 'No' },
+          ]} />
+        )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12, alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 11, color: '#888' }}>API Key *</label>
+            <input
+              placeholder="e.g. abcdef1234567890"
+              value={cfgApiKey}
+              onChange={(e) => setCfgApiKey(e.target.value)}
+              style={{ minWidth: 220 }}
+              autoComplete="off"
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 11, color: '#888' }}>API Secret (optional — updates secret too)</label>
+            <input
+              type="password"
+              placeholder="leave blank to keep existing"
+              value={cfgApiSecret}
+              onChange={(e) => setCfgApiSecret(e.target.value)}
+              style={{ minWidth: 260 }}
+              autoComplete="new-password"
+            />
+          </div>
+          <button
+            onClick={() => cfgMut.mutate()}
+            disabled={cfgMut.isPending || !cfgApiKey.trim()}
+          >
+            {cfgMut.isPending ? 'Saving…' : 'Save Credentials'}
+          </button>
+        </div>
+        {cfgMsg && <p style={{ color: '#26a69a', fontSize: 12, marginTop: 6 }}>{cfgMsg}</p>}
+        {cfgErr && <p style={{ color: '#ef5350', fontSize: 12, marginTop: 6 }}>{cfgErr}</p>}
+      </SectionCard>
+
       {/* ── 1. Account & Connection ── */}
       <SectionCard title="Account & Connection">
         <ErrorInline message={debug.isError ? (debug.error as Error).message : null} />
