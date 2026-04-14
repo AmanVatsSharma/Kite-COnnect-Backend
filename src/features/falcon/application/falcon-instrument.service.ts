@@ -808,6 +808,365 @@ export class FalconInstrumentService implements OnModuleInit {
     return { tested: tokens.length, invalid_instruments: invalid, deactivated };
   }
 
+  // =====================================================================
+  // Vayu-parity additions
+  // =====================================================================
+
+  /**
+   * Options chain for a symbol: all CE/PE rows grouped by expiry → strike → { CE, PE }.
+   * Kite stores the underlying name in `name` (e.g. "NIFTY", "RELIANCE").
+   */
+  async getOptionsChain(
+    symbol: string,
+    ltpOnly = false,
+  ): Promise<{
+    success: boolean;
+    data: {
+      symbol: string;
+      expiries: string[];
+      strikes: number[];
+      options: Record<string, Record<string, { CE?: any; PE?: any }>>;
+      ltp_only: boolean;
+    };
+  }> {
+    const sym = String(symbol || '').trim().toUpperCase();
+    if (!sym) {
+      return { success: true, data: { symbol: sym, expiries: [], strikes: [], options: {}, ltp_only: ltpOnly } };
+    }
+    const rows = await this.falconInstrumentRepo
+      .createQueryBuilder('fi')
+      .where('UPPER(fi.name) = :sym', { sym })
+      .andWhere("fi.instrument_type IN ('CE', 'PE')")
+      .orderBy('fi.expiry', 'ASC')
+      .addOrderBy('fi.strike', 'ASC')
+      .getMany();
+
+    let ltpMap: Record<string, any> = {};
+    try {
+      const tokens = rows.map((r) => String(r.instrument_token));
+      if (tokens.length) ltpMap = await this.falconAdapter.getLTP(tokens);
+    } catch { /* enrichment optional */ }
+
+    const expirySet = new Set<string>();
+    const strikeSet = new Set<number>();
+    const options: Record<string, Record<string, { CE?: any; PE?: any }>> = {};
+
+    for (const row of rows) {
+      const lp = Number(ltpMap?.[String(row.instrument_token)]?.last_price);
+      const last_price_live = Number.isFinite(lp) && lp > 0 ? lp : null;
+      if (ltpOnly && !last_price_live) continue;
+      const expiry = row.expiry || '';
+      const strikeNum = Number(row.strike);
+      const strikeKey = String(strikeNum);
+      expirySet.add(expiry);
+      strikeSet.add(strikeNum);
+      if (!options[expiry]) options[expiry] = {};
+      if (!options[expiry][strikeKey]) options[expiry][strikeKey] = {};
+      options[expiry][strikeKey][row.instrument_type as 'CE' | 'PE'] = {
+        instrument_token: row.instrument_token,
+        tradingsymbol: row.tradingsymbol,
+        name: row.name,
+        exchange: row.exchange,
+        segment: row.segment,
+        expiry: row.expiry,
+        strike: strikeNum,
+        lot_size: row.lot_size,
+        tick_size: row.tick_size,
+        last_price_live,
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        symbol: sym,
+        expiries: [...expirySet].sort(),
+        strikes: [...strikeSet].sort((a, b) => a - b),
+        options,
+        ltp_only: ltpOnly,
+      },
+    };
+  }
+
+  /**
+   * All active futures for a specific underlying symbol.
+   * Kite: underlying name stored in `name` field, instrument_type = 'FUT'.
+   */
+  async getUnderlyingFutures(
+    symbol: string,
+    exchange?: string,
+    limit = 100,
+    offset = 0,
+    ltpOnly = false,
+  ): Promise<{
+    items: Array<FalconInstrument & { last_price_live: number | null }>;
+    total: number;
+  }> {
+    const sym = String(symbol || '').trim().toUpperCase();
+    const qb = this.falconInstrumentRepo
+      .createQueryBuilder('fi')
+      .where('UPPER(fi.name) = :sym', { sym })
+      .andWhere("fi.instrument_type = 'FUT'")
+      .andWhere('fi.is_active = true');
+    if (exchange) qb.andWhere('fi.exchange = :ex', { ex: exchange });
+    const total = await qb.getCount();
+    const lim = Math.max(1, Math.min(1000, limit));
+    const off = Math.max(0, offset);
+    qb.orderBy('fi.expiry', 'ASC').limit(lim).offset(off);
+    const items = await qb.getMany();
+
+    let ltpMap: Record<string, any> = {};
+    try {
+      const tokens = items.map((i) => String(i.instrument_token));
+      if (tokens.length) ltpMap = await this.falconAdapter.getLTP(tokens);
+    } catch { /* optional */ }
+
+    let withLive = items.map((i) => {
+      const lp = Number(ltpMap?.[String(i.instrument_token)]?.last_price);
+      return { ...i, last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null };
+    });
+    if (ltpOnly) withLive = withLive.filter((i) => i.last_price_live !== null);
+    return { items: withLive, total };
+  }
+
+  /**
+   * F&O underlying symbol autocomplete.
+   * Returns distinct underlying `name` values that have active FUT/CE/PE instruments.
+   */
+  async autocompleteFno(
+    q: string,
+    scope?: 'nse' | 'mcx' | 'all',
+    limit = 10,
+  ): Promise<{
+    success: boolean;
+    data: { suggestions: Array<{ symbol: string; exchange: string }> };
+  }> {
+    const normalized = String(q || '').trim().toUpperCase();
+    if (!normalized) {
+      return { success: true, data: { suggestions: [] } };
+    }
+    const lim = Math.max(1, Math.min(50, limit));
+    const qb = this.falconInstrumentRepo
+      .createQueryBuilder('fi')
+      .select('fi.name', 'name')
+      .addSelect('MIN(fi.exchange)', 'exchange')
+      .where("fi.instrument_type IN ('FUT', 'CE', 'PE')")
+      .andWhere('fi.is_active = true')
+      .andWhere('UPPER(fi.name) LIKE :q', { q: `${normalized}%` });
+    if (scope === 'nse') qb.andWhere("fi.exchange IN ('NFO', 'CDS', 'BFO', 'NSE')");
+    else if (scope === 'mcx') qb.andWhere("fi.exchange = 'MCX'");
+    qb.groupBy('fi.name').limit(lim * 4);
+    const rows = await qb.getRawMany<{ name: string; exchange: string }>();
+
+    const seen = new Set<string>();
+    const suggestions: Array<{ symbol: string; exchange: string }> = [];
+    for (const row of rows) {
+      const name = String(row.name || '').toUpperCase();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      suggestions.push({ symbol: name, exchange: row.exchange });
+      if (suggestions.length >= lim) break;
+    }
+    return { success: true, data: { suggestions } };
+  }
+
+  /**
+   * MCX options (exchange = 'MCX', instrument_type CE/PE) with filters.
+   */
+  async getMcxOptions(filters: {
+    symbol?: string;
+    option_type?: 'CE' | 'PE';
+    expiry_from?: string;
+    expiry_to?: string;
+    strike_min?: number;
+    strike_max?: number;
+    is_active?: boolean;
+    ltp_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    items: Array<FalconInstrument & { last_price_live?: number | null }>;
+    total: number;
+  }> {
+    const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
+    qb.where("fi.exchange = 'MCX'").andWhere("fi.instrument_type IN ('CE', 'PE')");
+    if (filters?.symbol) {
+      const sym = filters.symbol.toUpperCase();
+      qb.andWhere('UPPER(fi.name) = :sym', { sym });
+    }
+    if (filters?.option_type) qb.andWhere('fi.instrument_type = :ot', { ot: filters.option_type });
+    if (filters?.expiry_from) qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
+    if (filters?.expiry_to) qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
+    if (typeof filters?.strike_min === 'number') qb.andWhere('fi.strike >= :smin', { smin: filters.strike_min });
+    if (typeof filters?.strike_max === 'number') qb.andWhere('fi.strike <= :smax', { smax: filters.strike_max });
+    if (typeof filters?.is_active === 'boolean') qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
+    const total = await qb.getCount();
+    const limit = Math.max(1, Math.min(1000, filters?.limit ?? 100));
+    const offset = Math.max(0, filters?.offset ?? 0);
+    qb.orderBy('fi.expiry', 'ASC').addOrderBy('fi.strike', 'ASC').limit(limit).offset(offset);
+    const items = await qb.getMany();
+    let withLive = items.map((i) => ({ ...i, last_price_live: null as number | null }));
+    try {
+      const tokens = items.map((i) => String(i.instrument_token));
+      if (tokens.length) {
+        const ltp = await this.falconAdapter.getLTP(tokens);
+        withLive = items.map((i) => {
+          const lp = Number(ltp?.[String(i.instrument_token)]?.last_price);
+          return { ...i, last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null };
+        });
+        if (filters?.ltp_only) {
+          withLive = withLive.filter((x) => Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0);
+        }
+      }
+    } catch { /* optional */ }
+    return { items: withLive, total };
+  }
+
+  /** Popular hardcoded symbols — looks them up by tradingsymbol (EQ instruments) + enriches with LTP. */
+  async getPopularInstruments(limit = 50): Promise<{
+    items: Array<{
+      instrument_token: number;
+      tradingsymbol: string;
+      name: string;
+      exchange: string;
+      instrument_type: string;
+      last_price_live: number | null;
+      description: string;
+    }>;
+  }> {
+    const lim = Math.max(1, Math.min(200, limit));
+    const rows = await this.falconInstrumentRepo
+      .createQueryBuilder('fi')
+      .where('fi.tradingsymbol IN (:...syms)', { syms: FalconInstrumentService.POPULAR_SYMBOLS })
+      .andWhere('fi.is_active = true')
+      .andWhere("fi.instrument_type = 'EQ'")
+      .orderBy('fi.tradingsymbol', 'ASC')
+      .limit(lim)
+      .getMany();
+
+    let ltpMap: Record<string, any> = {};
+    try {
+      const tokens = rows.map((r) => String(r.instrument_token));
+      if (tokens.length) ltpMap = await this.falconAdapter.getLTP(tokens);
+    } catch { /* optional */ }
+
+    const items = rows.map((r) => {
+      const lp = Number(ltpMap?.[String(r.instrument_token)]?.last_price);
+      return {
+        instrument_token: r.instrument_token,
+        tradingsymbol: r.tradingsymbol,
+        name: r.name,
+        exchange: r.exchange,
+        instrument_type: r.instrument_type,
+        last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null,
+        description: r.description,
+      };
+    });
+    return { items };
+  }
+
+  /** Permanently delete all instruments where is_active = false. */
+  async deleteInactiveInstruments(): Promise<{ deleted: number }> {
+    const result = await this.falconInstrumentRepo
+      .createQueryBuilder()
+      .delete()
+      .from(FalconInstrument)
+      .where('is_active = false')
+      .execute();
+    const deleted = result.affected ?? 0;
+    this.logger.log(`[FalconInstrumentService] Deleted ${deleted} inactive instruments`);
+    return { deleted };
+  }
+
+  /** Permanently delete instruments by exchange and/or instrument_type filter. */
+  async deleteByFilter(
+    exchange?: string,
+    instrument_type?: string,
+  ): Promise<{ deleted: number }> {
+    if (!exchange && !instrument_type) {
+      throw new Error('At least one filter required: exchange or instrument_type');
+    }
+    const qb = this.falconInstrumentRepo
+      .createQueryBuilder()
+      .delete()
+      .from(FalconInstrument);
+    const conditions: string[] = [];
+    const params: Record<string, string> = {};
+    if (exchange) { conditions.push('exchange = :ex'); params.ex = exchange; }
+    if (instrument_type) { conditions.push('instrument_type = :it'); params.it = instrument_type; }
+    qb.where(conditions.join(' AND '), params);
+    const result = await qb.execute();
+    const deleted = result.affected ?? 0;
+    this.logger.log(
+      `[FalconInstrumentService] Deleted ${deleted} instruments (exchange=${exchange ?? 'any'}, type=${instrument_type ?? 'any'})`,
+    );
+    return { deleted };
+  }
+
+  /** Clear known Falcon Redis cache keys (profile, margins, stats). */
+  async clearFalconCache(): Promise<void> {
+    const keys = [
+      'falcon:profile',
+      'falcon:margins:equity',
+      'falcon:margins:commodity',
+      'falcon:margins:all',
+      'falcon:stats',
+    ];
+    for (const key of keys) {
+      try { await this.redis.del(key); } catch { /* non-fatal */ }
+    }
+    this.logger.log('[FalconInstrumentService] Cleared Falcon cache keys');
+  }
+
+  /** Stats — served from Redis if fresh, computed on miss. */
+  async getCachedStats() {
+    const key = 'falcon:stats';
+    try {
+      const cached = await this.redis.get<any>(key);
+      if (cached) return cached;
+    } catch { /* non-fatal */ }
+    const stats = await this.getFalconInstrumentStats();
+    try { await this.redis.set(key, stats, 60); } catch { /* non-fatal */ }
+    return stats;
+  }
+
+  /**
+   * Start a Falcon instrument sync in the background and return a jobId.
+   * Poll progress via the existing sync/status endpoint using the returned jobId.
+   */
+  async startSyncAlwaysAsync(exchange?: string): Promise<{
+    success: boolean;
+    jobId: string;
+    message: string;
+    timestamp: string;
+  }> {
+    const jobId = randomUUID();
+    const key = `falcon:sync:job:${jobId}`;
+    try {
+      await this.redis.set(key, { status: 'started', exchange: exchange || 'all', ts: Date.now() }, 3600);
+    } catch { /* non-fatal */ }
+    setImmediate(async () => {
+      try {
+        await this.redis.set(key, { status: 'running', ts: Date.now() }, 3600).catch(() => { /* noop */ });
+        const summary = await this.syncFalconInstruments(
+          exchange,
+          undefined,
+          async (p) => {
+            try { await this.redis.set(key, { status: 'running', progress: p, ts: Date.now() }, 3600); } catch { /* noop */ }
+          },
+        );
+        await this.redis.set(key, { status: 'completed', summary, ts: Date.now() }, 3600).catch(() => { /* noop */ });
+      } catch (e: any) {
+        await this.redis.set(key, { status: 'failed', error: e?.message || 'unknown', ts: Date.now() }, 3600).catch(() => { /* noop */ });
+      }
+    });
+    return { success: true, jobId, message: 'Sync job started', timestamp: new Date().toISOString() };
+  }
+
+  // =====================================================================
+  // End Vayu-parity additions
+  // =====================================================================
+
   private buildDescription(i: FalconInstrument): string {
     const ex = (i.exchange || '').toUpperCase();
     const sym = (i.tradingsymbol || '').toUpperCase();
