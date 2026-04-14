@@ -17,6 +17,7 @@ import { Instrument } from '@features/market-data/domain/instrument.entity';
 import { VortexInstrument } from '@features/stock/domain/vortex-instrument.entity';
 import { InstrumentMapping } from '@features/market-data/domain/instrument-mapping.entity';
 import { RedisService } from '@infra/redis/redis.service';
+import { AppConfigService } from '@infra/app-config/app-config.service';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { ProviderQueueService } from '@features/market-data/application/provider-queue.service';
 import { MetricsService } from '@infra/observability/metrics.service';
@@ -226,6 +227,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     private vortexInstrumentRepo: Repository<VortexInstrument>,
     @InjectRepository(InstrumentMapping)
     private instrumentMappingRepo: Repository<InstrumentMapping>,
+    private readonly appConfig: AppConfigService,
   ) {}
 
   async onModuleInit() {
@@ -1414,15 +1416,14 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     }
   }
 
-  /** Load Redis-persisted config overrides into instance fields before initialize(). */
+  /** Load DB-persisted config overrides into instance fields before initialize(). */
   private async loadConfigOverrides(): Promise<void> {
-    if (!this.redisService?.isRedisAvailable?.()) return;
     try {
       const [apiKey, baseUrl, wsUrl, appId] = await Promise.all([
-        this.redisService.get<string>('config:vortex:api_key').catch(() => null),
-        this.redisService.get<string>('config:vortex:base_url').catch(() => null),
-        this.redisService.get<string>('config:vortex:ws_url').catch(() => null),
-        this.redisService.get<string>('config:vortex:app_id').catch(() => null),
+        this.appConfig.get('config:vortex:api_key').catch(() => null),
+        this.appConfig.get('config:vortex:base_url').catch(() => null),
+        this.appConfig.get('config:vortex:ws_url').catch(() => null),
+        this.appConfig.get('config:vortex:app_id').catch(() => null),
       ]);
       if (apiKey) this.vortexApiKeyOverride = apiKey;
       if (baseUrl) this.vortexBaseUrlOverride = baseUrl;
@@ -1431,9 +1432,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     } catch {}
   }
 
-  private static readonly CONFIG_TTL = 365 * 24 * 3600; // 1 year
-
-  /** Persist Vortex credential overrides to Redis and reinitialize provider. */
+  /** Persist Vortex credential overrides to the DB and reinitialize provider. */
   async updateApiCredentials(params: {
     apiKey?: string;
     baseUrl?: string;
@@ -1441,22 +1440,21 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     appId?: string;
   }): Promise<void> {
     const { apiKey, baseUrl, wsUrl, appId } = params;
-    const ttl = VortexProviderService.CONFIG_TTL;
     if (apiKey?.trim()) {
       this.vortexApiKeyOverride = apiKey.trim();
-      if (this.redisService?.isRedisAvailable?.()) await this.redisService.set('config:vortex:api_key', apiKey.trim(), ttl);
+      await this.appConfig.set('config:vortex:api_key', apiKey.trim());
     }
     if (baseUrl?.trim()) {
       this.vortexBaseUrlOverride = baseUrl.trim();
-      if (this.redisService?.isRedisAvailable?.()) await this.redisService.set('config:vortex:base_url', baseUrl.trim(), ttl);
+      await this.appConfig.set('config:vortex:base_url', baseUrl.trim());
     }
     if (wsUrl?.trim()) {
       this.vortexWsUrlOverride = wsUrl.trim();
-      if (this.redisService?.isRedisAvailable?.()) await this.redisService.set('config:vortex:ws_url', wsUrl.trim(), ttl);
+      await this.appConfig.set('config:vortex:ws_url', wsUrl.trim());
     }
     if (appId?.trim()) {
       this.vortexAppIdOverride = appId.trim();
-      if (this.redisService?.isRedisAvailable?.()) await this.redisService.set('config:vortex:app_id', appId.trim(), ttl);
+      await this.appConfig.set('config:vortex:app_id', appId.trim());
     }
     // Re-init HTTP client if key or baseUrl changed
     if (apiKey || baseUrl) {
