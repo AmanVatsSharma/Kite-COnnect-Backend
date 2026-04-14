@@ -16,10 +16,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { Repository, In, FindOptionsWhere } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.entity';
 import { InstrumentMapping } from '@features/market-data/domain/instrument-mapping.entity';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
+import { RedisService } from '@infra/redis/redis.service';
 
 const UPSERT_CHUNK = 600;
 const MAPPING_CHUNK = 800;
@@ -44,6 +46,15 @@ export type FalconInstrumentSyncOptions = {
 export class FalconInstrumentService implements OnModuleInit {
   private readonly logger = new Logger(FalconInstrumentService.name);
 
+  /** Hardcoded popular Kite instrument trading symbols for the popular-instruments endpoint. */
+  private static readonly POPULAR_SYMBOLS = [
+    'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX',
+    'RELIANCE', 'INFY', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN',
+    'WIPRO', 'HCLTECH', 'AXISBANK', 'KOTAKBANK', 'LT',
+    'BAJFINANCE', 'MARUTI', 'TATAMOTORS', 'ADANIENT',
+    'GOLD', 'SILVER', 'CRUDEOIL', 'NATURALGAS',
+  ];
+
   constructor(
     @InjectRepository(FalconInstrument)
     private falconInstrumentRepo: Repository<FalconInstrument>,
@@ -53,6 +64,7 @@ export class FalconInstrumentService implements OnModuleInit {
     private falconAdapter: FalconProviderAdapter,
     private readonly config: ConfigService,
     private readonly schedulerRegistry: SchedulerRegistry,
+    private readonly redis: RedisService,
   ) {}
 
   onModuleInit(): void {
