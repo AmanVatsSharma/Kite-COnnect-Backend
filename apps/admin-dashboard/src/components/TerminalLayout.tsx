@@ -149,6 +149,7 @@ export function TerminalLayout() {
               title={label}
             >
               <span className="terminal-rail__abbr">{abbr}</span>
+              <span className="terminal-rail__label">{label}</span>
             </NavLink>
           ))}
           <button type="button" className="terminal-rail__palette" onClick={openPalette} title="Command palette (⌘K)">

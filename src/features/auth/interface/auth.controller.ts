@@ -280,10 +280,19 @@ export class VortexAuthController {
         `[Vayu] Callback received with auth parameter: ${auth ? 'present' : 'missing'}`,
       );
 
-      const appId = this.configService.get<string>('VORTEX_APP_ID');
-      const apiKey = this.configService.get<string>('VORTEX_API_KEY');
+      const redisAppId = this.redisService.isRedisAvailable()
+        ? await this.redisService.get<string>('config:vortex:app_id').catch(() => null)
+        : null;
+      const redisApiKey = this.redisService.isRedisAvailable()
+        ? await this.redisService.get<string>('config:vortex:api_key').catch(() => null)
+        : null;
+      const redisBaseUrl = this.redisService.isRedisAvailable()
+        ? await this.redisService.get<string>('config:vortex:base_url').catch(() => null)
+        : null;
+      const appId = redisAppId || this.configService.get<string>('VORTEX_APP_ID');
+      const apiKey = redisApiKey || this.configService.get<string>('VORTEX_API_KEY');
       const baseUrl = (
-        this.configService.get<string>('VORTEX_BASE_URL') ||
+        redisBaseUrl || this.configService.get<string>('VORTEX_BASE_URL') ||
         'https://vortex-api.rupeezy.in/v2'
       ).replace(/\/$/, '');
       const createSessionUrl = `${baseUrl}/user/session`;

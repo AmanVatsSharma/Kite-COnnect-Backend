@@ -15,6 +15,7 @@ import {
   Body,
   Query,
   Param,
+  Patch,
   UseGuards,
   HttpException,
   HttpStatus,
@@ -23,6 +24,7 @@ import { ApiOperation, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '@features/admin/guards/admin.guard';
 import { FalconInstrumentService } from '@features/falcon/application/falcon-instrument.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
+import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { RedisService } from '@infra/redis/redis.service';
 import { FalconTokensDto, FalconHistoricalQueryDto } from './dto/falcon-market-data.dto';
 
@@ -35,7 +37,42 @@ export class AdminFalconController {
     private readonly instruments: FalconInstrumentService,
     private readonly adapter: FalconProviderAdapter,
     private readonly redis: RedisService,
+    private readonly kiteProvider: KiteProviderService,
   ) {}
+
+  // ─── Config ───────────────────────────────────────────────────────────────
+
+  @Get('config')
+  @ApiOperation({ summary: 'View current Falcon (Kite) API credential status (masked)' })
+  async getConfig() {
+    try {
+      const data = await this.kiteProvider.getConfigStatus();
+      return { success: true, data };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Failed to read Falcon config', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Patch('config')
+  @ApiOperation({ summary: 'Update Falcon (Kite) API key / secret — persists in Redis, survives restarts' })
+  async updateConfig(@Body() body: { apiKey?: string; apiSecret?: string }) {
+    const { apiKey, apiSecret } = body || {};
+    if (!apiKey?.trim()) {
+      throw new HttpException({ success: false, message: 'apiKey is required' }, HttpStatus.BAD_REQUEST);
+    }
+    try {
+      await this.kiteProvider.updateApiCredentials(apiKey.trim(), apiSecret?.trim());
+      return { success: true, message: 'Falcon API key updated. Re-authenticate at /api/auth/falcon/login to generate a new access token.' };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Failed to update Falcon config', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 
   // ─── Account ──────────────────────────────────────────────────────────────
 
