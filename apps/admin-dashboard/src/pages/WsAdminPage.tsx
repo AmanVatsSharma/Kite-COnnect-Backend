@@ -1,7 +1,8 @@
 /**
  * @file WsAdminPage.tsx
  * @module admin-dashboard
- * @description WebSocket admin: structured status/config, forms, and collapsible raw responses.
+ * @description WebSocket admin: live connections monitor, status/config, forms.
+ * @updated 2026-04-14
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -93,8 +94,128 @@ export function WsAdminPage() {
       ? (status.data as Record<string, unknown>).connections
       : undefined;
 
+  /* Per-key subscription breakdown */
+  const subscriptions: Array<Record<string, unknown>> =
+    status.data && Array.isArray((status.data as Record<string, unknown>).subscriptions)
+      ? ((status.data as Record<string, unknown>).subscriptions as Array<Record<string, unknown>>)
+      : [];
+  const byApiKey: Array<Record<string, unknown>> =
+    status.data && Array.isArray((status.data as Record<string, unknown>).byApiKey)
+      ? ((status.data as Record<string, unknown>).byApiKey as Array<Record<string, unknown>>)
+      : [];
+
+  function fmtNum(n: unknown): string {
+    if (typeof n !== 'number') return '—';
+    return n.toLocaleString('en-IN');
+  }
+  function truncKey(k: string, len = 20) {
+    return k.length > len ? `${k.slice(0, len)}…` : k;
+  }
+
   return (
     <>
+      {/* ── Live Connections Panel ─────────────────────────── */}
+      <div className="ws-conn-panel">
+        <div className="ws-conn-panel__head">
+          <span>LIVE WS CONNECTIONS</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {typeof conn === 'number' && conn > 0 && (
+              <span className="dot dot--live" style={{ marginRight: 2 }} />
+            )}
+            <span className="ws-conn-panel__total">{typeof conn === 'number' ? conn : '—'} conn</span>
+            <span className="cell-muted" style={{ fontSize: 10 }}>
+              {subscriptions.length} sub groups
+            </span>
+            {typeof (status.data as Record<string, unknown> | undefined)?.redis_ok === 'boolean' && (
+              <span style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: (status.data as Record<string, unknown>).redis_ok ? 'var(--ok)' : 'var(--bad)',
+              }}>
+                REDIS {(status.data as Record<string, unknown>).redis_ok ? 'OK' : 'ISSUE'}
+              </span>
+            )}
+          </div>
+        </div>
+        <ErrorInline message={status.isError ? (status.error as Error).message : null} />
+        {byApiKey.length > 0 ? (
+          <div className="ws-conn-panel__body">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>API KEY</th>
+                  <th className="cell-num">CONNS</th>
+                  <th className="cell-num">TOKENS</th>
+                  <th>MODE</th>
+                  <th>EXCHANGES</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byApiKey.map((row, i) => {
+                  const keyStr = String(row.apiKey ?? '');
+                  const subEntry = subscriptions.find((s) => s.apiKey === row.apiKey);
+                  const tokens: unknown[] = Array.isArray(subEntry?.tokens) ? (subEntry!.tokens as unknown[]) : [];
+                  const mode = typeof subEntry?.mode === 'string' ? subEntry.mode : '—';
+                  return (
+                    <tr key={i}>
+                      <td className="cell-key" title={keyStr}>{truncKey(keyStr)}</td>
+                      <td className="cell-num">{fmtNum(row.count)}</td>
+                      <td className="cell-num">{fmtNum(tokens.length)}</td>
+                      <td style={{ fontSize: 10 }}>
+                        <span style={{
+                          padding: '1px 5px',
+                          borderRadius: 3,
+                          background: mode === 'full' ? 'rgba(124,158,255,0.15)' : mode === 'ohlcv' ? 'rgba(255,182,72,0.12)' : 'rgba(43,211,155,0.1)',
+                          color: mode === 'full' ? 'var(--accent)' : mode === 'ohlcv' ? 'var(--warn)' : 'var(--ok)',
+                          fontSize: 9,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                        }}>
+                          {mode}
+                        </span>
+                      </td>
+                      <td className="cell-muted" style={{ fontSize: 10 }}>
+                        {tokens.length > 0
+                          ? `${String(tokens[0])}${tokens.length > 1 ? ` +${tokens.length - 1}` : ''}`
+                          : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : subscriptions.length > 0 ? (
+          <div className="ws-conn-panel__body">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>API KEY</th>
+                  <th className="cell-num">TOKENS</th>
+                  <th>MODE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subscriptions.slice(0, 20).map((s, i) => {
+                  const tokens: unknown[] = Array.isArray(s.tokens) ? (s.tokens as unknown[]) : [];
+                  return (
+                    <tr key={i}>
+                      <td className="cell-key" title={String(s.apiKey ?? '')}>{truncKey(String(s.apiKey ?? ''))}</td>
+                      <td className="cell-num">{fmtNum(tokens.length)}</td>
+                      <td style={{ fontSize: 9, textTransform: 'uppercase', color: 'var(--muted)' }}>{String(s.mode ?? '—')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="ws-conn-panel__empty">
+            {status.isLoading ? 'Loading…' : typeof conn === 'number' && conn === 0 ? 'No active connections' : 'No subscription data'}
+          </div>
+        )}
+      </div>
+
       <section className="card">
         <h2>WS status</h2>
         <ErrorInline message={status.isError ? (status.error as Error).message : null} />
