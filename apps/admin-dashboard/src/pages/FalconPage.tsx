@@ -4,14 +4,16 @@
  * @description Falcon (Kite) operator page — dense terminal layout: account status, stream control,
  *   instrument browser, market data explorer, historical candlestick charts, shard status, options chain.
  * @author BharatERP
- * @updated 2026-04-14 — added multi-shard status panel and options chain explorer
+ * @updated 2026-04-14 — Phase 3: session banner + quick actions strip
  */
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createChart, ColorType } from 'lightweight-charts';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
 import * as falcon from '../lib/falcon-api';
+import { notify } from '../lib/toast';
 import { ErrorInline } from '../components/ErrorInline';
 import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import type { FalconInstrument, FalconCandle } from '../lib/types';
@@ -85,6 +87,7 @@ function CandleChart({ candles }: { candles: FalconCandle[] }) {
 export function FalconPage() {
   const token = getAdminToken();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { refetchInterval } = useRefreshInterval();
 
   const debug = useQuery({ queryKey: ['admin-debug-falcon'], queryFn: admin.getKiteDebug, enabled: !!token, refetchInterval });
@@ -95,6 +98,48 @@ export function FalconPage() {
   const stats = useQuery({ queryKey: ['falcon-stats'], queryFn: falcon.getFalconStats, enabled: !!token });
   const falconConfig = useQuery({ queryKey: ['falcon-config'], queryFn: falcon.getFalconConfig, enabled: !!token });
   const shardStatus = useQuery({ queryKey: ['falcon-shard-status'], queryFn: falcon.getFalconShardStatus, enabled: !!token, refetchInterval });
+  const sessionQ = useQuery({ queryKey: ['falcon-session'], queryFn: falcon.getFalconSession, refetchInterval: 30_000, enabled: !!token });
+
+  // Quick action mutations
+  const restartTickerMut = useMutation({
+    mutationFn: falcon.postFalconTickerRestart,
+    onSuccess: () => {
+      notify.ok('Ticker restarted');
+      void qc.invalidateQueries({ queryKey: ['falcon-shard-status'] });
+      void qc.invalidateQueries({ queryKey: ['admin-debug-falcon'] });
+    },
+    onError: (e: Error) => notify.error(`Restart failed: ${e.message}`),
+  });
+
+  const [validatingSession, setValidatingSession] = useState(false);
+  async function handleValidateSession() {
+    setValidatingSession(true);
+    try {
+      await falcon.getFalconProfile();
+      notify.ok('Kite session valid');
+    } catch (e) {
+      notify.error(`Session invalid: ${(e as Error).message}`);
+    } finally {
+      setValidatingSession(false);
+    }
+  }
+
+  const [flushAllLoading, setFlushAllLoading] = useState(false);
+  async function handleFlushAllCaches() {
+    setFlushAllLoading(true);
+    try {
+      await Promise.all([
+        falcon.flushFalconCache({ type: 'options' }),
+        falcon.flushFalconCache({ type: 'ltp' }),
+        falcon.flushFalconCache({ type: 'historical' }),
+      ]);
+      notify.ok('All caches flushed');
+    } catch (e) {
+      notify.error(`Flush failed: ${(e as Error).message}`);
+    } finally {
+      setFlushAllLoading(false);
+    }
+  }
 
   const setProvMut = useMutation({
     mutationFn: () => admin.setGlobalProvider('kite'),
@@ -292,6 +337,75 @@ export function FalconPage() {
             </span>
           )}
         </div>
+      </div>
+
+      {/* ── Session Banner ─────────────────────────────────────── */}
+      {sessionQ.data && (() => {
+        const ttl = sessionQ.data.ttlSeconds;
+        const hasToken = sessionQ.data.hasToken;
+        let bg = 'rgba(43,211,155,0.06)';
+        let border = 'rgba(43,211,155,0.2)';
+        let color = 'var(--ok)';
+        let msg = `Session valid · Expires in ${Math.floor(ttl / 3600)}h ${Math.floor((ttl % 3600) / 60)}m`;
+        let showReauth = false;
+        if (!hasToken || ttl < 0) {
+          bg = 'rgba(255,107,107,0.06)'; border = 'rgba(255,107,107,0.2)'; color = 'var(--bad)';
+          msg = 'Session expired / missing — Login required'; showReauth = true;
+        } else if (ttl < 7200) {
+          bg = 'rgba(245,166,35,0.06)'; border = 'rgba(245,166,35,0.2)'; color = 'var(--warn, #f5a623)';
+          const h = Math.floor(ttl / 3600); const m = Math.floor((ttl % 3600) / 60);
+          msg = `Token expires in ${h}h ${m}m — re-auth soon`; showReauth = true;
+        }
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: bg, border: `1px solid ${border}`, borderRadius: 4, fontSize: 10, color, flexShrink: 0 }}>
+            <span style={{ flex: 1 }}>{msg}</span>
+            {showReauth && (
+              <button type="button" className="btn-xs btn-xs--bad" style={{ fontSize: 9 }} onClick={() => navigate('/auth')}>
+                Re-auth Now
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Quick Actions strip ─────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className="btn-xs"
+          onClick={() => restartTickerMut.mutate()}
+          disabled={restartTickerMut.isPending}
+          title="Restart Kite ticker (all shards)"
+        >
+          {restartTickerMut.isPending ? '…' : '⟳ Restart Ticker'}
+        </button>
+        <button
+          type="button"
+          className="btn-xs"
+          onClick={() => syncMut.mutate()}
+          disabled={syncMut.isPending}
+          title="Sync Falcon instruments from Kite"
+        >
+          {syncMut.isPending ? 'Syncing…' : '↓ Sync Instruments'}
+        </button>
+        <button
+          type="button"
+          className="btn-xs btn-xs--bad"
+          onClick={() => void handleFlushAllCaches()}
+          disabled={flushAllLoading}
+          title="Flush options + LTP + historical caches"
+        >
+          {flushAllLoading ? 'Flushing…' : '✕ Flush All Caches'}
+        </button>
+        <button
+          type="button"
+          className="btn-xs"
+          onClick={() => void handleValidateSession()}
+          disabled={validatingSession}
+          title="Validate Kite session via profile endpoint"
+        >
+          {validatingSession ? 'Validating…' : '↺ Validate Session'}
+        </button>
       </div>
 
       {/* ── Scrollable content ─────────────────────────────────── */}

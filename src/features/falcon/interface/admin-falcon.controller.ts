@@ -436,6 +436,72 @@ export class AdminFalconController {
     }
   }
 
+  // ─── Session Health ────────────────────────────────────────────────────────
+
+  @Get('session')
+  @ApiOperation({
+    summary: 'Kite session health: token age, Redis TTL, connection state, last error',
+    description: 'Use to drive the auth wizard status card. ttlSeconds < 0 means the key is missing (-2) or has no expiry (-1).',
+  })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: {
+        success: true,
+        data: {
+          hasToken: true, maskedToken: 'ab••••xy', createdAt: 1713000000000,
+          ttlSeconds: 72000, connected: true, degraded: false, lastError: null,
+        },
+      },
+    },
+  })
+  async sessionHealth() {
+    try {
+      const cfg = await this.kiteProvider.getConfigStatus();
+      const debug = this.kiteProvider.getDebugStatus();
+      const createdAtRaw = await this.redis.get<string>('kite:access_token_created_at');
+      const pttlMs = await this.redis.pttl('kite:access_token');
+      const ttlSeconds = pttlMs > 0 ? Math.floor(pttlMs / 1000) : pttlMs;
+      return {
+        success: true,
+        data: {
+          hasToken: cfg.accessToken.hasValue,
+          maskedToken: cfg.accessToken.masked,
+          createdAt: createdAtRaw ? Number(createdAtRaw) : null,
+          ttlSeconds,
+          connected: debug.connected,
+          degraded: debug.degraded,
+          lastError: (debug as any).lastTickerError ?? null,
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Failed to fetch session health', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Delete('session')
+  @ApiOperation({
+    summary: 'Revoke Kite access token — clears Redis cache and restarts ticker in degraded mode',
+    description: 'Use the "Revoke" button in the admin auth wizard. The ticker will halt until a new token is obtained via /auth/falcon/login.',
+  })
+  @ApiResponse({ status: 200, schema: { example: { success: true, message: 'Kite session revoked. Re-authenticate to restore.' } } })
+  async revokeSession() {
+    try {
+      await this.redis.del('kite:access_token');
+      await this.redis.del('kite:access_token_created_at');
+      await this.kiteProvider.restartTicker();
+      return { success: true, message: 'Kite session revoked. Re-authenticate to restore.' };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: 'Session revoke failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   // ─── Multi-Shard Status ───────────────────────────────────────────────────
 
   @Get('ticker/shards')

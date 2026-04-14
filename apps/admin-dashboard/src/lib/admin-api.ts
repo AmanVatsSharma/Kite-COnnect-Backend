@@ -245,3 +245,14 @@ export function manualUnblockAbuse(body: { api_key: string }) {
     body: JSON.stringify(body),
   });
 }
+
+export interface AdminStreamEvent {
+  type: 'connect' | 'disconnect' | 'auth_error' | 'max_reconnect';
+  shardIndex?: number;
+  ts: number;
+  message: string;
+}
+
+export function getAdminEvents(limit = 20) {
+  return apiFetch<AdminStreamEvent[]>(`/api/admin/events?limit=${limit}`, { ...admin });
+}

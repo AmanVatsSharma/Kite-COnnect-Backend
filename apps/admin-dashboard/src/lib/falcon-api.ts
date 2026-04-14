@@ -4,7 +4,7 @@
  * @description Typed API client for Falcon (Kite) admin endpoints under /api/admin/falcon/*.
  * @author BharatERP
  * @created 2026-04-14
- * @updated 2026-04-14 — added shard status, batch historical, options chain admin, cache flush
+ * @updated 2026-04-14 — added shard status, batch historical, options chain admin, cache flush, session health
  */
 import { apiFetch } from './api-client';
 import type {
@@ -213,4 +213,36 @@ export function flushFalconCache(body: FlushFalconCacheBody) {
     '/api/admin/falcon/cache/flush',
     { ...admin, method: 'DELETE', body: JSON.stringify(body) },
   );
+}
+
+// ─── Session Health ────────────────────────────────────────────────────────
+
+export interface FalconSessionHealth {
+  hasToken: boolean;
+  maskedToken: string | null;
+  createdAt: number | null;   // ms timestamp
+  ttlSeconds: number;          // -2 = missing, -1 = no expiry, 0+ = seconds remaining
+  connected: boolean;
+  degraded: boolean;
+  lastError: { message: string; code?: number; status?: number; time: string } | null;
+}
+
+export function getFalconSession() {
+  return apiFetch<FalconSessionHealth>('/api/admin/falcon/session', { ...admin });
+}
+
+export function revokeFalconSession() {
+  return apiFetch<{ message: string }>('/api/admin/falcon/session', { ...admin, method: 'DELETE' });
+}
+
+export function postFalconTickerRestart() {
+  return apiFetch<{ message: string }>('/api/admin/falcon/ticker/restart', { ...admin, method: 'POST' });
+}
+
+/** Admin manual request_token exchange — fallback when OAuth popup fails. */
+export function exchangeKiteRequestToken(requestToken: string) {
+  return apiFetch<{ success: boolean }>('/api/auth/falcon/exchange', {
+    method: 'POST',
+    body: JSON.stringify({ requestToken }),
+  });
 }

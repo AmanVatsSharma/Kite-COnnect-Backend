@@ -4,10 +4,11 @@
  * @description Root routes, query client, and terminal shell layout.
  * @author BharatERP
  * @created 2026-03-28
- * @updated 2026-04-14
+ * @updated 2026-04-14 — added Toaster for toast notifications
  */
 
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { AuthAlertProvider } from './contexts/AuthAlertProvider';
 import { RefreshIntervalProvider } from './contexts/RefreshIntervalProvider';
 import { QueryProvider } from './providers/QueryProvider';
@@ -28,6 +29,7 @@ import { FalconPage } from './pages/FalconPage';
 export default function App() {
   return (
     <ErrorBoundary>
+      <Toaster position="bottom-right" theme="dark" richColors closeButton />
       <AuthAlertProvider>
         <QueryProvider>
           <RefreshIntervalProvider>

@@ -434,6 +434,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         } else {
           this.logger.log(`[Kite] Shard ${shardIndex} reconnected`);
         }
+        void this.redisService.lpushTrim('admin:events', JSON.stringify({
+          type: 'connect', shardIndex, ts: Date.now(), message: `Shard ${shardIndex} connected`,
+        }));
       },
       onDisconnect: (shardIndex, _args) => {
         const allDisconnected = shardedTicker.getShardStatus().every((s) => !s.isConnected);
@@ -445,6 +448,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         this.reconnectCount++;
         this.metrics.kiteTickerReconnectTotal.labels('reconnecting').inc();
         this.logger.warn(`[Kite] Shard ${shardIndex} disconnected (allDisconnected=${allDisconnected})`);
+        void this.redisService.lpushTrim('admin:events', JSON.stringify({
+          type: 'disconnect', shardIndex, ts: Date.now(), message: `Shard ${shardIndex} disconnected`,
+        }));
       },
       onAuthError: (_shardIndex, error) => {
         const pretty = this.formatError(error);
@@ -460,10 +466,16 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         this.metrics.marketDataStreamTickerConnected.labels('kite').set(0);
         this.publishStreamStatus('auth_error');
         this.logger.warn('[Kite] Disabling reconnect due to authentication error. Visit /api/auth/falcon/login to re-authenticate.');
+        void this.redisService.lpushTrim('admin:events', JSON.stringify({
+          type: 'auth_error', shardIndex: _shardIndex, ts: Date.now(), message: pretty || 'Auth error — re-authenticate',
+        }));
       },
       onMaxReconnect: (_shardIndex) => {
         this.metrics.kiteTickerReconnectTotal.labels('max_attempts').inc();
         this.publishStreamStatus('provider_halted');
+        void this.redisService.lpushTrim('admin:events', JSON.stringify({
+          type: 'max_reconnect', shardIndex: _shardIndex, ts: Date.now(), message: 'Max reconnect attempts reached — provider halted',
+        }));
       },
       onError: (_shardIndex, error) => {
         const pretty = this.formatError(error);

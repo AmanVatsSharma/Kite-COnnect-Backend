@@ -796,4 +796,30 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return 0;
     }
   }
+
+  /**
+   * Push a string value to the head of a Redis list and trim to maxLen entries.
+   * Used for ring-buffer event logs (e.g. admin:events). Fails silently when Redis unavailable.
+   */
+  async lpushTrim(key: string, value: string, maxLen = 50): Promise<void> {
+    if (!this.isConnected || !this.client) return;
+    try {
+      await (this.client as any).lPush(key, value);
+      await (this.client as any).lTrim(key, 0, maxLen - 1);
+    } catch {}
+  }
+
+  /**
+   * Return a range of raw string elements from a Redis list (index 0 = most recently pushed).
+   * Unlike `lrange<T>()` this does NOT JSON.parse — caller handles deserialization.
+   * Returns empty array when Redis unavailable.
+   */
+  async lrangeRaw(key: string, start = 0, stop = -1): Promise<string[]> {
+    if (!this.isConnected || !this.client) return [];
+    try {
+      return await (this.client as any).lRange(key, start, stop);
+    } catch {
+      return [];
+    }
+  }
 }

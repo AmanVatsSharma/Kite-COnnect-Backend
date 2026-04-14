@@ -4,17 +4,20 @@
  * @description Bloomberg-style shell: ticker, icon rail, status bar, command palette (⌘K).
  * @author BharatERP
  * @created 2026-03-28
- * @updated 2026-04-14
+ * @updated 2026-04-14 — added Kite session health pill, useSystemAlerts
  */
 
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getAdminToken } from '../lib/api-client';
 import { useAuthAlert } from '../hooks/useAuthAlert';
+import { useSystemAlerts } from '../hooks/useSystemAlerts';
 import type { PollPresetId } from '../lib/poll-presets';
 import { POLL_PRESET_ORDER } from '../lib/poll-presets';
 import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import { useLiveAdminMetrics } from '../hooks/useLiveAdminMetrics';
+import { getFalconSession } from '../lib/falcon-api';
 import { TickerStrip } from './TickerStrip';
 import { CommandPalette } from './CommandPalette';
 
@@ -46,6 +49,14 @@ function StatusBar() {
   const { presetId, setPresetId, lastFetchLatencyMs } = useRefreshInterval();
   const { token, stream, ws } = useLiveAdminMetrics();
   const [clock, setClock] = useState(() => formatIstTime(new Date()));
+  const navigate = useNavigate();
+
+  const sessionQuery = useQuery({
+    queryKey: ['kite-session-pill'],
+    queryFn: getFalconSession,
+    refetchInterval: 60_000,
+    enabled: !!getAdminToken(),
+  });
 
   useEffect(() => {
     const id = window.setInterval(() => setClock(formatIstTime(new Date())), 1000);
@@ -92,6 +103,34 @@ function StatusBar() {
               ? `LIVE${providerName ? ` · ${String(providerName).toUpperCase()}` : ''}`
               : 'STREAM OFF'}
           </span>
+          {sessionQuery.data && (() => {
+            const ttl = sessionQuery.data.ttlSeconds;
+            let pillClass = 'dot--live';
+            let label = 'KITE OK';
+            if (ttl < 0 || !sessionQuery.data.hasToken) {
+              pillClass = 'dot--off';
+              label = 'KITE AUTH ✕';
+            } else if (ttl < 7200) {
+              pillClass = 'dot--warn';
+              const h = Math.floor(ttl / 3600);
+              const m = Math.floor((ttl % 3600) / 60);
+              label = h > 0 ? `KITE ${h}H` : `KITE ${m}M`;
+            }
+            return (
+              <>
+                <span className="terminal-statusbar__sep" aria-hidden>│</span>
+                <button
+                  type="button"
+                  className="sb-live-chip sb-live-chip--btn"
+                  onClick={() => navigate('/auth')}
+                  title="Kite session status — click to manage auth"
+                >
+                  <span className={`dot ${pillClass}`} />
+                  {label}
+                </button>
+              </>
+            );
+          })()}
           {wsConns !== null && (
             <>
               <span className="terminal-statusbar__sep" aria-hidden>│</span>
@@ -118,6 +157,7 @@ export function TerminalLayout() {
   const hasToken = !!getAdminToken();
   const { unauthorized, setUnauthorized } = useAuthAlert();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  useSystemAlerts();
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);

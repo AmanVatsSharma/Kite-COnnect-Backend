@@ -1,11 +1,16 @@
 import {
   Controller,
   Get,
+  Post,
+  Body,
   Query,
   Res,
   BadRequestException,
   Logger,
+  UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
+import { AdminGuard } from '@features/admin/guards/admin.guard';
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { KiteConnect } from 'kiteconnect';
@@ -14,8 +19,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { KiteSession } from '@features/kite-connect/domain/kite-session.entity';
 import { RedisService } from '@infra/redis/redis.service';
 import {
+  ApiBody,
   ApiOperation,
   ApiQuery,
+  ApiSecurity,
   ApiTags,
   ApiResponse,
   ApiOkResponse,
@@ -150,6 +157,12 @@ export class AuthController {
       session.access_token,
       24 * 3600,
     );
+    // store creation timestamp for session health monitoring
+    await this.redisService.set(
+      'kite:access_token_created_at',
+      Date.now().toString(),
+      24 * 3600,
+    );
 
     // update in-memory client and restart ticker
     await this.kiteProvider.updateAccessToken(session.access_token);
@@ -173,6 +186,70 @@ export class AuthController {
       if (this.redisService.isRedisAvailable())
         await this.redisService.del(`kite_oauth_state:${state}`);
       kiteStateMemory.delete(state);
+    } catch {}
+
+    return { success: true };
+  }
+
+  /**
+   * Manual request_token exchange — for the admin dashboard "manual fallback" flow
+   * when the OAuth popup doesn't work. Skips CSRF state validation.
+   * Protected by x-admin-token (AdminGuard).
+   */
+  @Post('exchange')
+  @UseGuards(AdminGuard)
+  @ApiSecurity('admin')
+  @ApiOperation({
+    summary: 'Exchange a Kite request_token for an access_token (admin manual fallback)',
+    description: 'Skips CSRF state check. Use when the OAuth popup flow fails. Requires x-admin-token header.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['requestToken'],
+      properties: {
+        requestToken: { type: 'string', description: 'request_token from Kite callback URL' },
+      },
+    },
+  })
+  @ApiOkResponse({ schema: { properties: { success: { type: 'boolean', example: true } } } })
+  async exchangeToken(@Body() body: { requestToken?: string }) {
+    const requestToken = body?.requestToken?.trim();
+    if (!requestToken) throw new BadRequestException('requestToken is required');
+
+    const dbApiKey = await this.appConfig.get('config:kite:api_key').catch(() => null);
+    const dbApiSecret = await this.appConfig.get('config:kite:api_secret').catch(() => null);
+    const apiKey = dbApiKey || this.configService.get<string>('KITE_API_KEY');
+    const apiSecret = dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
+    if (!apiKey || !apiSecret) throw new BadRequestException('Falcon API creds not configured');
+
+    const kite = new KiteConnect({ api_key: apiKey });
+    let session: any;
+    try {
+      session = await kite.generateSession(requestToken, apiSecret);
+    } catch (e: any) {
+      throw new BadRequestException(`Token exchange failed: ${e?.message || 'unknown error'}`);
+    }
+
+    // Deactivate previous sessions and save new one
+    await this.kiteSessionRepo.createQueryBuilder().update(KiteSession)
+      .set({ is_active: false }).where('is_active = :active', { active: true }).execute();
+    await this.kiteSessionRepo.save(
+      this.kiteSessionRepo.create({ access_token: session.access_token, public_token: session.public_token, is_active: true, metadata: session }),
+    );
+
+    // Cache token + created_at
+    await this.redisService.set('kite:access_token', session.access_token, 24 * 3600);
+    await this.redisService.set('kite:access_token_created_at', Date.now().toString(), 24 * 3600);
+
+    // Update provider and restart ticker
+    await this.kiteProvider.updateAccessToken(session.access_token);
+    await this.kiteProvider.restartTicker();
+    try { await this.resolver.setGlobalProviderName('kite'); } catch {}
+    try {
+      const status = await this.streamService.getStreamingStatus();
+      if (!status?.isStreaming) await this.streamService.startStreaming();
+      else await this.streamService.reconnectIfStreaming();
     } catch {}
 
     return { success: true };
