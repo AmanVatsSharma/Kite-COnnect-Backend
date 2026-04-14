@@ -52,3 +52,7 @@ Kite credentials: `KITE_API_KEY`, `KITE_ACCESS_TOKEN` or Redis `kite:access_toke
   - `RedisService`: added `scanDelete(pattern)` for wildcard key deletion (SCAN + DEL loop).
   - `MarketDataStreamService`: dynamic upstream limit via `provider.getSubscriptionLimit?.() ?? 3000` instead of hardcoded constant.
   - Admin dashboard: `FalconPage` gains multi-shard status panel (per-shard cards + capacity bar) and Options Chain Explorer; `WsAdminPage` shows Kite WS capacity bar; new functions in `falcon-api.ts`.
+
+- **2026-04-14** — Phase 3: Kite session management endpoints:
+  - `AdminFalconController`: `GET /admin/falcon/session` returns token age (`kite:access_token_created_at`), Redis TTL via `pttl()`, connected/degraded state, lastError; `DELETE /admin/falcon/session` revokes token from Redis and restarts ticker.
+  - Admin dashboard: `AuthPage` rewritten as 3-step OAuth wizard with Session Status Card, manual `request_token` fallback; `FalconPage` gains session health banner + Quick Actions strip (Restart Ticker, Sync Instruments, Flush All Caches, Validate Session); `TerminalLayout` status bar gains Kite session health pill.

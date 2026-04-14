@@ -4,11 +4,12 @@
  * @description Command center: high-density multi-panel operations view for trading broker/dealer.
  * @author BharatERP
  * @created 2026-03-28
- * @updated 2026-04-14
+ * @updated 2026-04-14 — Phase 3: added recent stream events feed
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink } from 'react-router-dom';
+import type { AdminStreamEvent } from '../lib/admin-api';
 import { useLiveAdminMetrics } from '../hooks/useLiveAdminMetrics';
 import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import * as admin from '../lib/admin-api';
@@ -528,6 +529,56 @@ function DataPlanePanel({ stats }: { stats: unknown }) {
   );
 }
 
+/* ─── Recent Events Panel ────────────────────────────────────────────── */
+function eventColor(type: AdminStreamEvent['type']): string {
+  if (type === 'connect') return 'var(--ok)';
+  if (type === 'disconnect') return 'var(--warn, #f5a623)';
+  return 'var(--bad)';
+}
+
+function eventIcon(type: AdminStreamEvent['type']): string {
+  if (type === 'connect') return '●';
+  if (type === 'disconnect') return '○';
+  return '✕';
+}
+
+function fmtEvtTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function RecentEventsPanel({ token }: { token: boolean }) {
+  const eventsQ = useQuery({
+    queryKey: ['admin-events'],
+    queryFn: () => admin.getAdminEvents(20),
+    refetchInterval: 15_000,
+    enabled: token,
+  });
+
+  const events = (eventsQ.data ?? []) as AdminStreamEvent[];
+
+  return (
+    <Panel title="RECENT STREAM EVENTS">
+      {eventsQ.isLoading && <p className="muted" style={{ fontSize: 10 }}>Loading…</p>}
+      {!eventsQ.isLoading && events.length === 0 && (
+        <p className="muted" style={{ fontSize: 10 }}>No events yet</p>
+      )}
+      {events.map((ev, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 10, marginBottom: 4, lineHeight: 1.5 }}>
+          <span style={{ color: 'var(--muted)', fontFamily: 'ui-monospace, monospace', flexShrink: 0, fontSize: 9 }}>
+            {fmtEvtTime(ev.ts)}
+          </span>
+          <span style={{ color: eventColor(ev.type), flexShrink: 0 }}>
+            {eventIcon(ev.type)} {ev.type.replace('_', ' ')}
+          </span>
+          <span style={{ color: 'var(--text)', wordBreak: 'break-word', flex: 1 }}>
+            {ev.message}
+          </span>
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
 /* ─── Main page ──────────────────────────────────────────────────────── */
 export function OverviewPage() {
   const { token, health, mdHealth, stats, globalProv, stream, ws } = useLiveAdminMetrics();
@@ -639,6 +690,7 @@ export function OverviewPage() {
         <div className="cc-col-right">
           <WsStatusPanel ws={ws.data} token={hasToken} />
           <AbuseSummaryPanel token={hasToken} />
+          <RecentEventsPanel token={hasToken} />
         </div>
       </div>
     </div>

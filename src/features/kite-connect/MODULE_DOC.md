@@ -35,3 +35,7 @@ Kite Connect HTTP client + WebSocket ticker provider. Implements the `MarketData
 | `KITE_API_KEY` | Kite Connect API key (required) |
 | `KITE_ACCESS_TOKEN` | OAuth access token; falls back to Redis `kite:access_token` |
 | `KITE_WS_MAX_SHARDS` | Max concurrent Kite WebSocket connections (default `1`; each shard holds up to 3000 instruments) |
+
+- **2026-04-14** — Phase 3: Admin events ring buffer:
+  - `KiteProviderService`: publishes `connect`, `disconnect`, `auth_error`, `max_reconnect` events to `admin:events` Redis list (LPUSH + LTRIM to 50 entries) via `RedisService.lpushTrim()` inside all four ticker callbacks.
+  - `RedisService`: added `lpushTrim(key, value, maxLen)` and `lrange(key, start, stop)` for ring buffer operations.

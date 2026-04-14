@@ -674,6 +674,19 @@ export class AdminController {
     return this.vortexProvider.getDebugStatus?.() || {};
   }
 
+  @Get('events')
+  @ApiOperation({
+    summary: 'Recent admin stream events (connect, disconnect, auth_error, max_reconnect)',
+    description: 'Ring buffer of last 50 events published by KiteProviderService. Useful for the admin dashboard events feed.',
+  })
+  @ApiQuery({ name: 'limit', required: false, description: 'Max events to return (1–50, default 20)' })
+  async recentEvents(@Query('limit') limitRaw?: string) {
+    const limit = Math.min(50, Math.max(1, Number(limitRaw) || 20));
+    const raw = await this.redis.lrangeRaw('admin:events', 0, limit - 1);
+    const events = raw.map((s: string) => { try { return JSON.parse(s); } catch { return { raw: s }; } });
+    return { success: true, data: events, total: events.length };
+  }
+
   // ===== Audit / Sampling Config =====
 
   @Get('audit/config')
