@@ -4,7 +4,7 @@
  * @description Typed API client for Falcon (Kite) admin endpoints under /api/admin/falcon/*.
  * @author BharatERP
  * @created 2026-04-14
- * @updated 2026-04-14
+ * @updated 2026-04-14 — added shard status, batch historical, options chain admin, cache flush
  */
 import { apiFetch } from './api-client';
 import type {
@@ -131,5 +131,86 @@ export function getFalconHistorical(
   return apiFetch<{ candles: FalconCandle[] }>(
     `/api/admin/falcon/historical/${encodeURIComponent(token)}?${q}`,
     { ...admin },
+  );
+}
+
+// ─── Batch Historical ──────────────────────────────────────────────────────
+
+export interface FalconBatchHistoricalRequest {
+  token: number;
+  from: string;
+  to: string;
+  interval: string;
+  continuous?: boolean;
+  oi?: boolean;
+}
+
+export function postFalconHistoricalBatch(requests: FalconBatchHistoricalRequest[]) {
+  return apiFetch<Record<number, { candles?: FalconCandle[]; error?: string }>>(
+    '/api/admin/falcon/historical/batch',
+    { ...admin, method: 'POST', body: JSON.stringify({ requests }) },
+  );
+}
+
+// ─── Shard Status ──────────────────────────────────────────────────────────
+
+export interface FalconShardStatus {
+  index: number;
+  isConnected: boolean;
+  subscribedCount: number;
+  reconnectAttempts: number;
+  reconnectCount: number;
+  disableReconnect: boolean;
+}
+
+export interface FalconShardStatusResponse {
+  shards: FalconShardStatus[];
+  totalCapacity: number;
+  used: number;
+  remaining: number;
+  utilizationPct: number;
+}
+
+export function getFalconShardStatus() {
+  return apiFetch<FalconShardStatusResponse>('/api/admin/falcon/ticker/shards', { ...admin });
+}
+
+// ─── Options Chain (Admin) ─────────────────────────────────────────────────
+
+export interface FalconOptionsStrike {
+  strike: number;
+  ceToken?: number;
+  ceLtp?: number | null;
+  peToken?: number;
+  peLtp?: number | null;
+}
+
+export interface FalconOptionsChainResponse {
+  symbol: string;
+  expiries: string[];
+  strikes: FalconOptionsStrike[];
+  fetchedAt?: string;
+}
+
+export function getFalconOptionsChainAdmin(symbol: string, ltpOnly = false) {
+  const q = ltpOnly ? '?ltp_only=true' : '';
+  return apiFetch<FalconOptionsChainResponse>(
+    `/api/admin/falcon/options/chain/${encodeURIComponent(symbol)}${q}`,
+    { ...admin },
+  );
+}
+
+// ─── Cache Flush ───────────────────────────────────────────────────────────
+
+export interface FlushFalconCacheBody {
+  type: 'options' | 'ltp' | 'historical';
+  symbol?: string;
+  token?: number;
+}
+
+export function flushFalconCache(body: FlushFalconCacheBody) {
+  return apiFetch<{ deleted: number; message?: string }>(
+    '/api/admin/falcon/cache/flush',
+    { ...admin, method: 'DELETE', body: JSON.stringify(body) },
   );
 }

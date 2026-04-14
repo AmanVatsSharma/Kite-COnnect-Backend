@@ -24,9 +24,9 @@ import { FalconInstrumentService } from '@features/falcon/application/falcon-ins
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
 import { RedisService } from '@infra/redis/redis.service';
 import { randomUUID } from 'crypto';
-import { ApiBadRequestResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBadRequestResponse, ApiBody, ApiHeader, ApiOkResponse, ApiOperation, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from '@shared/guards/api-key.guard';
-import { FalconTokensDto, FalconHistoricalQueryDto } from './dto/falcon-market-data.dto';
+import { FalconTokensDto, FalconHistoricalQueryDto, FalconBatchHistoricalDto } from './dto/falcon-market-data.dto';
 
 @ApiTags('falcon')
 @UseGuards(ApiKeyGuard)
@@ -650,6 +650,32 @@ export class FalconController {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
         { success: false, message: 'Falcon OHLC failed', error: (error as any)?.message || 'unknown' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('historical/batch')
+  @ApiOperation({
+    summary: 'Batch historical candles for up to 10 tokens in a single call',
+    description: 'Fetches OHLCV candle data for multiple tokens in one request (max 10). Each token uses its own from/to/interval. Concurrency-limited to 3 parallel requests (~3 RPS). Uses per-token Redis cache with smart TTL (60s for 1-min today → 86400s for day interval past dates).',
+  })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  @ApiBody({ type: FalconBatchHistoricalDto, description: 'Up to 10 token historical requests' })
+  @ApiOkResponse({ description: 'Map of instrument_token → candle data. Individual tokens may contain { error } if that token failed.' })
+  @ApiBadRequestResponse({ description: 'requests array missing or empty' })
+  async historicalBatch(@Body() body: FalconBatchHistoricalDto) {
+    try {
+      const requests = (body?.requests || []).slice(0, 10);
+      if (!requests.length) {
+        throw new HttpException({ success: false, message: 'requests array is required (max 10)' }, HttpStatus.BAD_REQUEST);
+      }
+      const data = await this.falconAdapter.getBatchHistoricalData(requests);
+      return { success: true, data, count: Object.keys(data).length, timestamp: new Date().toISOString() };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: 'Batch historical failed', error: (error as any)?.message || 'unknown' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

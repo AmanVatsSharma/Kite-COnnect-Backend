@@ -4,7 +4,7 @@
  * @description Kite Connect HTTP + ticker provider implementing MarketDataProvider; ticker wrapped for stream mode parity with Vortex (ohlcv → quote).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-14 — exponential-backoff reconnect, resolveExchanges(), Redis pub/sub events, kite reconnect metrics
+ * @updated 2026-04-14 — multi-shard KiteShardedTicker, KITE_WS_MAX_SHARDS, getSubscriptionLimit/getShardStatus, exponential-backoff reconnect, resolveExchanges(), Redis pub/sub events, kite reconnect metrics
  *
  * Notes:
  * - refreshSession / isClientInitialized support scheduled Falcon instrument sync.
@@ -27,9 +27,7 @@ import {
 import { MetricsService } from '@infra/observability/metrics.service';
 import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.entity';
 import { KiteConnect } from 'kiteconnect';
-import { wrapKiteTickerForStreaming } from '@features/kite-connect/infra/kite-ticker.facade';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { KiteTicker } = require('kiteconnect');
+import { KiteShardedTicker, KiteShardStatus } from '@features/kite-connect/infra/kite-sharded-ticker';
 
 /** Kite segment → Vortex-style exchange label (used by resolveExchanges). */
 const SEGMENT_TO_EXCHANGE: Record<string, string> = {
@@ -65,6 +63,8 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     time: string;
   } | null = null;
   private reconnectCount = 0;
+  /** Number of WS shards configured (read from KITE_WS_MAX_SHARDS on first initializeTicker call). */
+  private maxShards = 1;
 
   /** Identify this as the kite provider for stream service limit enforcement. */
   readonly providerName = 'kite';
@@ -411,100 +411,84 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       return undefined as any;
     }
 
-    const inner = new KiteTicker({
-      api_key: apiKey,
-      access_token: accessToken,
-    });
+    const maxShards = Math.max(1, Number(this.configService.get('KITE_WS_MAX_SHARDS') || 1));
+    this.maxShards = maxShards;
 
-    inner.on('connect', () => {
-      this.isConnected = true;
-      this.reconnectAttempts = 0;
-      this.disableReconnect = false;
-      this.logger.log('[Kite] Ticker connected');
-      this.metrics.marketDataStreamTickerConnected.labels('kite').set(1);
-      this.publishStreamStatus('connect');
-    });
-    inner.on('ticks', (ticks: any[]) => {
-      this.logger.debug?.(`[Kite] Received ${ticks?.length || 0} ticks`);
-    });
-    inner.on('disconnect', (...args: any[]) => {
-      this.isConnected = false;
-      this.logger.warn(
-        '[Kite] Ticker disconnected ' + this.stringifyArgs(args),
-      );
-      this.metrics.marketDataStreamTickerConnected.labels('kite').set(0);
-      if (this.disableReconnect) {
-        this.logger.warn(
-          '[Kite] Reconnect disabled due to previous auth errors',
-        );
-        return;
-      }
-      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-        this.logger.warn(
-          `[Kite] Max reconnect attempts (${this.maxReconnectAttempts}) reached; stopping`,
-        );
+    const shardedTicker = new KiteShardedTicker({
+      apiKey,
+      accessToken,
+      maxShards,
+      maxReconnectAttempts: this.maxReconnectAttempts,
+      logger: this.logger,
+      onTick: (ticks) => {
+        this.logger.debug?.(`[Kite] Received ${ticks?.length || 0} ticks (shards=${maxShards})`);
+      },
+      onConnect: (shardIndex) => {
+        if (!this.isConnected) {
+          this.isConnected = true;
+          this.reconnectAttempts = 0;
+          this.disableReconnect = false;
+          this.metrics.marketDataStreamTickerConnected.labels('kite').set(1);
+          this.publishStreamStatus('connect');
+          this.logger.log(`[Kite] Shard ${shardIndex} connected (first connection)`);
+        } else {
+          this.logger.log(`[Kite] Shard ${shardIndex} reconnected`);
+        }
+      },
+      onDisconnect: (shardIndex, _args) => {
+        const allDisconnected = shardedTicker.getShardStatus().every((s) => !s.isConnected);
+        if (allDisconnected) {
+          this.isConnected = false;
+          this.metrics.marketDataStreamTickerConnected.labels('kite').set(0);
+          this.publishStreamStatus('disconnect');
+        }
+        this.reconnectCount++;
+        this.metrics.kiteTickerReconnectTotal.labels('reconnecting').inc();
+        this.logger.warn(`[Kite] Shard ${shardIndex} disconnected (allDisconnected=${allDisconnected})`);
+      },
+      onAuthError: (_shardIndex, error) => {
+        const pretty = this.formatError(error);
+        this.lastTickerError = {
+          message: pretty,
+          code: (error && (error.code || error?.data?.code)) || undefined,
+          status: (error && (error.status || error?.data?.status)) || undefined,
+          time: new Date().toISOString(),
+        };
+        this.disableReconnect = true;
+        this.isConnected = false;
+        this.metrics.kiteTickerReconnectTotal.labels('auth_error').inc();
+        this.metrics.marketDataStreamTickerConnected.labels('kite').set(0);
+        this.publishStreamStatus('auth_error');
+        this.logger.warn('[Kite] Disabling reconnect due to authentication error. Visit /api/auth/falcon/login to re-authenticate.');
+      },
+      onMaxReconnect: (_shardIndex) => {
         this.metrics.kiteTickerReconnectTotal.labels('max_attempts').inc();
         this.publishStreamStatus('provider_halted');
-        return;
-      }
-      this.reconnectAttempts++;
-      this.reconnectCount++;
-      this.metrics.kiteTickerReconnectTotal.labels('reconnecting').inc();
-      this.publishStreamStatus('disconnect');
-      // Exponential backoff with jitter: min(30s, 1s * 2^attempts) + rand(0-1s)
-      const base = Math.min(30_000, 1000 * Math.pow(2, this.reconnectAttempts));
-      const jitter = Math.floor(Math.random() * 1000);
-      const delayMs = base + jitter;
-      this.logger.log(
-        `[Kite] Reconnecting in ${delayMs}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
-      );
-      setTimeout(() => {
-        try {
-          inner.connect();
-        } catch (e) {
-          this.logger.error('[Kite] Ticker reconnect failed', e as any);
-        }
-      }, delayMs);
+      },
+      onError: (_shardIndex, error) => {
+        const pretty = this.formatError(error);
+        this.lastTickerError = {
+          message: pretty,
+          code: (error && (error.code || error?.data?.code)) || undefined,
+          status: (error && (error.status || error?.data?.status)) || undefined,
+          time: new Date().toISOString(),
+        };
+        this.logger.error('[Kite] Ticker error: ' + pretty);
+      },
     });
 
-    // Optional events if exposed by SDK; safe to attach even if never emitted
-    inner.on('reconnect', (...args: any[]) => {
-      this.logger.warn(
-        '[Kite] Ticker reconnect event ' + this.stringifyArgs(args),
-      );
-    });
-    inner.on('noreconnect', (...args: any[]) => {
-      this.logger.warn(
-        '[Kite] Ticker noreconnect event ' + this.stringifyArgs(args),
-      );
-    });
-    inner.on('close', (...args: any[]) => {
-      this.logger.warn('[Kite] Ticker close event ' + this.stringifyArgs(args));
-    });
-    inner.on('error', (error: any) => {
-      const pretty = this.formatError(error);
-      this.lastTickerError = {
-        message: pretty,
-        code: (error && (error.code || error?.data?.code)) || undefined,
-        status: (error && (error.status || error?.data?.status)) || undefined,
-        time: new Date().toISOString(),
-      };
-      this.logger.error('[Kite] Ticker error: ' + pretty);
-      if (this.isAuthError(error)) {
-        this.disableReconnect = true;
-        this.metrics.kiteTickerReconnectTotal.labels('auth_error').inc();
-        this.publishStreamStatus('auth_error');
-        this.logger.warn(
-          '[Kite] Disabling reconnect due to authentication error. Visit /api/auth/falcon/login to re-authenticate.',
-        );
-        try {
-          inner.disconnect?.();
-        } catch {}
-      }
-    });
-
-    this.ticker = wrapKiteTickerForStreaming(inner);
+    this.ticker = shardedTicker;
     return this.ticker;
+  }
+
+  /** Total upstream instrument capacity across all shards (3000 × numShards). */
+  getSubscriptionLimit(): number {
+    return (this.ticker as KiteShardedTicker)?.getSubscriptionLimit?.() ?? 3000;
+  }
+
+  /** Per-shard status for admin monitoring. */
+  getShardStatus(): KiteShardStatus[] {
+    return (this.ticker as KiteShardedTicker)?.getShardStatus?.() ?? [];
   }
 
   async restartTicker(): Promise<void> {
@@ -515,9 +499,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         } catch {}
       }
       this.ticker = undefined as any;
-      // Reset reconnect state so fresh connection starts cleanly
+      // Reset aggregate state so fresh connection starts cleanly
       this.reconnectAttempts = 0;
       this.disableReconnect = false;
+      this.isConnected = false;
       const ticker = this.initializeTicker();
       try {
         ticker?.connect?.();
@@ -687,6 +672,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
 
   // Exposed for debugging via controller
   getDebugStatus() {
+    const shards = this.getShardStatus();
     return {
       connected: this.isConnected,
       reconnectAttempts: this.reconnectAttempts,
@@ -699,6 +685,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       maskedApiKey: this.mask(this.currentApiKey),
       maskedAccessToken: this.mask(this.currentAccessToken),
       lastTickerError: this.lastTickerError,
+      shardCount: shards.length || this.maxShards,
+      subscriptionLimit: this.getSubscriptionLimit(),
+      shards,
     };
   }
 

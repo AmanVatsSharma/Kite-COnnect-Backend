@@ -151,6 +151,23 @@ export class FalconProviderAdapter {
 
   // ─── Historical ───────────────────────────────────────────────────────────
 
+  /**
+   * Smart TTL for historical candles:
+   * - Intraday (minute–60min) today: short TTL (60–900s) so live charts update
+   * - Intraday past dates: medium TTL (3600–21600s)
+   * - Day interval today: 1800s (today's daily candle updates until close)
+   * - Day interval past: 86400s (static historical)
+   */
+  private historicalTtl(interval: string, to: string): number {
+    const today = new Date().toISOString().slice(0, 10);
+    const isToday = to >= today;
+    if (['minute', '3minute', '5minute'].includes(interval)) return isToday ? 60 : 3600;
+    if (['10minute', '15minute', '30minute'].includes(interval)) return isToday ? 300 : 7200;
+    if (interval === '60minute') return isToday ? 900 : 21600;
+    // day or unknown: static historical after market close
+    return isToday ? 1800 : 86400;
+  }
+
   async getHistoricalData(
     token: number,
     from: string,
@@ -168,9 +185,40 @@ export class FalconProviderAdapter {
       'getHistoricalData',
     );
     if (data) {
-      await this.setToRedis(cacheKey, data, 3600);
+      await this.setToRedis(cacheKey, data, this.historicalTtl(interval, to));
     }
     return data;
+  }
+
+  /**
+   * Batch historical: fetch up to 10 tokens in parallel (3-at-a-time, respecting 3 RPS).
+   * Each request uses the same caching as getHistoricalData().
+   */
+  async getBatchHistoricalData(
+    requests: Array<{ token: number; from: string; to: string; interval: string; continuous?: boolean; oi?: boolean }>,
+  ): Promise<Record<number, any>> {
+    const MAX = 10;
+    const capped = requests.slice(0, MAX);
+    const results: Record<number, any> = {};
+    const CONCURRENCY = 3;
+    for (let i = 0; i < capped.length; i += CONCURRENCY) {
+      const chunk = capped.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        chunk.map(async (r) => {
+          try {
+            results[r.token] = await this.getHistoricalData(
+              r.token, r.from, r.to, r.interval, r.continuous ?? false, r.oi ?? false,
+            );
+          } catch (e) {
+            results[r.token] = { error: (e as any)?.message || 'failed' };
+          }
+        }),
+      );
+      if (i + CONCURRENCY < capped.length) {
+        await new Promise((res) => setTimeout(res, 350)); // ~3 RPS pacing
+      }
+    }
+    return results;
   }
 
   // ─── Profile ──────────────────────────────────────────────────────────────

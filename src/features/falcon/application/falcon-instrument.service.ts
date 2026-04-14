@@ -894,9 +894,24 @@ export class FalconInstrumentService implements OnModuleInit {
   // Vayu-parity additions
   // =====================================================================
 
+  /** True if current time is within NSE market hours (IST 9:15–15:30, Mon–Fri). */
+  private isMarketHours(): boolean {
+    try {
+      const now = new Date();
+      const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      const day = ist.getDay();
+      if (day === 0 || day === 6) return false; // weekend
+      const mins = ist.getHours() * 60 + ist.getMinutes();
+      return mins >= 555 && mins <= 930; // 9:15 = 555, 15:30 = 930
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Options chain for a symbol: all CE/PE rows grouped by expiry → strike → { CE, PE }.
    * Kite stores the underlying name in `name` (e.g. "NIFTY", "RELIANCE").
+   * Results are Redis-cached: 60s during market hours, 300s otherwise.
    */
   async getOptionsChain(
     symbol: string,
@@ -915,6 +930,14 @@ export class FalconInstrumentService implements OnModuleInit {
     if (!sym) {
       return { success: true, data: { symbol: sym, expiries: [], strikes: [], options: {}, ltp_only: ltpOnly } };
     }
+
+    // Redis cache
+    const cacheKey = `falcon:options:chain:${sym}${ltpOnly ? ':ltp' : ''}`;
+    try {
+      const cached = await this.redis.get<any>(cacheKey);
+      if (cached) return cached;
+    } catch { /* non-fatal */ }
+
     const rows = await this.falconInstrumentRepo
       .createQueryBuilder('fi')
       .where('UPPER(fi.name) = :sym', { sym })
@@ -958,7 +981,7 @@ export class FalconInstrumentService implements OnModuleInit {
       };
     }
 
-    return {
+    const result = {
       success: true,
       data: {
         symbol: sym,
@@ -968,6 +991,14 @@ export class FalconInstrumentService implements OnModuleInit {
         ltp_only: ltpOnly,
       },
     };
+
+    // Cache result
+    const ttl = this.isMarketHours() ? 60 : 300;
+    try {
+      await this.redis.set(cacheKey, result, ttl);
+    } catch { /* non-fatal */ }
+
+    return result;
   }
 
   /**
