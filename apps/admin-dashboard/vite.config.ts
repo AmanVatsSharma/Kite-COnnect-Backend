@@ -20,9 +20,23 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      // Redirect root → /dashboard/ so localhost:5173/ works in dev
+      open: '/dashboard/',
       proxy: {
         '/api': {
           target,
+          changeOrigin: true,
+        },
+        // Proxy /ws native WebSocket (needed if dashboard ever streams ticks directly)
+        '/ws': {
+          target: target.replace('http', 'ws'),
+          ws: true,
+          changeOrigin: true,
+        },
+        // Proxy Socket.IO transport (market-data namespace)
+        '/socket.io': {
+          target,
+          ws: true,
           changeOrigin: true,
         },
       },

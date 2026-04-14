@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "kite": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.kite.trade/mcp"],
+      "env": {}
+    }
+  }
+}
