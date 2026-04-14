@@ -28,5 +28,7 @@ Keep `StockModule` as the composition root re-exporting providers until cycle ri
 
 ## Changelog
 
+- **2026-04-14** — Runtime credential management: added `AdminVayuController` (`interface/admin-vayu.controller.ts`) with `GET /api/admin/vayu/config` + `PATCH /api/admin/vayu/config` endpoints; `VortexProviderService` gains `updateApiCredentials(params)` + `getConfigStatus()` + `loadConfigOverrides()` to load DB-persisted credential overrides on startup; `VortexAuthController` (Vayu login/callback) reads appId/apiKey/baseUrl from `app_configs` DB table before env vars; `StockModule` wires `AdminVayuController` + `AdminGuard`; ProviderPage.tsx gains "Vayu API Credentials" section for updating without SSH.
+
 - **2026-03-28** — **Vortex instruments**: monolithic `vortex-instrument.service.ts` split into `vortex-instrument-sync`, `-cleanup`, `-cache`, `-ltp`, `-search`, `-read` services with **unchanged** `VortexInstrumentService` facade API. Helpers in `vortex-instrument-helpers.ts`. **Stock REST**: `stock.controller.ts` split into `stock-instruments`, `stock-quotes`, `stock-subscriptions` controllers (same `stock` prefix). **Vortex provider**: CSV + binary tick parsing moved to `vortex-csv.util.ts`, `vortex-ws-binary-tick.parser.ts`. Unit test `stock.controller.spec` retargeted to `VayuController` LTP; Falcon spec `Repository` import fixed.
 - **2025+** — See git history for Vayu and Vortex streaming work.

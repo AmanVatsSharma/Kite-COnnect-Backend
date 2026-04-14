@@ -7,6 +7,8 @@ import { StockInstrumentsController } from './interface/stock-instruments.contro
 import { StockQuotesController } from './interface/stock-quotes.controller';
 import { StockSubscriptionsController } from './interface/stock-subscriptions.controller';
 import { VayuController } from './interface/vayu.controller';
+import { AdminVayuController } from './interface/admin-vayu.controller';
+import { AdminGuard } from '@features/admin/guards/admin.guard';
 import { StockService } from './application/stock.service';
 import { VortexProviderService } from './infra/vortex-provider.service';
 import { VortexInstrumentService } from './application/vortex-instrument.service';
@@ -52,9 +54,11 @@ import { AdminModule } from '../admin/admin.module';
     StockQuotesController,
     StockSubscriptionsController,
     VayuController,
+    AdminVayuController,
   ],
   providers: [
     StockService,
+    AdminGuard,
     VortexProviderService,
     VortexInstrumentLtpService,
     VortexInstrumentSyncService,
