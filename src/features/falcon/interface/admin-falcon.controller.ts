@@ -23,14 +23,14 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiOperation, ApiParam, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '@features/admin/guards/admin.guard';
 import { FalconInstrumentService } from '@features/falcon/application/falcon-instrument.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
 import { RedisService } from '@infra/redis/redis.service';
-import { FalconTokensDto, FalconHistoricalQueryDto, FalconBatchHistoricalDto } from './dto/falcon-market-data.dto';
+import { FalconTokensDto, FalconHistoricalQueryDto, FalconBatchHistoricalDto, FalconCacheFlushDto } from './dto/falcon-market-data.dto';
 
 @ApiTags('admin-falcon')
 @ApiSecurity('admin')
@@ -388,6 +388,8 @@ export class AdminFalconController {
 
   @Post('historical/batch')
   @ApiOperation({ summary: 'Batch historical candles for up to 10 tokens in a single call' })
+  @ApiBody({ type: FalconBatchHistoricalDto, description: 'Array of up to 10 historical data requests' })
+  @ApiResponse({ status: 200, description: 'Map of token → candle data (or error per token if one failed)' })
   async adminHistoricalBatch(@Body() body: FalconBatchHistoricalDto) {
     try {
       const requests = (body?.requests || []).slice(0, 10);
@@ -437,7 +439,23 @@ export class AdminFalconController {
   // ─── Multi-Shard Status ───────────────────────────────────────────────────
 
   @Get('ticker/shards')
-  @ApiOperation({ summary: 'Per-shard Kite WebSocket status and total capacity' })
+  @ApiOperation({
+    summary: 'Per-shard Kite WebSocket status and total capacity',
+    description: 'Returns per-shard connection state, subscribed token counts, and aggregate capacity utilization. Meaningful only when KITE_WS_MAX_SHARDS > 1; returns a single shard entry when default (1).',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Shard list + totalCapacity, used, remaining, utilizationPct',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          shards: [{ index: 0, isConnected: true, subscribedCount: 1500, reconnectAttempts: 0, reconnectCount: 2, disableReconnect: false }],
+          totalCapacity: 3000, used: 1500, remaining: 1500, utilizationPct: 50,
+        },
+      },
+    },
+  })
   async shardStatus() {
     try {
       const shards = this.kiteProvider.getShardStatus();
@@ -464,9 +482,13 @@ export class AdminFalconController {
   // ─── Options Chain Admin ──────────────────────────────────────────────────
 
   @Get('options/chain/:symbol')
-  @ApiOperation({ summary: 'Options chain for an underlying symbol (admin view, with Redis cache)' })
-  @ApiParam({ name: 'symbol', required: true, example: 'NIFTY' })
-  @ApiQuery({ name: 'ltp_only', required: false })
+  @ApiOperation({
+    summary: 'Options chain for an underlying symbol (admin view, with Redis cache)',
+    description: 'Returns call/put strikes grouped by expiry. Cached in Redis: 60s during market hours (9:15–15:30 IST), 300s otherwise. Use DELETE /cache/flush { type: "options", symbol } to invalidate.',
+  })
+  @ApiParam({ name: 'symbol', required: true, example: 'NIFTY', description: 'Underlying symbol (case-insensitive)' })
+  @ApiQuery({ name: 'ltp_only', required: false, description: 'If true, only CE/PE LTPs are populated (faster); no full quote data' })
+  @ApiResponse({ status: 200, description: 'Options chain with expiries, strikes, CE/PE tokens and LTPs' })
   async adminOptionsChain(
     @Param('symbol') symbol: string,
     @Query('ltp_only') ltpOnlyRaw?: string,
@@ -489,9 +511,14 @@ export class AdminFalconController {
   // ─── Cache Management ─────────────────────────────────────────────────────
 
   @Delete('cache/flush')
-  @ApiOperation({ summary: 'Flush Falcon Redis caches: options, ltp, or historical by token' })
+  @ApiOperation({
+    summary: 'Flush Falcon Redis caches: options, ltp, or historical by token',
+    description: 'type=options requires symbol; type=ltp or type=historical requires token. Uses Redis SCAN+DEL for wildcard patterns.',
+  })
+  @ApiBody({ type: FalconCacheFlushDto })
+  @ApiResponse({ status: 200, description: 'Number of keys deleted', schema: { example: { success: true, deleted: 4, type: 'options', symbol: 'NIFTY' } } })
   async flushCache(
-    @Body() body: { type: 'options' | 'ltp' | 'historical'; symbol?: string; token?: number },
+    @Body() body: FalconCacheFlushDto,
   ) {
     try {
       const { type, symbol, token } = body || {};

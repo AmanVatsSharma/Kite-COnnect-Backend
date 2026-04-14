@@ -1,10 +1,10 @@
 /**
  * @file falcon-market-data.dto.ts
  * @module falcon
- * @description DTOs for Falcon market data endpoints: Quote, OHLC, Historical candles, Batch historical.
+ * @description DTOs for Falcon market data endpoints: Quote, OHLC, Historical candles, Batch historical, Cache flush.
  * @author BharatERP
  * @created 2026-04-14
- * @updated 2026-04-14 — added FalconBatchHistoricalDto
+ * @updated 2026-04-14 — added FalconBatchHistoricalDto, FalconCacheFlushDto
  */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -81,4 +81,26 @@ export class FalconBatchHistoricalDto {
     type: [FalconBatchHistoricalItemDto],
   })
   requests!: FalconBatchHistoricalItemDto[];
+}
+
+/** Body for DELETE /admin/falcon/cache/flush. */
+export class FalconCacheFlushDto {
+  @ApiProperty({
+    description: 'Cache type to flush',
+    enum: ['options', 'ltp', 'historical'],
+    example: 'options',
+  })
+  type!: 'options' | 'ltp' | 'historical';
+
+  @ApiPropertyOptional({
+    description: 'Underlying symbol — required when type=options (e.g. NIFTY)',
+    example: 'NIFTY',
+  })
+  symbol?: string;
+
+  @ApiPropertyOptional({
+    description: 'Instrument token — required when type=ltp or type=historical',
+    example: 738561,
+  })
+  token?: number;
 }
