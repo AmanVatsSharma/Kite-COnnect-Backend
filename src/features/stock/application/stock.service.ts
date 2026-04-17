@@ -557,6 +557,10 @@ export class StockService {
   ): Promise<void> {
     try {
       await this.redisService.set(`last_tick:${instrumentToken}`, data, 300);
+      // Dual-write UIR-keyed cache when enrichment is present
+      if (data?._uirId != null) {
+        await this.redisService.set(`last_tick:uir:${data._uirId}`, data, 300);
+      }
     } catch (e: any) {
       this.logger.warn(
         `Failed to set last_tick in Redis for token ${instrumentToken}: ${e?.message || e}`,

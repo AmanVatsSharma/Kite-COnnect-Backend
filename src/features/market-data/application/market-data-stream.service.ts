@@ -4,7 +4,7 @@
  * @description Orchestrates provider ticker streaming, subscription batching, LTP cache, and Redis stream status.
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-03-28
+ * @updated 2026-04-17
  */
 import {
   Injectable,
@@ -24,6 +24,7 @@ import { LtpMemoryCacheService } from '@features/market-data/application/ltp-mem
 import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
 import { internalToClientProviderName } from '@shared/utils/provider-label.util';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 
 @Injectable()
 export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
@@ -64,6 +65,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     private metrics: MetricsService,
     private readonly wsInterest: MarketDataWsInterestService,
     private readonly configService: ConfigService,
+    private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
 
   async onModuleInit() {
@@ -292,6 +294,16 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
       for (const tick of ticks) {
         const instrumentToken = tick.instrument_token;
+
+        // Enrich tick with UIR data (Phase 2: dual-key, enrichment only)
+        const uirId = this.instrumentRegistry.resolveProviderToken(
+          this.streamMetricsProvider,
+          instrumentToken,
+        );
+        if (uirId !== undefined) {
+          tick._uirId = uirId;
+          tick._canonicalSymbol = this.instrumentRegistry.getCanonicalSymbol(uirId);
+        }
 
         // Update subscribed instruments set first
         this.subscribedInstruments.add(instrumentToken);

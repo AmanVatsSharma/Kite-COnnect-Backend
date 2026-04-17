@@ -14,6 +14,7 @@ import { RedisService } from '@infra/redis/redis.service';
 import { LtpMemoryCacheService } from './ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketDataWsInterestService } from './market-data-ws-interest.service';
+import { InstrumentRegistryService } from './instrument-registry.service';
 
 describe('MarketDataStreamService', () => {
   let service: MarketDataStreamService;
@@ -81,6 +82,13 @@ describe('MarketDataStreamService', () => {
             getInterestedTokens: jest.fn(() => [1]),
             addInterest: jest.fn(),
             removeInterest: jest.fn(),
+          },
+        },
+        {
+          provide: InstrumentRegistryService,
+          useValue: {
+            resolveProviderToken: jest.fn(() => undefined),
+            getCanonicalSymbol: jest.fn(() => undefined),
           },
         },
         {
