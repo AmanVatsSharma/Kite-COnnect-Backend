@@ -24,7 +24,7 @@ export class UniversalInstrument {
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: string;
 
-  @Column({ type: 'varchar', length: 128, unique: true })
+  @Column({ type: 'varchar', length: 128 })
   canonical_symbol: string;
 
   @Column({ type: 'varchar', length: 8 })
