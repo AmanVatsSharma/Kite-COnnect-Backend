@@ -5,6 +5,7 @@
  * @author BharatERP
  * @created 2025-03-23
  * @updated 2026-04-18
+ * Changelog: added symbols[] canonical subscription support in handleSubscribe
  */
 import {
   Injectable,
@@ -312,13 +313,38 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
-    const { instruments, mode = 'ltp' } = data || {};
+    const { instruments: rawInstruments = [], symbols = [], mode = 'ltp' } = data || {};
 
-    if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
+    // Resolve canonical symbols (e.g. "NSE:RELIANCE") to numeric provider tokens
+    const resolvedSymbolTokens: number[] = [];
+    const unresolvedSymbols: string[] = [];
+    if (Array.isArray(symbols) && symbols.length > 0) {
+      const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+      for (const sym of symbols as string[]) {
+        const uirId = this.instrumentRegistry.resolveCanonicalSymbol(sym);
+        if (uirId == null) { unresolvedSymbols.push(sym); continue; }
+        const pt = this.instrumentRegistry.getProviderToken(uirId, providerName);
+        if (pt != null) resolvedSymbolTokens.push(Number(pt));
+        else unresolvedSymbols.push(sym);
+      }
+    }
+
+    const instruments: number[] = [...(rawInstruments as number[]), ...resolvedSymbolTokens];
+
+    if (instruments.length === 0 && symbols.length === 0) {
       this.sendError(
         client,
         'WS_INVALID_INSTRUMENTS',
-        'Invalid instruments array',
+        'Provide instruments (numeric tokens) or symbols (canonical strings)',
+      );
+      return;
+    }
+
+    if (instruments.length === 0) {
+      this.sendError(
+        client,
+        'WS_INVALID_INSTRUMENTS',
+        `No resolvable instruments found. Unresolved symbols: ${unresolvedSymbols.join(', ')}`,
       );
       return;
     }
@@ -399,6 +425,7 @@ export class NativeWsService implements OnModuleDestroy {
       instruments: subscription.instruments,
       mode,
       limits,
+      ...(unresolvedSymbols.length > 0 ? { unresolvedSymbols } : {}),
       timestamp: new Date().toISOString(),
     });
 

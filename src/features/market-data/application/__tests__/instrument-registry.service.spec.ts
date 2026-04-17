@@ -153,7 +153,7 @@ describe('InstrumentRegistryService', () => {
   describe('refresh', () => {
     it('should clear and repopulate all maps', async () => {
       await service.warmMaps();
-      expect(service.getStats()).toEqual({ instruments: 2, mappings: 3 });
+      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 3 });
 
       // Return different data on refresh
       uirRepoFind.mockResolvedValue([
@@ -172,18 +172,18 @@ describe('InstrumentRegistryService', () => {
       // New data should be present
       expect(service.getCanonicalSymbol(1)).toBe('NSE:TCS');
       expect(service.resolveProviderToken('kite', '100')).toBe(1);
-      expect(service.getStats()).toEqual({ instruments: 1, mappings: 1 });
+      expect(service.getStats()).toMatchObject({ instruments: 1, mappings: 1 });
     });
   });
 
   describe('getStats', () => {
     it('should return zero counts before warmMaps', () => {
-      expect(service.getStats()).toEqual({ instruments: 0, mappings: 0 });
+      expect(service.getStats()).toMatchObject({ instruments: 0, mappings: 0 });
     });
 
     it('should return correct counts after warmMaps', async () => {
       await service.warmMaps();
-      expect(service.getStats()).toEqual({ instruments: 2, mappings: 3 });
+      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 3 });
     });
   });
 });

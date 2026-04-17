@@ -4,7 +4,7 @@
  * @description Shapes full provider ticks for client-requested streaming mode (ltp / ohlcv / full).
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-04-17
+ * @updated 2026-04-18
  */
 
 export type StreamTickMode = 'ltp' | 'ohlcv' | 'full';
@@ -41,5 +41,6 @@ export function shapeMarketTickForMode(raw: any, mode: StreamTickMode): any {
       symbol,
     };
   }
-  return { ...raw };
+  const { _uirId, _canonicalSymbol, ...rest } = raw;
+  return { ...rest, uir_id: _uirId, symbol: _canonicalSymbol };
 }

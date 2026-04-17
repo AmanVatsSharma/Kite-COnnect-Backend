@@ -622,6 +622,25 @@ export class MarketDataGateway
         }
       } catch {}
 
+      // Enforce admin WS blocklist (Redis-backed)
+      try {
+        const apiKey: string = ((client.data as any)?.apiKey as string) || client.id;
+        const [keyBlocked, rawBlockedExchanges] = await Promise.all([
+          this.redisService.get(`ws:block:apikey:${apiKey}`),
+          this.redisService.get('ws:block:exchanges'),
+        ]);
+        if (keyBlocked) {
+          client.emit('error', {
+            code: 'api_key_blocked',
+            message: 'This API key is blocked from WS subscriptions',
+          });
+          return;
+        }
+        if (rawBlockedExchanges) {
+          (client as any).__blockedExchanges = new Set<string>(JSON.parse(rawBlockedExchanges as string));
+        }
+      } catch {}
+
       if (
         !instruments ||
         !Array.isArray(instruments) ||
@@ -722,6 +741,12 @@ export class MarketDataGateway
       );
       const forbiddenPairs = finalPairs.filter((p) => !allowed.has(String(p.exchange)));
       finalPairs = finalPairs.filter((p) => allowed.has(String(p.exchange)));
+
+      // Admin blocklist: filter out blocked exchanges
+      const blockedExSet: Set<string> | undefined = (client as any).__blockedExchanges;
+      if (blockedExSet && blockedExSet.size > 0) {
+        finalPairs = finalPairs.filter((p) => !blockedExSet.has(String(p.exchange)));
+      }
 
       // Phase 3: resolve tokens to UIR IDs for internal tracking
       const providerNameForResolve = (this.streamService as any).streamMetricsProvider || 'kite';
