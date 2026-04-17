@@ -67,9 +67,6 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
   /** Number of WS shards configured (read from KITE_WS_MAX_SHARDS on first initializeTicker call). */
   private maxShards = 1;
 
-  /** Identify this as the kite provider for stream service limit enforcement. */
-  readonly providerName = 'kite';
-
   constructor(
     private configService: ConfigService,
     private redisService: RedisService,
