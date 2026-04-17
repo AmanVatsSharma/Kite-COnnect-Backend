@@ -54,14 +54,21 @@ describe('FalconInstrumentService', () => {
     } as unknown as SchedulerRegistry;
     const falconAdapter = {} as FalconProviderAdapter;
     const redisService = { get: jest.fn(), set: jest.fn(), del: jest.fn() } as any;
+    const uirRepo = {
+      upsert: jest.fn().mockResolvedValue(undefined),
+      findOne: jest.fn().mockResolvedValue(null),
+    } as any;
+    const instrumentRegistry = { refresh: jest.fn().mockResolvedValue(undefined) } as any;
     service = new FalconInstrumentService(
       falconRepo as unknown as Repository<FalconInstrument>,
       mappingRepo as unknown as Repository<InstrumentMapping>,
+      uirRepo,
       kite as unknown as KiteProviderService,
       falconAdapter,
       config,
       schedulerRegistry,
       redisService,
+      instrumentRegistry,
     );
   });
 

@@ -4,7 +4,7 @@
  * @description Sync Kite Connect instruments into falcon_instruments with batched upserts, daily cron, retries, and optional reconciliation (Vortex-style).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-03-28
+ * @updated 2026-04-17
  *
  * Notes:
  * - Requires Kite OAuth (KITE_ACCESS_TOKEN or Redis kite:access_token) for sync.
@@ -19,9 +19,13 @@ import { Repository, In, FindOptionsWhere } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.entity';
 import { InstrumentMapping } from '@features/market-data/domain/instrument-mapping.entity';
+import { UniversalInstrument } from '@features/market-data/domain/universal-instrument.entity';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
 import { RedisService } from '@infra/redis/redis.service';
+import { normalizeExchange } from '@shared/utils/exchange-normalizer';
+import { computeCanonicalSymbol } from '@shared/utils/canonical-symbol';
 
 const UPSERT_CHUNK = 600;
 const MAPPING_CHUNK = 800;
@@ -60,11 +64,14 @@ export class FalconInstrumentService implements OnModuleInit {
     private falconInstrumentRepo: Repository<FalconInstrument>,
     @InjectRepository(InstrumentMapping)
     private mappingRepo: Repository<InstrumentMapping>,
+    @InjectRepository(UniversalInstrument)
+    private readonly uirRepo: Repository<UniversalInstrument>,
     private kite: KiteProviderService,
     private falconAdapter: FalconProviderAdapter,
     private readonly config: ConfigService,
     private readonly schedulerRegistry: SchedulerRegistry,
     private readonly redis: RedisService,
+    private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
 
   onModuleInit(): void {
@@ -320,6 +327,15 @@ export class FalconInstrumentService implements OnModuleInit {
         this.logger.warn('[FalconInstrumentService] Symbol cache population failed (non-fatal)', e as Error);
       }
 
+      // Upsert universal instruments and refresh registry
+      try {
+        const uirCount = await this.upsertUniversalInstruments(payloads);
+        this.logger.log(`[FalconInstrumentService] UIR upsert: ${uirCount} instruments linked`);
+        await this.instrumentRegistry.refresh();
+      } catch (uirErr) {
+        this.logger.warn('[FalconInstrumentService] UIR upsert failed (non-fatal)', uirErr as Error);
+      }
+
       this.logger.log(
         `[FalconInstrumentService] Sync completed. Synced: ${synced}, Updated: ${updated}`,
       );
@@ -406,6 +422,91 @@ export class FalconInstrumentService implements OnModuleInit {
       result[sym] = token;
     }
     return result;
+  }
+
+  /**
+   * Upsert universal instrument rows for each Falcon instrument and link them
+   * to existing instrument_mappings via uir_id.
+   */
+  private async upsertUniversalInstruments(payloads: FalconInstrument[]): Promise<number> {
+    let uirCount = 0;
+    const CHUNK = 500;
+
+    for (let i = 0; i < payloads.length; i += CHUNK) {
+      const chunk = payloads.slice(i, i + CHUNK);
+
+      for (const p of chunk) {
+        try {
+          // Normalize exchange
+          const normalizedExchange = normalizeExchange(p.exchange, 'kite');
+
+          // Determine underlying: for equities use 'name' field (it has the clean name),
+          // for derivatives also use 'name' (Kite's name field = underlying for derivatives)
+          // If name is empty, fall back to tradingsymbol
+          const underlying = (p.name || p.tradingsymbol).toUpperCase().trim();
+          if (!underlying) continue;
+
+          // Map instrument_type: Kite uses EQ, FUT, CE, PE directly
+          // For indices (segment contains 'INDICES'), use IDX
+          const instrumentType = p.segment?.includes('INDICES') ? 'IDX' : (p.instrument_type || 'EQ');
+
+          // Parse expiry from string (YYYY-MM-DD format in Kite) to Date
+          let expiry: Date | null = null;
+          if (p.expiry && p.expiry.length >= 10) {
+            expiry = new Date(p.expiry);
+            if (isNaN(expiry.getTime())) expiry = null;
+          }
+
+          const strike = Number(p.strike) || null;
+          const optionType = (instrumentType === 'CE' || instrumentType === 'PE') ? instrumentType : null;
+
+          // Compute canonical symbol
+          const canonicalSymbol = computeCanonicalSymbol({
+            exchange: normalizedExchange,
+            underlying,
+            instrument_type: instrumentType,
+            expiry,
+            strike,
+            option_type: optionType,
+          });
+
+          // Upsert into universal_instruments
+          await this.uirRepo.upsert({
+            canonical_symbol: canonicalSymbol,
+            exchange: normalizedExchange,
+            underlying,
+            instrument_type: instrumentType,
+            expiry,
+            strike: strike || 0,
+            option_type: optionType,
+            lot_size: p.lot_size || 1,
+            tick_size: Number(p.tick_size) || 0.05,
+            name: p.name || '',
+            segment: p.segment || '',
+            is_active: true,
+            asset_class: normalizedExchange === 'MCX' ? 'commodity' : (normalizedExchange === 'CDS' ? 'currency' : 'equity'),
+          }, {
+            conflictPaths: ['canonical_symbol'],
+            skipUpdateIfNoValuesChanged: false,
+          });
+
+          // Find the UIR row to get its ID
+          const uirRow = await this.uirRepo.findOne({ where: { canonical_symbol: canonicalSymbol } });
+          if (uirRow) {
+            // Update the instrument_mapping with uir_id
+            await this.mappingRepo.update(
+              { provider: 'kite' as const, provider_token: String(p.instrument_token) },
+              { uir_id: Number(uirRow.id) },
+            );
+            uirCount++;
+          }
+        } catch (err) {
+          this.logger.debug(`[FalconInstrumentService] UIR upsert failed for token=${p.instrument_token}: ${(err as Error)?.message}`);
+        }
+      }
+    }
+
+    return uirCount;
   }
 
   /**

@@ -4,6 +4,7 @@
  * @description CSV sync, instrument_mapping upserts, and daily cron for Vortex instruments.
  * @author BharatERP
  * @created 2026-03-28
+ * @updated 2026-04-17
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -12,8 +13,12 @@ import { Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { VortexInstrument } from '@features/stock/domain/vortex-instrument.entity';
 import { InstrumentMapping } from '@features/market-data/domain/instrument-mapping.entity';
+import { UniversalInstrument } from '@features/market-data/domain/universal-instrument.entity';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { VortexProviderService } from '@features/stock/infra/vortex-provider.service';
 import { generateVortexInstrumentDescription } from '@features/stock/application/vortex-instrument-helpers';
+import { normalizeExchange } from '@shared/utils/exchange-normalizer';
+import { computeCanonicalSymbol } from '@shared/utils/canonical-symbol';
 
 @Injectable()
 export class VortexInstrumentSyncService {
@@ -24,7 +29,10 @@ export class VortexInstrumentSyncService {
     private readonly vortexInstrumentRepo: Repository<VortexInstrument>,
     @InjectRepository(InstrumentMapping)
     private readonly mappingRepo: Repository<InstrumentMapping>,
+    @InjectRepository(UniversalInstrument)
+    private readonly uirRepo: Repository<UniversalInstrument>,
     private readonly vortexProvider: VortexProviderService,
+    private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
 
   /**
@@ -146,6 +154,7 @@ export class VortexInstrumentSyncService {
           }
 
           await this.updateInstrumentMapping(vortexInstrument);
+          await this.upsertUniversalInstrument(vortexInstrument);
         } catch (error) {
           errors++;
           this.logger.error(
@@ -170,6 +179,15 @@ export class VortexInstrumentSyncService {
       this.logger.log(
         `[VortexInstrumentSyncService] Sync completed. Synced: ${synced}, Updated: ${updated}`,
       );
+
+      // Refresh the universal instrument registry after sync
+      try {
+        await this.instrumentRegistry.refresh();
+        this.logger.log('[VortexInstrumentSyncService] InstrumentRegistry refreshed after sync');
+      } catch (refreshErr) {
+        this.logger.warn('[VortexInstrumentSyncService] Failed to refresh InstrumentRegistry', refreshErr);
+      }
+
       onProgress?.({
         phase: 'complete',
         total: instruments.length,
@@ -234,6 +252,90 @@ export class VortexInstrumentSyncService {
         `[VortexInstrumentSyncService] Failed to update mapping for token ${vortexInstrument.token}`,
         error,
       );
+    }
+  }
+
+  /**
+   * Upsert a single Vortex instrument into the universal instrument registry
+   * and link its instrument_mapping row via uir_id.
+   */
+  private async upsertUniversalInstrument(vortexInstrument: {
+    exchange?: string;
+    token?: number;
+    symbol?: string;
+    instrument_name?: string;
+    expiry_date?: string;
+    option_type?: string;
+    strike_price?: number;
+    tick?: number;
+    lot_size?: number;
+  }): Promise<void> {
+    try {
+      const normalizedExchange = normalizeExchange(vortexInstrument.exchange || '', 'vortex');
+      const underlying = (vortexInstrument.symbol || '').toUpperCase().trim();
+      if (!underlying) return;
+
+      // Map Vortex instrument_name to our type system
+      // Vortex uses: EQ, FUTIDX, FUTSTK, OPTIDX, OPTSTK, FUTCUR, OPTCUR, FUTCOM, OPTCOM
+      let instrumentType = 'EQ';
+      const iName = (vortexInstrument.instrument_name || '').toUpperCase();
+      if (iName.startsWith('FUT')) instrumentType = 'FUT';
+      else if (iName.startsWith('OPT') && vortexInstrument.option_type === 'CE') instrumentType = 'CE';
+      else if (iName.startsWith('OPT') && vortexInstrument.option_type === 'PE') instrumentType = 'PE';
+      else if (iName === 'EQ') instrumentType = 'EQ';
+
+      // Parse expiry from YYYYMMDD string
+      let expiry: Date | null = null;
+      if (vortexInstrument.expiry_date && vortexInstrument.expiry_date.length === 8) {
+        const y = vortexInstrument.expiry_date.slice(0, 4);
+        const m = vortexInstrument.expiry_date.slice(4, 6);
+        const d = vortexInstrument.expiry_date.slice(6, 8);
+        expiry = new Date(`${y}-${m}-${d}`);
+        if (isNaN(expiry.getTime())) expiry = null;
+      }
+
+      const strike = Number(vortexInstrument.strike_price) || null;
+      const optionType = (instrumentType === 'CE' || instrumentType === 'PE') ? instrumentType : null;
+
+      const canonicalSymbol = computeCanonicalSymbol({
+        exchange: normalizedExchange,
+        underlying,
+        instrument_type: instrumentType,
+        expiry,
+        strike,
+        option_type: optionType,
+      });
+
+      await this.uirRepo.upsert({
+        canonical_symbol: canonicalSymbol,
+        exchange: normalizedExchange,
+        underlying,
+        instrument_type: instrumentType,
+        expiry,
+        strike: strike || 0,
+        option_type: optionType,
+        lot_size: vortexInstrument.lot_size || 1,
+        tick_size: Number(vortexInstrument.tick) || 0.05,
+        name: underlying,
+        segment: normalizedExchange,
+        is_active: true,
+        asset_class: normalizedExchange === 'MCX' ? 'commodity' : (normalizedExchange === 'CDS' ? 'currency' : 'equity'),
+      }, {
+        conflictPaths: ['canonical_symbol'],
+        skipUpdateIfNoValuesChanged: false,
+      });
+
+      // Link mapping to UIR
+      const uirRow = await this.uirRepo.findOne({ where: { canonical_symbol: canonicalSymbol } });
+      if (uirRow) {
+        const providerToken = `${vortexInstrument.exchange}-${vortexInstrument.token}`;
+        await this.mappingRepo.update(
+          { provider: 'vortex' as const, provider_token: providerToken },
+          { uir_id: Number(uirRow.id) },
+        );
+      }
+    } catch (err) {
+      this.logger.debug(`[VortexInstrumentSyncService] UIR upsert failed for token=${vortexInstrument.token}: ${(err as Error)?.message}`);
     }
   }
 
