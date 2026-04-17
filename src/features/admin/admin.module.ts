@@ -4,8 +4,11 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import { AdminController } from './interface/admin.controller';
+import { AdminInstrumentsController } from './interface/admin-instruments.controller';
 import { AdminGuard } from './guards/admin.guard';
 import { RequestAuditLog } from './domain/request-audit-log.entity';
+import { UniversalInstrument } from '@features/market-data/domain/universal-instrument.entity';
+import { InstrumentMapping } from '@features/market-data/domain/instrument-mapping.entity';
 import { OriginAuditService } from './application/origin-audit.service';
 import { AuditCleanupCronService } from './application/audit-cleanup.cron';
 import { OriginAuditInterceptor } from '@shared/interceptors/origin-audit.interceptor';
@@ -18,7 +21,7 @@ import { StockModule } from '../stock/stock.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RequestAuditLog]),
+    TypeOrmModule.forFeature([RequestAuditLog, UniversalInstrument, InstrumentMapping]),
     ScheduleModule.forRoot(), // For cron
     ConfigModule,
     RedisModule,
@@ -27,7 +30,7 @@ import { StockModule } from '../stock/stock.module';
     KiteConnectModule,
     forwardRef(() => StockModule)
   ],
-  controllers: [AdminController],
+  controllers: [AdminController, AdminInstrumentsController],
   providers: [
     OriginAuditService,
     OriginAuditInterceptor,

@@ -4,7 +4,7 @@
  * @description Warm in-memory registry mapping provider tokens <-> UIR IDs <-> canonical symbols.
  * @author BharatERP
  * @created 2026-04-17
- * @updated 2026-04-17
+ * @updated 2026-04-18
  */
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
@@ -122,12 +122,67 @@ export class InstrumentRegistryService implements OnModuleInit {
   }
 
   /**
-   * Return counts for monitoring/logging.
+   * Return both Kite and Vortex provider tokens for a canonical symbol (in-memory, no DB).
    */
-  getStats(): { instruments: number; mappings: number } {
+  resolveCrossProvider(canonical: string): {
+    uirId: number | undefined;
+    kiteToken: string | undefined;
+    vortexToken: string | undefined;
+  } {
+    const uirId = this.canonicalToUirId.get(canonical);
+    if (uirId == null) {
+      return { uirId: undefined, kiteToken: undefined, vortexToken: undefined };
+    }
+    const providerMap = this.uirIdToProviderTokens.get(uirId);
+    return {
+      uirId,
+      kiteToken: providerMap?.get('kite'),
+      vortexToken: providerMap?.get('vortex'),
+    };
+  }
+
+  /**
+   * Coverage breakdown computed from warm in-memory maps (no DB).
+   */
+  getCoverage(): {
+    totalInRegistry: number;
+    withBothProviders: number;
+    withKiteOnly: number;
+    withVortexOnly: number;
+    withNoMapping: number;
+  } {
+    let both = 0;
+    let kiteOnly = 0;
+    let vortexOnly = 0;
+    for (const [, providerMap] of this.uirIdToProviderTokens) {
+      const hasKite = providerMap.has('kite');
+      const hasVortex = providerMap.has('vortex');
+      if (hasKite && hasVortex) both++;
+      else if (hasKite) kiteOnly++;
+      else if (hasVortex) vortexOnly++;
+    }
+    const total = this.uirIdToCanonical.size;
+    return {
+      totalInRegistry: total,
+      withBothProviders: both,
+      withKiteOnly: kiteOnly,
+      withVortexOnly: vortexOnly,
+      withNoMapping: total - this.uirIdToProviderTokens.size,
+    };
+  }
+
+  /**
+   * Return counts for monitoring/logging, including coverage summary.
+   */
+  getStats(): {
+    instruments: number;
+    mappings: number;
+    coverage: ReturnType<InstrumentRegistryService['getCoverage']>;
+  } {
     return {
       instruments: this.uirIdToCanonical.size,
       mappings: this.providerTokenToUirId.size,
+      coverage: this.getCoverage(),
     };
   }
 }

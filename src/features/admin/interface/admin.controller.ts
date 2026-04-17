@@ -36,6 +36,7 @@ import {
   internalToClientProviderName,
 } from '@shared/utils/provider-label.util';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 
 @Controller('admin')
 @ApiTags('admin', 'admin-ws')
@@ -56,6 +57,7 @@ export class AdminController {
     private abuseDetection: AbuseDetectionService,
     private configService: ConfigService,
     private wsInterest: MarketDataWsInterestService,
+    private instrumentRegistry: InstrumentRegistryService,
   ) {}
 
   @Post('apikeys')
@@ -543,6 +545,7 @@ export class AdminController {
   async streamStatus() {
     const status = await this.stream.getStreamingStatus();
     const kiteSubscribedInstruments = this.stream.getSubscribedInstrumentCount?.() ?? null;
+    const registryStats = this.instrumentRegistry.getStats();
     return {
       ...status,
       kiteSubscribedInstruments,
@@ -550,6 +553,7 @@ export class AdminController {
       kiteUtilizationPct: kiteSubscribedInstruments != null
         ? Math.round((kiteSubscribedInstruments / 3000) * 100)
         : null,
+      registry: registryStats,
     };
   }
 
@@ -575,7 +579,11 @@ export class AdminController {
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   async topInstruments(@Query('limit') limitRaw?: string) {
     const limit = Math.max(1, Math.min(200, parseInt(String(limitRaw || '50')) || 50));
-    const data = this.wsInterest.getTopInstruments(limit);
+    const raw = this.wsInterest.getTopInstruments(limit);
+    const data = raw.map((entry: { token: number; subscribers: number }) => ({
+      ...entry,
+      symbol: this.instrumentRegistry.getCanonicalSymbol(entry.token) ?? null,
+    }));
     return { success: true, data };
   }
 
