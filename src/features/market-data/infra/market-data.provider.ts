@@ -4,6 +4,7 @@
  * @description Contract for Kite/Vortex market data providers (HTTP + streaming).
  * @author BharatERP
  * @created 2025-01-01
+ * @updated 2026-04-18
  */
 import { Logger } from '@nestjs/common';
 
@@ -16,15 +17,15 @@ export type MarketDataLtpPair = {
 /** Explicit exchange per token for WS subscribe / mapping prime. */
 export type MarketDataExchangeToken = {
   token: number;
-  exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+  exchange: string;
 };
 
 // MarketDataProvider defines the contract implemented by concrete providers (Kite, Vortex).
 // Implementations must be resilient: never crash the app; always log failures clearly; return
 // empty data or safe no-ops when unconfigured.
 export interface MarketDataProvider {
-  /** Provider identifier used for limit enforcement and metrics. */
-  readonly providerName?: string;
+  /** Internal provider identifier used for metrics, registry lookups, and logging. */
+  readonly providerName: string;
   initialize(): Promise<void>;
   getInstruments(exchange?: string, opts?: any): Promise<any[]>;
   getQuote(tokens: string[]): Promise<Record<string, any>>;

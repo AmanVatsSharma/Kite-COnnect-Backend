@@ -47,6 +47,7 @@ const SEGMENT_TO_EXCHANGE: Record<string, string> = {
 
 @Injectable()
 export class KiteProviderService implements OnModuleInit, MarketDataProvider {
+  readonly providerName = 'kite' as const;
   private readonly logger = new Logger(KiteProviderService.name);
   private kite: KiteConnect | undefined;
   private ticker: TickerLike | undefined;

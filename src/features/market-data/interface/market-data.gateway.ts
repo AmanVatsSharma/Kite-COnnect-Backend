@@ -663,7 +663,7 @@ export class MarketDataGateway
 
       // Parse instruments allowing both numeric tokens and EXCHANGE-TOKEN strings
       const requestedRaw = Array.from(new Set(instruments as any));
-      const explicitPairs: Array<{ token: number; exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' }> = [];
+      const explicitPairs: Array<{ token: number; exchange: string }> = [];
       const numericTokens: number[] = [];
 
       for (const item of requestedRaw as any[]) {

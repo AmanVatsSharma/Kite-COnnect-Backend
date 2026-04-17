@@ -57,6 +57,7 @@ class NoopTicker {
 
 @Injectable()
 export class VortexProviderService implements OnModuleInit, MarketDataProvider {
+  readonly providerName = 'vortex' as const;
   private readonly logger = new Logger(VortexProviderService.name);
   readonly providerName = 'vortex';
   private ticker: TickerLike;

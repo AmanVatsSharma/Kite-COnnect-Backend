@@ -402,7 +402,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   async subscribePairs(
     pairs: Array<{
       token: number;
-      exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+      exchange: string;
     }>,
     mode: 'ltp' | 'ohlcv' | 'full' = 'ltp',
     clientId?: string,
