@@ -22,6 +22,7 @@ Real-time market data streaming (Socket.IO + native WebSocket), provider abstrac
 | `MarketDataGateway` | Socket.IO `/market-data` |
 | `NativeWsService` | WS `/ws` |
 | `MarketDataWsInterestService` | Ref-counts tokens with active WS subscribers (Socket.IO + native) for optional synthetic tick pulse |
+| `InstrumentRegistryService` | Warm in-memory maps for O(1) provider token / UIR ID / canonical symbol resolution on tick hot path |
 
 ## Environment
 
@@ -31,6 +32,7 @@ Real-time market data streaming (Socket.IO + native WebSocket), provider abstrac
 
 ## Changelog
 
+- **2026-04-17** — Added `InstrumentRegistryService`: warm in-memory `Map`-based registry mapping provider tokens, UIR IDs, and canonical symbols for O(1) synchronous lookups on the tick hot path. Warmed on module init via `onModuleInit`; supports `refresh()` for daily re-sync. Registered in `market-data.module.ts` providers and exports. Unit tests in `application/__tests__/instrument-registry.service.spec.ts`.
 - **2026-03-28 (structure)** — `MarketDataGatewaySubscriptionRegistry` holds Socket.IO client subscription map; gateway delegates to it (behavior unchanged). ESLint **`max-lines`** / **`max-lines-per-function`** are **warnings** in root `.eslintrc.js`. `npm run verify:pr` runs build + tests + **`check:cycles:warn`** (madge report; known module cycles may still print — see script). **`check:cycles`** exits non-zero if circular imports are found.
 - **2026-03-28 (Falcon parity)** — Kite ticker wrapped (`kite-ticker.facade.ts`): `subscribe(tokens, mode)` calls `setMode` with `ohlcv`→`quote` for upstream. Client payloads use **Falcon** / **Vayu**: Socket.IO `welcome` / `whoami`, Redis `stream:status`, `getStreamingStatus` / health `provider` field. Prometheus labels unchanged (`kite`/`vortex`). `x-provider` and admin global/API-key accept **falcon** / **vayu** aliases. Resolver: `getResolvedInternalProviderNameForWebsocket()`.
 - **2026-03-24** — Tick **hot path**: `forwardRealtimeTick` (Redis `last_tick` + WS broadcast) runs before **async** DB + `cacheMarketData` (`enqueuePersistMarketData` / `setImmediate`) so batches are not serialized on inserts. Per-tick `logger.log` demoted to `debug` on gateways/native WS; Redis `cacheMarketData` / `getCachedMarketData` use `Logger.debug` instead of `console.log`. Optional **`MARKET_DATA_SYNTHETIC_INTERVAL_MS`**: `MarketDataStreamService` pulses last payload with `syntheticLast: true`; metric `market_data_synthetic_tick_total`. `MarketDataWsInterestService` tracks subscriber ref-counts on subscribe/unsubscribe/disconnect (Socket.IO + native `/ws`).
