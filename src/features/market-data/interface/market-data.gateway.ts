@@ -54,6 +54,7 @@ import {
   MarketDataGatewaySubscriptionRegistry,
   MarketDataClientSubscription,
 } from '@features/market-data/interface/market-data-gateway-subscription.registry';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 
 const PROTOCOL_VERSION = '2.0';
 
@@ -83,6 +84,7 @@ export class MarketDataGateway
     private abuseDetection: AbuseDetectionService,
     private readonly wsInterest: MarketDataWsInterestService,
     private readonly subscriptionRegistry: MarketDataGatewaySubscriptionRegistry,
+    private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
 
   async onModuleInit() {
@@ -512,7 +514,8 @@ export class MarketDataGateway
   async handleSubscribe(
     @MessageBody()
     data: {
-      instruments: number[];
+      instruments?: number[];
+      symbols?: string[];
       type?: 'live' | 'historical' | 'both';
       mode?: 'ltp' | 'ohlcv' | 'full';
     },
@@ -541,22 +544,50 @@ export class MarketDataGateway
   // Internal handler
   private async doSubscribe(
     data: {
-      instruments: number[];
+      instruments?: number[];
+      symbols?: string[];
       type?: 'live' | 'historical' | 'both';
       mode?: 'ltp' | 'ohlcv' | 'full';
     },
     client: Socket,
   ) {
     try {
-      const { instruments, type = 'live', mode = 'ltp' } = data;
+      const { symbols, type = 'live', mode = 'ltp' } = data;
+      let instruments = data.instruments || [];
 
-      // Validate payload shape
+      // Resolve symbols to provider tokens if provided
+      const resolvedSymbols: Array<{ symbol: string; uirId: number; providerToken?: number }> = [];
+      const unresolvedSymbols: string[] = [];
+      if (Array.isArray(symbols) && symbols.length > 0) {
+        for (const sym of symbols) {
+          const uirId = this.instrumentRegistry.resolveCanonicalSymbol(sym);
+          if (uirId == null) {
+            unresolvedSymbols.push(sym);
+            continue;
+          }
+          // Find the provider token for the active WS provider
+          const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+          const providerToken = this.instrumentRegistry.getProviderToken(uirId, providerName);
+          if (providerToken != null) {
+            const numToken = Number(providerToken);
+            if (Number.isFinite(numToken)) {
+              instruments = [...instruments, numToken];
+              resolvedSymbols.push({ symbol: sym, uirId, providerToken: numToken });
+            }
+          } else {
+            unresolvedSymbols.push(sym);
+          }
+        }
+      }
+
+      // Validate payload shape (instruments may now include symbol-resolved tokens)
       const v = validateSubscribePayload({ instruments, mode });
-      if (!v.ok) {
+      if (!v.ok && (!instruments || instruments.length === 0)) {
         client.emit('error', {
           code: 'invalid_payload',
-          message: 'Invalid subscribe payload',
+          message: 'Invalid subscribe payload — provide instruments or symbols',
           errors: v.errors,
+          unresolvedSymbols,
         });
         return;
       }
@@ -742,9 +773,15 @@ export class MarketDataGateway
         await this.streamService.subscribePairs(finalPairs, mode, client.id);
       }
 
-      // Join rooms only for included tokens
+      // Join rooms only for included tokens (dual-key: both provider-token and UIR rooms)
       includedTokens.forEach((token) => {
         client.join(`instrument:${token}`);
+        // Also join UIR-keyed room for symbol-based clients
+        const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+        const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
+        if (uirId != null) {
+          client.join(`instrument:uir:${uirId}`);
+        }
       });
 
       for (const token of includedTokens) {
@@ -782,11 +819,30 @@ export class MarketDataGateway
         queues = this.streamService.getQueueStatus();
       } catch {}
 
+      // Build symbol enrichment for included tokens
+      const symbolEnrichment: Array<{ symbol: string; uirId: number; providerToken: number }> = [];
+      for (const token of includedTokens) {
+        const found = resolvedSymbols.find((r) => r.providerToken === token);
+        if (found) {
+          symbolEnrichment.push({ symbol: found.symbol, uirId: found.uirId, providerToken: token });
+        } else {
+          // Reverse-resolve from registry for legacy token subscribers
+          const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+          const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
+          if (uirId != null) {
+            const sym = this.instrumentRegistry.getCanonicalSymbol(uirId);
+            if (sym) symbolEnrichment.push({ symbol: sym, uirId, providerToken: token });
+          }
+        }
+      }
+
       client.emit('subscription_confirmed', {
         requested: requestedRaw,
         pairs: finalPairs.map((p) => `${p.exchange}-${p.token}`),
         included: includedTokens,
+        resolved: symbolEnrichment.length > 0 ? symbolEnrichment : undefined,
         unresolved,
+        unresolvedSymbols: unresolvedSymbols.length > 0 ? unresolvedSymbols : undefined,
         forbidden: forbiddenPairs.map((p) => ({ token: p.token, exchange: p.exchange })),
         snapshot,
         mode,
