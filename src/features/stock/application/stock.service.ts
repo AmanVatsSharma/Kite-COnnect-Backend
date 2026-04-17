@@ -550,31 +550,31 @@ export class StockService {
   /**
    * Hot path: Redis last_tick + WebSocket broadcast (no DB). Use with enqueuePersistMarketData for persistence.
    */
+  /**
+   * Fan-out a realtime tick to Redis, Socket.IO gateway, and native WS.
+   * @param identifier UIR ID (Phase 3 primary) used for Redis key and room broadcast.
+   */
   async forwardRealtimeTick(
-    instrumentToken: number,
+    identifier: number,
     data: any,
     emitOpts?: MarketTickEmitOptions,
   ): Promise<void> {
     try {
-      await this.redisService.set(`last_tick:${instrumentToken}`, data, 300);
-      // Dual-write UIR-keyed cache when enrichment is present
-      if (data?._uirId != null) {
-        await this.redisService.set(`last_tick:uir:${data._uirId}`, data, 300);
-      }
+      await this.redisService.set(`last_tick:${identifier}`, data, 300);
     } catch (e: any) {
       this.logger.warn(
-        `Failed to set last_tick in Redis for token ${instrumentToken}: ${e?.message || e}`,
+        `Failed to set last_tick in Redis for ${identifier}: ${e?.message || e}`,
       );
     }
 
     try {
       await this.marketDataGateway.broadcastMarketData(
-        instrumentToken,
+        identifier,
         data,
         emitOpts,
       );
       this.logger.debug(
-        `[StockService] Broadcasted market data for token ${instrumentToken} to MarketDataGateway`,
+        `[StockService] Broadcasted market data for ${identifier} to MarketDataGateway`,
       );
     } catch (gatewayError: any) {
       this.logger.warn(
@@ -584,12 +584,12 @@ export class StockService {
 
     try {
       await this.nativeWsService.broadcastMarketData(
-        instrumentToken,
+        identifier,
         data,
         emitOpts,
       );
       this.logger.debug(
-        `[StockService] Broadcasted market data for token ${instrumentToken} to NativeWsService`,
+        `[StockService] Broadcasted market data for ${identifier} to NativeWsService`,
       );
     } catch (nativeGatewayError: any) {
       this.logger.warn(

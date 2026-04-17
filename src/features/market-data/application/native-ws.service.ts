@@ -4,7 +4,7 @@
  * @description Native WebSocket /ws endpoint: API key auth, subscriptions, tick broadcast with mode shaping.
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-03-24
+ * @updated 2026-04-18
  */
 import {
   Injectable,
@@ -25,6 +25,7 @@ import {
 } from '@features/market-data/application/tick-shape.util';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
 import { validateSetModePayload } from '@shared/utils/ws-validation';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 
 interface ClientSubscription {
   clientId: string;
@@ -54,6 +55,7 @@ export class NativeWsService implements OnModuleDestroy {
     @Inject(forwardRef(() => MarketDataStreamService))
     private readonly streamService: MarketDataStreamService,
     private readonly wsInterest: MarketDataWsInterestService,
+    private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
 
   /**
@@ -345,22 +347,30 @@ export class NativeWsService implements OnModuleDestroy {
       this.logger.warn('Failed to read streaming status', e as any);
     }
 
-    const prior = new Set(subscription.instruments);
-    // Update subscription
-    subscription.instruments = [
-      ...new Set([...subscription.instruments, ...instruments]),
-    ];
-    instruments.forEach((token: number) => {
-      subscription.modeByInstrument.set(token, mode);
-    });
+    // Phase 3: resolve provider tokens to UIR IDs for internal tracking
+    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    const uirIds: number[] = [];
     for (const token of instruments as number[]) {
-      if (!prior.has(token)) {
-        this.wsInterest.addInterest(token);
+      const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
+      uirIds.push(uirId != null ? uirId : token);
+    }
+
+    const prior = new Set(subscription.instruments);
+    // Update subscription with UIR IDs
+    subscription.instruments = [
+      ...new Set([...subscription.instruments, ...uirIds]),
+    ];
+    uirIds.forEach((id: number) => {
+      subscription.modeByInstrument.set(id, mode);
+    });
+    for (const id of uirIds) {
+      if (!prior.has(id)) {
+        this.wsInterest.addInterest(id);
       }
     }
 
     this.logger.debug(
-      `[NativeWsService] Subscribing client ${clientId} count=${instruments.length} mode=${mode}`,
+      `[NativeWsService] Subscribing client ${clientId} count=${instruments.length} uirIds=${uirIds.length} mode=${mode}`,
     );
     await this.subscribeToInstruments(instruments, mode, clientId);
 
@@ -416,24 +426,32 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
+    // Phase 3: resolve incoming provider tokens to UIR IDs
+    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    const requestedUirIds: number[] = [];
+    for (const token of instruments as number[]) {
+      const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
+      requestedUirIds.push(uirId != null ? uirId : token);
+    }
+
     const before = new Set(subscription.instruments);
-    // Remove instruments
+    // Remove UIR IDs from subscription
     subscription.instruments = subscription.instruments.filter(
-      (token) => !instruments.includes(token),
+      (id) => !requestedUirIds.includes(id),
     );
 
     const removed = Array.from(before).filter(
       (t) => !subscription.instruments.includes(t),
     );
-    removed.forEach((t) => this.wsInterest.removeInterest(t));
+    removed.forEach((id) => this.wsInterest.removeInterest(id));
 
     // Check if still subscribed globally
     const stillSubscribed = Array.from(this.clientSubscriptions.values()).some(
-      (sub) => sub.instruments.some((token) => instruments.includes(token)),
+      (sub) => sub.instruments.some((id) => requestedUirIds.includes(id)),
     );
 
     if (!stillSubscribed) {
-      await this.unsubscribeFromInstruments(instruments, clientId);
+      await this.unsubscribeFromInstruments(requestedUirIds, clientId);
     }
 
     this.sendToClient(client, 'unsubscription_confirmed', {
@@ -476,11 +494,18 @@ export class NativeWsService implements OnModuleDestroy {
         if (Number.isFinite(n)) tokens.push(n);
       }
     }
+    // Phase 3: resolve provider tokens to UIR IDs
+    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    const uirIds: number[] = [];
+    for (const token of tokens) {
+      const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
+      uirIds.push(uirId != null ? uirId : token);
+    }
     const subscribedSet = new Set(subscription.instruments);
-    const target = tokens.filter((t) => subscribedSet.has(t));
+    const target = uirIds.filter((id) => subscribedSet.has(id));
     if (target.length > 0) {
       await this.streamService.setMode(mode, target);
-      target.forEach((t) => subscription.modeByInstrument.set(t, mode));
+      target.forEach((id) => subscription.modeByInstrument.set(id, mode));
     }
     this.sendToClient(client, 'mode_set', {
       requested: tokens,
@@ -618,9 +643,12 @@ export class NativeWsService implements OnModuleDestroy {
     }
   }
 
-  // Broadcast market data to native WebSocket clients
+  /**
+   * Broadcast market data to native WebSocket clients.
+   * @param identifier UIR ID (Phase 3 primary) — matches client subscription identifiers.
+   */
   async broadcastMarketData(
-    instrumentToken: number,
+    identifier: number,
     data: any,
     emitOpts?: MarketTickEmitOptions,
   ) {
@@ -631,7 +659,7 @@ export class NativeWsService implements OnModuleDestroy {
       }
 
       const subscribedClients = Array.from(this.clientSubscriptions.values()).filter(
-        (sub) => sub.instruments.includes(instrumentToken),
+        (sub) => sub.instruments.includes(identifier),
       );
 
       if (subscribedClients.length > 0) {
@@ -644,12 +672,13 @@ export class NativeWsService implements OnModuleDestroy {
               ? this.clientSubscriptions.get(clientId)
               : undefined;
 
-            if (subscription && subscription.instruments.includes(instrumentToken)) {
+            if (subscription && subscription.instruments.includes(identifier)) {
               const m: StreamTickMode =
-                subscription.modeByInstrument.get(instrumentToken) || 'ltp';
+                subscription.modeByInstrument.get(identifier) || 'ltp';
               const payload = shapeMarketTickForMode(data, m);
               this.sendToClient(ws, 'market_data', {
-                instrumentToken,
+                instrumentToken: data?.instrument_token ?? identifier,
+                uirId: identifier,
                 data: payload,
                 timestamp: new Date().toISOString(),
                 ...(emitOpts?.syntheticLast ? { syntheticLast: true } : {}),
@@ -659,7 +688,7 @@ export class NativeWsService implements OnModuleDestroy {
         });
 
         this.logger.debug(
-          `[NativeWS] Broadcasted tick ${instrumentToken} to ${subscribedClients.length} clients`,
+          `[NativeWS] Broadcasted tick UIR ${identifier} to ${subscribedClients.length} clients`,
         );
       }
     } catch (error) {

@@ -4,7 +4,7 @@
  * @description Orchestrates provider ticker streaming, subscription batching, LTP cache, and Redis stream status.
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-04-17
+ * @updated 2026-04-18
  */
 import {
   Injectable,
@@ -295,41 +295,48 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       for (const tick of ticks) {
         const instrumentToken = tick.instrument_token;
 
-        // Enrich tick with UIR data (Phase 2: dual-key, enrichment only)
+        // Phase 3: resolve to UIR ID — all internal state keyed by UIR
         const uirId = this.instrumentRegistry.resolveProviderToken(
           this.streamMetricsProvider,
           instrumentToken,
         );
-        if (uirId !== undefined) {
-          tick._uirId = uirId;
-          tick._canonicalSymbol = this.instrumentRegistry.getCanonicalSymbol(uirId);
+        if (uirId === undefined) {
+          this.rateLimitedLog(
+            'debug',
+            `unmapped_tick:${instrumentToken}`,
+            `Tick for unmapped provider token ${instrumentToken}; skipping (run sync to populate UIR)`,
+            30_000,
+          );
+          continue;
         }
+        tick._uirId = uirId;
+        tick._canonicalSymbol = this.instrumentRegistry.getCanonicalSymbol(uirId);
 
-        // Update subscribed instruments set first
-        this.subscribedInstruments.add(instrumentToken);
+        // All internal state keyed by UIR ID
+        this.subscribedInstruments.add(uirId);
 
         // Update in-memory LTP cache first for hot-read path
         try {
           const lp = Number(tick.last_price);
           if (Number.isFinite(lp) && lp > 0) {
-            this.ltpCache.set(instrumentToken, lp);
+            this.ltpCache.set(uirId, lp);
           }
         } catch {}
 
-        this.lastTickPayload.set(instrumentToken, { ...tick });
-        this.lastUpstreamAt.set(instrumentToken, Date.now());
+        this.lastTickPayload.set(uirId, { ...tick });
+        this.lastUpstreamAt.set(uirId, Date.now());
 
         try {
-          await this.stockService.forwardRealtimeTick(instrumentToken, tick);
+          await this.stockService.forwardRealtimeTick(uirId, tick);
         } catch (storeError: any) {
           this.rateLimitedLog(
             'debug',
-            `forward_tick_fail:${instrumentToken}`,
-            `Failed to forward tick for ${instrumentToken}, continuing: ${storeError?.message || storeError}`,
+            `forward_tick_fail:${uirId}`,
+            `Failed to forward tick for UIR ${uirId}, continuing: ${storeError?.message || storeError}`,
             30_000,
           );
         }
-        this.stockService.enqueuePersistMarketData(instrumentToken, tick);
+        this.stockService.enqueuePersistMarketData(uirId, tick);
       }
     } catch (error) {
       this.logger.error('Error handling ticks', error);
@@ -489,17 +496,17 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      // Process subscriptions
+      // Process subscriptions (queue is keyed by UIR ID; translate to provider tokens for upstream)
       if (this.subscriptionQueue.size > 0) {
         let subscriptions = Array.from(this.subscriptionQueue.entries());
 
         // Enforce Kite upstream instrument limit (dynamic: 3000 × numShards via provider.getSubscriptionLimit())
         if (provider.providerName === 'kite') {
-          const limit = provider.getSubscriptionLimit?.() ?? this.KITE_UPSTREAM_INSTRUMENT_LIMIT;
+          const limit = (provider as any).getSubscriptionLimit?.() ?? this.KITE_UPSTREAM_INSTRUMENT_LIMIT;
           const capacity = limit - this.subscribedInstruments.size;
           if (capacity <= 0) {
             this.logger.warn(
-              `[StreamBatching] Kite upstream limit (${limit}) reached; dropping ${subscriptions.length} queued tokens`,
+              `[StreamBatching] Kite upstream limit (${limit}) reached; dropping ${subscriptions.length} queued UIR IDs`,
             );
             this.metrics.marketDataStreamQueueDroppedTotal
               .labels('kite_upstream_limit')
@@ -516,41 +523,49 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               .inc(dropped);
             subscriptions = subscriptions.slice(0, capacity);
             // Re-sync queue to only allowed entries
-            const allowedTokens = new Set(subscriptions.map(([t]) => t));
-            for (const [t] of this.subscriptionQueue) {
-              if (!allowedTokens.has(t)) this.subscriptionQueue.delete(t);
+            const allowedIds = new Set(subscriptions.map(([id]) => id));
+            for (const [id] of this.subscriptionQueue) {
+              if (!allowedIds.has(id)) this.subscriptionQueue.delete(id);
             }
           }
         }
 
         if (subscriptions.length > 0) {
-          const tokensToSubscribe = subscriptions.map(([token]) => token);
+          const uirIdsToSubscribe = subscriptions.map(([uirId]) => uirId);
 
           // Group by mode for efficient batching
           const modeGroups = new Map<string, number[]>();
-          subscriptions.forEach(([token, sub]) => {
+          subscriptions.forEach(([uirId, sub]) => {
             if (!modeGroups.has(sub.mode)) {
               modeGroups.set(sub.mode, []);
             }
-            modeGroups.get(sub.mode)!.push(token);
+            modeGroups.get(sub.mode)!.push(uirId);
           });
 
-          // Subscribe by mode groups with chunking
-          for (const [mode, tokens] of modeGroups) {
+          // Subscribe by mode groups with chunking — translate UIR IDs to provider tokens
+          for (const [mode, uirIds] of modeGroups) {
+            const providerTokens: number[] = [];
+            for (const uirId of uirIds) {
+              const pt = this.instrumentRegistry.getProviderToken(uirId, this.streamMetricsProvider);
+              if (pt != null) {
+                const numPt = Number(pt);
+                if (Number.isFinite(numPt)) providerTokens.push(numPt);
+              }
+            }
             this.logger.log(
-              `[StreamBatching] Subscribing ${tokens.length} tokens with mode=${mode} to provider`,
+              `[StreamBatching] Subscribing ${providerTokens.length} provider tokens (${uirIds.length} UIR IDs) with mode=${mode} to upstream`,
             );
-            for (let i = 0; i < tokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
-              const chunk = tokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
+            for (let i = 0; i < providerTokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
+              const chunk = providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
               ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
             }
-            tokens.forEach((token) => {
-              this.subscribedInstruments.add(token);
+            uirIds.forEach((uirId) => {
+              this.subscribedInstruments.add(uirId);
             });
           }
 
           this.logger.log(
-            `[StreamBatching] Processed ${tokensToSubscribe.length} subscriptions in ${modeGroups.size} mode groups`,
+            `[StreamBatching] Processed ${uirIdsToSubscribe.length} subscriptions in ${modeGroups.size} mode groups`,
           );
         }
         this.subscriptionQueue.clear();
@@ -562,19 +577,27 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      // Process unsubscriptions
+      // Process unsubscriptions (queue is keyed by UIR ID; translate to provider tokens for upstream)
       if (this.unsubscriptionQueue.size > 0) {
-        const tokensToUnsubscribe = Array.from(this.unsubscriptionQueue);
-        for (let i = 0; i < tokensToUnsubscribe.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
-          const chunk = tokensToUnsubscribe.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
+        const uirIdsToUnsubscribe = Array.from(this.unsubscriptionQueue);
+        const providerTokens: number[] = [];
+        for (const uirId of uirIdsToUnsubscribe) {
+          const pt = this.instrumentRegistry.getProviderToken(uirId, this.streamMetricsProvider);
+          if (pt != null) {
+            const numPt = Number(pt);
+            if (Number.isFinite(numPt)) providerTokens.push(numPt);
+          }
+        }
+        for (let i = 0; i < providerTokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
+          const chunk = providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
           ticker.unsubscribe(chunk);
         }
-        tokensToUnsubscribe.forEach((token) => {
-          this.subscribedInstruments.delete(token);
+        uirIdsToUnsubscribe.forEach((uirId) => {
+          this.subscribedInstruments.delete(uirId);
         });
 
         this.logger.log(
-          `[StreamBatching] Processed ${tokensToUnsubscribe.length} unsubscriptions`,
+          `[StreamBatching] Processed ${uirIdsToUnsubscribe.length} unsubscriptions`,
         );
         this.unsubscriptionQueue.clear();
         // Update gauge after unsubscriptions too

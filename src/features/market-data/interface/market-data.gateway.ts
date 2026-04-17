@@ -723,46 +723,72 @@ export class MarketDataGateway
       const forbiddenPairs = finalPairs.filter((p) => !allowed.has(String(p.exchange)));
       finalPairs = finalPairs.filter((p) => allowed.has(String(p.exchange)));
 
-      // Enforce per-connection instrument subscription cap
+      // Phase 3: resolve tokens to UIR IDs for internal tracking
+      const providerNameForResolve = (this.streamService as any).streamMetricsProvider || 'kite';
+
+      // Enforce per-connection instrument subscription cap (using UIR IDs)
       const maxInstruments =
         (record?.ws_max_instruments != null && Number.isFinite(record.ws_max_instruments) && record.ws_max_instruments > 0)
           ? record.ws_max_instruments
           : Number(process.env.WS_MAX_INSTRUMENTS ?? 3000);
       const currentInstrumentCount = subscription.instruments.length;
-      const newTokens = finalPairs.map((p) => p.token).filter((t) => !new Set(subscription.instruments).has(t));
+      // Pre-resolve to UIR IDs for limit check
+      const preResolvedNewIds = finalPairs
+        .map((p) => {
+          const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, p.token);
+          return uirId != null ? uirId : p.token;
+        })
+        .filter((id) => !new Set(subscription.instruments).has(id));
       const capacity = maxInstruments - currentInstrumentCount;
-      if (capacity <= 0 && newTokens.length > 0) {
+      if (capacity <= 0 && preResolvedNewIds.length > 0) {
         client.emit('error', {
           code: 'instrument_limit_exceeded',
           message: `Max ${maxInstruments} instruments per connection. Currently at ${currentInstrumentCount}.`,
-          rejected_tokens: newTokens,
+          rejected_tokens: preResolvedNewIds,
           limit: maxInstruments,
           current: currentInstrumentCount,
         });
-        finalPairs = finalPairs.filter((p) => new Set(subscription.instruments).has(p.token));
-      } else if (newTokens.length > capacity) {
-        const allowed = newTokens.slice(0, capacity);
-        const rejected = newTokens.slice(capacity);
+        // Keep only pairs whose UIR ID is already in subscription
+        const existingSet = new Set(subscription.instruments);
+        finalPairs = finalPairs.filter((p) => {
+          const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, p.token);
+          return existingSet.has(uirId != null ? uirId : p.token);
+        });
+      } else if (preResolvedNewIds.length > capacity) {
+        const allowedNewIds = preResolvedNewIds.slice(0, capacity);
+        const rejectedIds = preResolvedNewIds.slice(capacity);
         client.emit('error', {
           code: 'instrument_limit_exceeded',
-          message: `Max ${maxInstruments} instruments per connection. ${rejected.length} token(s) rejected.`,
-          rejected_tokens: rejected,
+          message: `Max ${maxInstruments} instruments per connection. ${rejectedIds.length} token(s) rejected.`,
+          rejected_tokens: rejectedIds,
           limit: maxInstruments,
           current: currentInstrumentCount,
         });
-        const allowedSet = new Set([...subscription.instruments, ...allowed]);
-        finalPairs = finalPairs.filter((p) => allowedSet.has(p.token));
+        const allowedSet = new Set([...subscription.instruments, ...allowedNewIds]);
+        finalPairs = finalPairs.filter((p) => {
+          const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, p.token);
+          return allowedSet.has(uirId != null ? uirId : p.token);
+        });
       }
 
-      // Update subscription tracking only with included tokens
-      const priorInstrumentSet = new Set(subscription.instruments);
       const includedTokens = finalPairs.map((p) => p.token);
+      const includedUirIds: number[] = [];
+      for (const token of includedTokens) {
+        const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, token);
+        if (uirId != null) {
+          includedUirIds.push(uirId);
+        } else {
+          // Fallback: use provider token as identifier for unmapped instruments
+          includedUirIds.push(token);
+        }
+      }
+      const priorInstrumentSet = new Set(subscription.instruments);
       subscription.instruments = [
-        ...new Set([...subscription.instruments, ...includedTokens]),
+        ...new Set([...subscription.instruments, ...includedUirIds]),
       ];
       subscription.subscriptionType = type;
-      includedTokens.forEach((token) => {
-        subscription.modeByInstrument.set(token, mode);
+      includedUirIds.forEach((id) => {
+        subscription.modeByInstrument.set(id, mode);
       });
 
       // Delegate to stream service via pairs to prime mapping first
@@ -773,20 +799,21 @@ export class MarketDataGateway
         await this.streamService.subscribePairs(finalPairs, mode, client.id);
       }
 
-      // Join rooms only for included tokens (dual-key: both provider-token and UIR rooms)
+      // Phase 3: join UIR-keyed rooms only
+      const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
       includedTokens.forEach((token) => {
-        client.join(`instrument:${token}`);
-        // Also join UIR-keyed room for symbol-based clients
-        const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
         const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
         if (uirId != null) {
-          client.join(`instrument:uir:${uirId}`);
+          client.join(`instrument:${uirId}`);
+        } else {
+          // Fallback for unmapped tokens — use provider token as room key
+          client.join(`instrument:${token}`);
         }
       });
 
-      for (const token of includedTokens) {
-        if (!priorInstrumentSet.has(token)) {
-          this.wsInterest.addInterest(token);
+      for (const id of includedUirIds) {
+        if (!priorInstrumentSet.has(id)) {
+          this.wsInterest.addInterest(id);
         }
       }
 
@@ -804,12 +831,12 @@ export class MarketDataGateway
       try {
         vortexLimits = (provider as any)?.getVortexWsLimits?.() ?? null;
       } catch {}
-      // Initial snapshot for included tokens
+      // Initial snapshot for included UIR IDs
       let snapshot: Record<string, { last_price: number | null }> = {};
       try {
-        if (includedTokens.length > 0) {
+        if (includedUirIds.length > 0) {
           snapshot = await this.streamService.getRecentLTP(
-            includedTokens.map((t) => String(t)),
+            includedUirIds.map((id) => String(id)),
           );
         }
       } catch {}
@@ -819,27 +846,24 @@ export class MarketDataGateway
         queues = this.streamService.getQueueStatus();
       } catch {}
 
-      // Build symbol enrichment for included tokens
+      // Build symbol enrichment for included identifiers
       const symbolEnrichment: Array<{ symbol: string; uirId: number; providerToken: number }> = [];
-      for (const token of includedTokens) {
+      for (let i = 0; i < includedTokens.length; i++) {
+        const token = includedTokens[i];
+        const id = includedUirIds[i];
         const found = resolvedSymbols.find((r) => r.providerToken === token);
         if (found) {
           symbolEnrichment.push({ symbol: found.symbol, uirId: found.uirId, providerToken: token });
         } else {
-          // Reverse-resolve from registry for legacy token subscribers
-          const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
-          const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
-          if (uirId != null) {
-            const sym = this.instrumentRegistry.getCanonicalSymbol(uirId);
-            if (sym) symbolEnrichment.push({ symbol: sym, uirId, providerToken: token });
-          }
+          const sym = this.instrumentRegistry.getCanonicalSymbol(id);
+          if (sym) symbolEnrichment.push({ symbol: sym, uirId: id, providerToken: token });
         }
       }
 
       client.emit('subscription_confirmed', {
         requested: requestedRaw,
         pairs: finalPairs.map((p) => `${p.exchange}-${p.token}`),
-        included: includedTokens,
+        included: includedUirIds,
         resolved: symbolEnrichment.length > 0 ? symbolEnrichment : undefined,
         unresolved,
         unresolvedSymbols: unresolvedSymbols.length > 0 ? unresolvedSymbols : undefined,
@@ -1030,29 +1054,37 @@ export class MarketDataGateway
         }
       }
 
-      // Remove instruments from subscription
+      // Phase 3: resolve incoming provider tokens to UIR IDs for matching internal state
+      const providerNameForResolve = (this.streamService as any).streamMetricsProvider || 'kite';
+      const requestedUirIds: number[] = [];
+      for (const token of requestedTokens) {
+        const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, token);
+        requestedUirIds.push(uirId != null ? uirId : token);
+      }
+
+      // Remove instruments from subscription (keyed by UIR ID)
       const before = new Set(subscription.instruments);
       subscription.instruments = subscription.instruments.filter(
-        (token) => !requestedTokens.includes(token),
+        (id) => !requestedUirIds.includes(id),
       );
 
-      // Check if any other clients are subscribed to these instruments
+      // Check if any other clients are subscribed to these UIR IDs
       const stillSubscribed = Array.from(
         this.subscriptionRegistry.values(),
       ).some((sub) =>
-        sub.instruments.some((token) => requestedTokens.includes(token)),
+        sub.instruments.some((id) => requestedUirIds.includes(id)),
       );
 
       if (!stillSubscribed) {
-        await this.unsubscribeFromInstruments(requestedTokens, client.id);
+        await this.unsubscribeFromInstruments(requestedUirIds, client.id);
       }
 
-      // Leave rooms
-      requestedTokens.forEach((token) => client.leave(`instrument:${token}`));
+      // Leave UIR-keyed rooms
+      requestedUirIds.forEach((id) => client.leave(`instrument:${id}`));
 
       const removed = Array.from(before).filter((t) => !subscription.instruments.includes(t));
-      removed.forEach((token) => this.wsInterest.removeInterest(token));
-      const not_found = requestedTokens.filter((t) => !before.has(t));
+      removed.forEach((id) => this.wsInterest.removeInterest(id));
+      const not_found = requestedUirIds.filter((id) => !before.has(id));
       client.emit('unsubscription_confirmed', {
         requested: requestedTokens,
         removed,
@@ -1385,7 +1417,7 @@ export class MarketDataGateway
         return;
       }
 
-      // Parse targets
+      // Parse targets — incoming tokens are provider tokens, resolve to UIR IDs
       const requestedRaw = Array.from(new Set(instruments as any));
       const tokens: number[] = [];
       for (const item of requestedRaw as any[]) {
@@ -1398,30 +1430,27 @@ export class MarketDataGateway
         }
       }
 
+      // Phase 3: resolve provider tokens to UIR IDs for matching internal state
+      const providerNameForResolve = (this.streamService as any).streamMetricsProvider || 'kite';
+      const uirIds: number[] = [];
+      for (const token of tokens) {
+        const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, token);
+        uirIds.push(uirId != null ? uirId : token);
+      }
+
       const subscribedSet = new Set(subscription.instruments);
-      const target = tokens.filter((t) => subscribedSet.has(t));
-      const not_subscribed = tokens.filter((t) => !subscribedSet.has(t));
+      const target = uirIds.filter((id) => subscribedSet.has(id));
+      const not_subscribed = uirIds.filter((id) => !subscribedSet.has(id));
 
       if (target.length > 0) {
         await this.streamService.setMode(mode, target);
-        target.forEach((t) => subscription.modeByInstrument.set(t, mode));
+        target.forEach((id) => subscription.modeByInstrument.set(id, mode));
       }
-
-      // Compute unresolved by attempting resolution (diagnostic only)
-      let unresolved: number[] = [];
-      try {
-        const provider = await this.providerResolver.resolveForWebsocket();
-        const exMap: Map<string, any> = (provider as any)?.resolveExchanges
-          ? await (provider as any).resolveExchanges(target.map((t) => String(t)))
-          : new Map();
-        unresolved = target.filter((t) => !exMap.has(String(t)));
-      } catch {}
 
       client.emit('mode_set', {
         requested: tokens,
         updated: target,
         not_subscribed,
-        unresolved,
         mode,
         timestamp: new Date().toISOString(),
       });
@@ -1482,18 +1511,18 @@ export class MarketDataGateway
   async handleUnsubscribeAll(@ConnectedSocket() client: Socket) {
     try {
       const sub = this.subscriptionRegistry.get(client.id);
-      const tokens = sub?.instruments || [];
-      if (tokens.length > 0) {
-        tokens.forEach((t) => this.wsInterest.removeInterest(t));
-        await this.unsubscribeFromInstruments(tokens, client.id);
-        tokens.forEach((t) => client.leave(`instrument:${t}`));
+      const ids = sub?.instruments || [];
+      if (ids.length > 0) {
+        ids.forEach((id) => this.wsInterest.removeInterest(id));
+        await this.unsubscribeFromInstruments(ids, client.id);
+        ids.forEach((id) => client.leave(`instrument:${id}`));
       }
       if (sub) {
         sub.instruments = [];
         sub.modeByInstrument.clear();
       }
       client.emit('unsubscribed_all', {
-        removed_count: tokens.length,
+        removed_count: ids.length,
         timestamp: new Date().toISOString(),
       });
     } catch (e) {
@@ -1600,14 +1629,18 @@ export class MarketDataGateway
    *
    * @performance <5ms broadcast latency for 100 clients
    */
+  /**
+   * Broadcast market data to subscribed clients.
+   * @param identifier UIR ID (Phase 3 primary) — matches room `instrument:{uirId}`.
+   */
   async broadcastMarketData(
-    instrumentToken: number,
+    identifier: number,
     data: any,
     emitOpts?: MarketTickEmitOptions,
   ) {
     try {
       const startTime = Date.now();
-      const room = `instrument:${instrumentToken}`;
+      const room = `instrument:${identifier}`;
       const sockets = await this.server.in(room).fetchSockets();
       if (sockets.length === 0) return;
 
@@ -1615,10 +1648,11 @@ export class MarketDataGateway
       for (const s of sockets) {
         const sub = this.subscriptionRegistry.get(s.id);
         const mode: StreamTickMode =
-          sub?.modeByInstrument?.get(instrumentToken) || 'ltp';
+          sub?.modeByInstrument?.get(identifier) || 'ltp';
         const payload = shapeMarketTickForMode(data, mode);
         s.emit('market_data', {
-          instrumentToken,
+          instrumentToken: data?.instrument_token ?? identifier,
+          uirId: identifier,
           data: payload,
           timestamp: ts,
           ...(emitOpts?.syntheticLast ? { syntheticLast: true } : {}),
@@ -1627,7 +1661,7 @@ export class MarketDataGateway
 
       const broadcastTime = Date.now() - startTime;
       this.logger.debug(
-        `[Gateway] Broadcasted tick ${instrumentToken} to ${sockets.length} clients in ${broadcastTime}ms`,
+        `[Gateway] Broadcasted tick UIR ${identifier} to ${sockets.length} clients in ${broadcastTime}ms`,
       );
     } catch (error) {
       this.logger.error('[Gateway] Error broadcasting market data', error);

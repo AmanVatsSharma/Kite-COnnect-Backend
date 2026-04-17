@@ -87,8 +87,9 @@ describe('MarketDataStreamService', () => {
         {
           provide: InstrumentRegistryService,
           useValue: {
-            resolveProviderToken: jest.fn(() => undefined),
-            getCanonicalSymbol: jest.fn(() => undefined),
+            resolveProviderToken: jest.fn((provider: string, token: number) => token),
+            getCanonicalSymbol: jest.fn((uirId: number) => `NSE:MOCK_${uirId}`),
+            getProviderToken: jest.fn((uirId: number) => String(uirId)),
           },
         },
         {
