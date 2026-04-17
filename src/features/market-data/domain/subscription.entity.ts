@@ -1,3 +1,12 @@
+/**
+ * @file subscription.entity.ts
+ * @module market-data
+ * @description Persisted instrument subscriptions per user, with UIR linkage for symbol-based access.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-04-17
+ */
+
 import {
   Entity,
   PrimaryGeneratedColumn,

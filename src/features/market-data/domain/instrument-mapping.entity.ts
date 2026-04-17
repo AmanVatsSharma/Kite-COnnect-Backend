@@ -1,3 +1,12 @@
+/**
+ * @file instrument-mapping.entity.ts
+ * @module market-data
+ * @description Maps provider-specific instrument tokens to universal instrument registry IDs.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-04-17
+ */
+
 import {
   Entity,
   PrimaryGeneratedColumn,
