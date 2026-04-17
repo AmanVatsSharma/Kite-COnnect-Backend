@@ -9,6 +9,7 @@ import {
 
 @Entity('instrument_mappings')
 @Index(['provider', 'provider_token'], { unique: true })
+@Index(['uir_id'])
 export class InstrumentMapping {
   @PrimaryGeneratedColumn()
   id: number;
@@ -21,6 +22,9 @@ export class InstrumentMapping {
 
   @Column({ type: 'int' })
   instrument_token: number; // FK to instruments.instrument_token (not enforced, for simplicity)
+
+  @Column({ type: 'bigint', nullable: true })
+  uir_id: number | null; // FK to universal_instruments.id
 
   @CreateDateColumn()
   created_at: Date;

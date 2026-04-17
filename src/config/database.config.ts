@@ -12,6 +12,7 @@ import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.enti
 import { RequestAuditLog } from '@features/admin/domain/request-audit-log.entity';
 import { ApiKeyAbuseFlag } from '@features/auth/domain/api-key-abuse-flag.entity';
 import { AppConfig } from '@infra/app-config/app-config.entity';
+import { UniversalInstrument } from '@features/market-data/domain/universal-instrument.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -35,6 +36,7 @@ export const getDatabaseConfig = (
     RequestAuditLog,
     ApiKeyAbuseFlag,
     AppConfig,
+    UniversalInstrument,
   ],
   // In production, prefer running migrations over synchronize
   // Override with DB_SYNCHRONIZE=true only for development

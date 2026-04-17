@@ -28,6 +28,9 @@ export class Subscription {
   @Column({ type: 'json', nullable: true })
   metadata: any;
 
+  @Column({ type: 'bigint', nullable: true })
+  uir_id: number | null; // FK to universal_instruments.id
+
   @CreateDateColumn()
   created_at: Date;
 

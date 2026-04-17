@@ -24,6 +24,7 @@ import { MarketData } from './domain/market-data.entity';
 import { Instrument } from './domain/instrument.entity';
 import { InstrumentMapping } from './domain/instrument-mapping.entity';
 import { Subscription } from './domain/subscription.entity';
+import { UniversalInstrument } from './domain/universal-instrument.entity';
 import { ApiKey } from '../auth/domain/api-key.entity'; // Import ApiKey
 
 @Module({
@@ -33,6 +34,7 @@ import { ApiKey } from '../auth/domain/api-key.entity'; // Import ApiKey
       Instrument,
       InstrumentMapping,
       Subscription,
+      UniversalInstrument,
       ApiKey, // Add ApiKey to features
     ]),
     ConfigModule,
