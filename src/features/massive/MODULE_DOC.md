@@ -1,0 +1,64 @@
+# massive feature
+
+Massive (formerly Polygon.io, rebranded Oct 2025) market data provider for US stocks, forex, crypto, options, and indices. Implements the `MarketDataProvider` interface so the market-data gateway can use Massive as a streaming source alongside Kite (Indian equities) and Vortex (Rupeezy).
+
+## Provider selection
+
+- Set `DATA_PROVIDER=massive` (or `DATA_PROVIDER=polygon`) to use Massive as default.
+- Pass `x-provider: massive` or `x-provider: polygon` HTTP header for per-request override.
+- Call `POST /api/admin/provider/global {"provider":"massive"}` to switch the WebSocket stream globally.
+
+## Configuration
+
+| Variable | Description |
+|---|---|
+| `MASSIVE_API_KEY` | **Required.** Massive API key (same as Polygon.io key). |
+| `MASSIVE_REALTIME` | `true` = realtime feed (`socket.massive.com`); `false` (default) = delayed feed (`delayed.socket.massive.com`). |
+| `MASSIVE_WS_ASSET_CLASS` | WS asset class: `stocks` (default), `forex`, `crypto`, `options`, `indices`. |
+
+## Instrument tokens
+
+Massive uses string symbols as provider tokens (e.g. `AAPL`, `BTC-USD`, `EUR/USD`).
+In the UIR instrument mapping table, store `provider = 'massive'` and `provider_token = 'AAPL'` (symbol string).
+The streaming layer resolves UIR IDs → provider tokens and passes symbols to the WS ticker's `subscribe()`.
+
+## REST endpoints used
+
+| Method | Path | MarketDataProvider method |
+|---|---|---|
+| GET | `/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}` | `getQuote`, `getLTP`, `getOHLC` |
+| GET | `/v2/aggs/ticker/{ticker}/range/{mult}/{span}/{from}/{to}` | `getHistoricalData` |
+| GET | `/v3/reference/tickers` | `getInstruments` |
+| GET | `/v1/marketstatus/now` | health/degraded check |
+
+## WebSocket protocol
+
+```
+wss://socket.massive.com/stocks   (realtime)
+wss://delayed.socket.massive.com/stocks   (delayed)
+
+1. Receive: [{"ev":"status","status":"connected","message":"..."}]
+2. Send:    {"action":"auth","params":"<MASSIVE_API_KEY>"}
+3. Receive: [{"ev":"status","status":"auth_success","message":"..."}]
+4. Send:    {"action":"subscribe","params":"T.AAPL,AM.AAPL"}
+5. Stream:  [{"ev":"T","sym":"AAPL","p":150.00,"s":100,"t":1234567890000,...}]
+```
+
+Subscriptions survive reconnect — the client re-subscribes all tracked symbols on `auth_success`.
+
+## Module files
+
+| File | Purpose |
+|---|---|
+| `massive.constants.ts` | REST/WS base URLs, asset class types, interval map |
+| `dto/massive-ws-event.dto.ts` | TypeScript shapes for all WS event types (T, Q, AM, XT, XA, C, CA) |
+| `dto/massive-aggs.dto.ts` | REST OHLCV aggregate response shapes |
+| `dto/massive-snapshot.dto.ts` | REST snapshot and reference ticker response shapes |
+| `infra/massive-rest.client.ts` | Axios REST client; `init(apiKey)` must be called before use |
+| `infra/massive-websocket.client.ts` | `ws`-based ticker facade; duck-typed to TickerLike |
+| `infra/massive-provider.service.ts` | `MarketDataProvider` implementation wiring REST + WS |
+| `massive.module.ts` | NestJS `@Global()` module exporting `MassiveProviderService` |
+
+## Changelog
+
+- **2026-04-18** — Initial implementation: REST client, WebSocket ticker, MarketDataProvider service, module registration. Provider aliases `massive` and `polygon` added to `normalizeProviderAlias`. Streaming layer updated to support string provider tokens (Massive symbols). `InternalProviderName` union extended with `'massive'`.

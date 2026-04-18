@@ -13,6 +13,7 @@ import { MarketDataModule } from './features/market-data/market-data.module';
 import { KiteConnectModule } from './features/kite-connect/kite-connect.module';
 import { StockModule } from './features/stock/stock.module';
 import { FalconModule } from './features/falcon/falcon.module';
+import { MassiveModule } from './features/massive/massive.module';
 import { HealthModule } from './features/health/health.module';
 import { ObservabilityModule } from './infra/observability/observability.module';
 
@@ -37,6 +38,7 @@ import { ObservabilityModule } from './infra/observability/observability.module'
     KiteConnectModule,
     StockModule,
     FalconModule,
+    MassiveModule,
     HealthModule,
   ],
   controllers: [AppController],

@@ -1,23 +1,27 @@
 /**
  * @file market-data-provider-resolver.service.ts
  * @module market-data
- * @description Resolves MarketDataProvider for HTTP and WebSocket (kite/vortex; x-provider accepts falcon/vayu aliases).
+ * @description Resolves MarketDataProvider for HTTP and WebSocket (kite/vortex/massive; falcon/vayu/polygon aliases).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-03-28
+ * @updated 2026-04-18
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { VortexProviderService } from '@features/stock/infra/vortex-provider.service';
+import { MassiveProviderService } from '@features/massive/infra/massive-provider.service';
 import { MarketDataProvider } from '@features/market-data/infra/market-data.provider';
 import { RedisService } from '@infra/redis/redis.service';
 import { ApiKey } from '@features/auth/domain/api-key.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { normalizeProviderAlias } from '@shared/utils/provider-label.util';
+import {
+  normalizeProviderAlias,
+  InternalProviderName,
+} from '@shared/utils/provider-label.util';
 
-type ProviderName = 'kite' | 'vortex';
+type ProviderName = InternalProviderName;
 
 @Injectable()
 export class MarketDataProviderResolverService {
@@ -31,6 +35,7 @@ export class MarketDataProviderResolverService {
     private redis: RedisService,
     private kite: KiteProviderService,
     private vortex: VortexProviderService,
+    private massive: MassiveProviderService,
     @InjectRepository(ApiKey) private apiKeyRepo: Repository<ApiKey>,
   ) {}
 
@@ -55,11 +60,12 @@ export class MarketDataProviderResolverService {
         const rec = await this.apiKeyRepo.findOne({
           where: { key: apiKey, is_active: true },
         });
-        if (rec?.provider === 'kite' || rec?.provider === 'vortex') {
+        const normalized = normalizeProviderAlias(rec?.provider ?? null);
+        if (normalized) {
           this.logger.log(
-            `[Resolver][HTTP] Using API key provider=${rec.provider}`,
+            `[Resolver][HTTP] Using API key provider=${normalized}`,
           );
-          return this.getProvider(rec.provider as ProviderName);
+          return this.getProvider(normalized);
         }
       } catch (e) {
         this.logger.warn(
@@ -119,7 +125,8 @@ export class MarketDataProviderResolverService {
     try {
       if (this.redis.isRedisAvailable()) {
         const v = await this.redis.get<string>(this.GLOBAL_PROVIDER_KEY);
-        if (v === 'kite' || v === 'vortex') return v;
+        const n = normalizeProviderAlias(v ?? null);
+        if (n) return n;
       }
     } catch {}
     if (this.inMemoryGlobalProvider) return this.inMemoryGlobalProvider;
@@ -150,6 +157,7 @@ export class MarketDataProviderResolverService {
     if (this.providerCache.has(name)) return this.providerCache.get(name)!;
     let instance: MarketDataProvider;
     if (name === 'kite') instance = this.kite;
+    else if (name === 'massive') instance = this.massive;
     else instance = this.vortex;
     // fire-and-forget initialize; providers are resilient if not configured
     this.ensureInitialized(instance, name);

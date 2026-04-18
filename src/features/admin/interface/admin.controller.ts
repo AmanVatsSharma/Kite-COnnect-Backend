@@ -438,12 +438,12 @@ export class AdminController {
   async setApiKeyProvider(
     @Body() body: { key: string; provider?: string | null },
   ) {
-    let normalized: 'kite' | 'vortex' | null = null;
+    let normalized: ReturnType<typeof normalizeProviderAlias> = null;
     if (body.provider != null && String(body.provider).trim() !== '') {
       const n = normalizeProviderAlias(body.provider);
       if (!n) {
         throw new BadRequestException(
-          'provider must be kite, vortex, falcon, or vayu',
+          'provider must be kite, vortex, falcon, vayu, massive, or polygon',
         );
       }
       normalized = n;
@@ -467,9 +467,9 @@ export class AdminController {
       properties: {
         provider: {
           type: 'string',
-          enum: ['kite', 'vortex', 'falcon', 'vayu'],
+          enum: ['kite', 'vortex', 'falcon', 'vayu', 'massive', 'polygon'],
           description:
-            'Internal or alias: kite/falcon (Falcon), vortex/vayu (Vayu)',
+            'Internal or alias: kite/falcon (Falcon), vortex/vayu (Vayu), massive/polygon (Massive)',
         },
       },
       example: { provider: 'vortex' },
@@ -479,7 +479,7 @@ export class AdminController {
     const internal = normalizeProviderAlias(body.provider);
     if (!internal) {
       throw new BadRequestException(
-        'provider must be kite, vortex, falcon, or vayu',
+        'provider must be kite, vortex, falcon, vayu, massive, or polygon',
       );
     }
     await this.resolver.setGlobalProviderName(internal);

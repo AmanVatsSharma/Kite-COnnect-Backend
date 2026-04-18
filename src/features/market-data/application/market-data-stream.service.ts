@@ -44,8 +44,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   private readonly UNSUB_QUEUE_MAX = 50_000;
   /** Kite upstream WebSocket limit: max 3000 instruments per connection. */
   private readonly KITE_UPSTREAM_INSTRUMENT_LIMIT = 3000;
-  /** Prometheus label for stream metrics (internal: kite | vortex). */
-  private streamMetricsProvider: 'kite' | 'vortex' | 'unknown' = 'unknown';
+  /** Prometheus label for stream metrics (internal: kite | vortex | massive). */
+  private streamMetricsProvider: 'kite' | 'vortex' | 'massive' | 'unknown' = 'unknown';
   /** Client-visible provider name for stream_status and health (Falcon | Vayu). */
   private streamClientProviderLabel = 'Falcon';
   /** Attach stream-level ticker handlers once per ticker instance (avoids duplicates on re-init). */
@@ -542,14 +542,15 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             modeGroups.get(sub.mode)!.push(uirId);
           });
 
-          // Subscribe by mode groups with chunking — translate UIR IDs to provider tokens
+          // Subscribe by mode groups with chunking — translate UIR IDs to provider tokens.
+          // Tokens may be numeric (Kite/Vortex) or string symbols (Massive).
           for (const [mode, uirIds] of modeGroups) {
-            const providerTokens: number[] = [];
+            const providerTokens: (number | string)[] = [];
             for (const uirId of uirIds) {
               const pt = this.instrumentRegistry.getProviderToken(uirId, this.streamMetricsProvider);
               if (pt != null) {
                 const numPt = Number(pt);
-                if (Number.isFinite(numPt)) providerTokens.push(numPt);
+                providerTokens.push(Number.isFinite(numPt) ? numPt : pt);
               }
             }
             this.logger.log(
@@ -580,12 +581,12 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       // Process unsubscriptions (queue is keyed by UIR ID; translate to provider tokens for upstream)
       if (this.unsubscriptionQueue.size > 0) {
         const uirIdsToUnsubscribe = Array.from(this.unsubscriptionQueue);
-        const providerTokens: number[] = [];
+        const providerTokens: (number | string)[] = [];
         for (const uirId of uirIdsToUnsubscribe) {
           const pt = this.instrumentRegistry.getProviderToken(uirId, this.streamMetricsProvider);
           if (pt != null) {
             const numPt = Number(pt);
-            if (Number.isFinite(numPt)) providerTokens.push(numPt);
+            providerTokens.push(Number.isFinite(numPt) ? numPt : pt);
           }
         }
         for (let i = 0; i < providerTokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
