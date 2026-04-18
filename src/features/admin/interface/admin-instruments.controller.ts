@@ -75,8 +75,10 @@ export class AdminInstrumentsController {
         name: row.name,
         kiteToken: cross.kiteToken ?? null,
         vortexToken: cross.vortexToken ?? null,
+        massiveToken: cross.massiveToken ?? null,
         hasKite: cross.kiteToken != null,
         hasVortex: cross.vortexToken != null,
+        hasMassive: cross.massiveToken != null,
       };
     });
 
@@ -114,6 +116,7 @@ export class AdminInstrumentsController {
       uirId: cross.uirId ?? null,
       kiteToken: cross.kiteToken ?? null,
       vortexToken: cross.vortexToken ?? null,
+      massiveToken: cross.massiveToken ?? null,
       found: cross.uirId != null,
     };
   }

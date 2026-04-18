@@ -4,7 +4,7 @@
  * @description Warm in-memory registry mapping provider tokens <-> UIR IDs <-> canonical symbols.
  * @author BharatERP
  * @created 2026-04-17
- * @updated 2026-04-18
+ * @updated 2026-04-19
  */
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
@@ -122,22 +122,24 @@ export class InstrumentRegistryService implements OnModuleInit {
   }
 
   /**
-   * Return both Kite and Vortex provider tokens for a canonical symbol (in-memory, no DB).
+   * Return provider tokens for all known providers for a canonical symbol (in-memory, no DB).
    */
   resolveCrossProvider(canonical: string): {
     uirId: number | undefined;
     kiteToken: string | undefined;
     vortexToken: string | undefined;
+    massiveToken: string | undefined;
   } {
     const uirId = this.canonicalToUirId.get(canonical);
     if (uirId == null) {
-      return { uirId: undefined, kiteToken: undefined, vortexToken: undefined };
+      return { uirId: undefined, kiteToken: undefined, vortexToken: undefined, massiveToken: undefined };
     }
     const providerMap = this.uirIdToProviderTokens.get(uirId);
     return {
       uirId,
       kiteToken: providerMap?.get('kite'),
       vortexToken: providerMap?.get('vortex'),
+      massiveToken: providerMap?.get('massive'),
     };
   }
 
