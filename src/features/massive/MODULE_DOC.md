@@ -46,6 +46,24 @@ wss://delayed.socket.massive.com/stocks   (delayed)
 
 Subscriptions survive reconnect — the client re-subscribes all tracked symbols on `auth_success`.
 
+## Instrument sync
+
+Daily cron (`MASSIVE_INSTRUMENTS_CRON`, default `15 10 * * *` America/New_York) pulls all tickers
+from `/v3/reference/tickers` (paginated by `next_url` cursor), upserts into `massive_instruments`,
+creates `instrument_mappings` rows (`provider='massive'`), upserts `universal_instruments` (UIR),
+then calls `InstrumentRegistryService.refresh()` so the streaming layer can immediately route
+WS subscriptions to Massive symbols.
+
+| Variable | Description |
+|---|---|
+| `MASSIVE_INSTRUMENT_SYNC_ENABLED` | `true`/`false` — enable/disable cron (default `true`) |
+| `MASSIVE_INSTRUMENTS_CRON` | Cron expression (default `15 10 * * *`) |
+| `MASSIVE_INSTRUMENTS_CRON_TZ` | Timezone (default `America/New_York`) |
+| `MASSIVE_INSTRUMENT_MARKETS` | Comma-separated markets to sync (default `stocks,forex,crypto`) |
+
+Admin endpoints: `POST /api/admin/massive/instruments/sync`, `GET /api/admin/massive/instruments/sync/status`,
+`GET /api/admin/massive/instruments`, `GET /api/admin/massive/instruments/resolve`.
+
 ## Module files
 
 | File | Purpose |
@@ -57,8 +75,12 @@ Subscriptions survive reconnect — the client re-subscribes all tracked symbols
 | `infra/massive-rest.client.ts` | Axios REST client; `init(apiKey)` must be called before use |
 | `infra/massive-websocket.client.ts` | `ws`-based ticker facade; duck-typed to TickerLike |
 | `infra/massive-provider.service.ts` | `MarketDataProvider` implementation wiring REST + WS |
-| `massive.module.ts` | NestJS `@Global()` module exporting `MassiveProviderService` |
+| `domain/massive-instrument.entity.ts` | TypeORM entity for `massive_instruments` table |
+| `application/massive-instrument-sync.service.ts` | Daily sync cron + UIR wiring |
+| `interface/admin-massive.controller.ts` | Admin REST endpoints for sync control and inspection |
+| `massive.module.ts` | NestJS `@Global()` module |
 
 ## Changelog
 
 - **2026-04-18** — Initial implementation: REST client, WebSocket ticker, MarketDataProvider service, module registration. Provider aliases `massive` and `polygon` added to `normalizeProviderAlias`. Streaming layer updated to support string provider tokens (Massive symbols). `InternalProviderName` union extended with `'massive'`.
+- **2026-04-19** — Instrument sync: `massive_instruments` table + migration, daily sync cron, UIR wiring, admin endpoints. `InstrumentMapping.provider` type extended with `'massive'`. `resolveCrossProvider()` now returns `massiveToken`.

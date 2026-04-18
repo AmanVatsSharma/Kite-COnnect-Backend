@@ -4,7 +4,7 @@
  * @description Maps provider-specific instrument tokens to universal instrument registry IDs.
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-17
+ * @updated 2026-04-19
  */
 
 import {
@@ -24,7 +24,7 @@ export class InstrumentMapping {
   id: number;
 
   @Column({ type: 'varchar', length: 16 })
-  provider: 'kite' | 'vortex';
+  provider: 'kite' | 'vortex' | 'massive';
 
   @Column({ type: 'varchar', length: 64 })
   provider_token: string;
