@@ -457,9 +457,9 @@ export class AdminController {
 
   @Post('provider/global')
   @ApiOperation({
-    summary: 'Set global provider for WebSocket streaming',
+    summary: 'Set global provider for HTTP REST queries',
     description:
-      'Sets the global market data provider that will be used for all WebSocket connections. Must be done before starting streaming.',
+      'Sets the default provider used for HTTP REST quote requests (x-provider header overrides per-request). WebSocket streaming uses automatic per-exchange routing and ignores this setting.',
   })
   @ApiBody({
     schema: {
@@ -544,7 +544,7 @@ export class AdminController {
   })
   async streamStatus() {
     const status = await this.stream.getStreamingStatus();
-    const kiteSubscribedInstruments = this.stream.getSubscribedInstrumentCount?.() ?? null;
+    const kiteSubscribedInstruments = status.providers?.['kite']?.subscribedCount ?? null;
     const registryStats = this.instrumentRegistry.getStats();
     return {
       ...status,
@@ -553,6 +553,7 @@ export class AdminController {
       kiteUtilizationPct: kiteSubscribedInstruments != null
         ? Math.round((kiteSubscribedInstruments / 3000) * 100)
         : null,
+      providerHealth: status.providers,
       registry: registryStats,
     };
   }

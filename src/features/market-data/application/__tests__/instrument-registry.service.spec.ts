@@ -4,7 +4,7 @@
  * @description Unit tests for InstrumentRegistryService in-memory maps.
  * @author BharatERP
  * @created 2026-04-17
- * @updated 2026-04-17
+ * @updated 2026-04-19
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -14,8 +14,8 @@ import { UniversalInstrument } from '../../domain/universal-instrument.entity';
 import { InstrumentMapping } from '../../domain/instrument-mapping.entity';
 
 const mockUirRows = [
-  { id: '42', canonical_symbol: 'NSE:RELIANCE', is_active: true },
-  { id: '108', canonical_symbol: 'NFO:NIFTY:FUT:20250424', is_active: true },
+  { id: '42', canonical_symbol: 'NSE:RELIANCE', exchange: 'NSE', is_active: true },
+  { id: '108', canonical_symbol: 'NFO:NIFTY:FUT:20250424', exchange: 'NFO', is_active: true },
 ];
 
 const mockMappings = [
@@ -184,6 +184,43 @@ describe('InstrumentRegistryService', () => {
     it('should return correct counts after warmMaps', async () => {
       await service.warmMaps();
       expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 3 });
+    });
+  });
+
+  describe('getBestProviderForUirId', () => {
+    it('NSE instrument with kite token → kite (Tier 1 exchange match)', async () => {
+      await service.warmMaps();
+      expect(service.getBestProviderForUirId(42)).toBe('kite');
+    });
+
+    it('NSE instrument with only vortex token → vortex (Tier 2 Indian fallback)', async () => {
+      mappingRepoFind.mockResolvedValue([
+        { provider: 'vortex', provider_token: 'NSE_EQ-22', uir_id: 42 },
+      ]);
+      await service.warmMaps();
+      expect(service.getBestProviderForUirId(42)).toBe('vortex');
+    });
+
+    it('US instrument with massive token → massive (Tier 1 exchange match)', async () => {
+      uirRepoFind.mockResolvedValue([
+        { id: '200', canonical_symbol: 'US:AAPL', exchange: 'US', is_active: true },
+      ]);
+      mappingRepoFind.mockResolvedValue([
+        { provider: 'massive', provider_token: 'AAPL', uir_id: 200 },
+      ]);
+      await service.warmMaps();
+      expect(service.getBestProviderForUirId(200)).toBe('massive');
+    });
+
+    it('UIR ID with no tokens → undefined (Tier 3)', async () => {
+      mappingRepoFind.mockResolvedValue([]);
+      await service.warmMaps();
+      expect(service.getBestProviderForUirId(42)).toBeUndefined();
+    });
+
+    it('unknown UIR ID → undefined', async () => {
+      await service.warmMaps();
+      expect(service.getBestProviderForUirId(9999)).toBeUndefined();
     });
   });
 });

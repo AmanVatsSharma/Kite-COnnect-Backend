@@ -4,7 +4,7 @@
  * @description Orchestrates provider ticker streaming, subscription batching, LTP cache, and Redis stream status.
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-04-18
+ * @updated 2026-04-19
  */
 import {
   Injectable,
@@ -23,14 +23,18 @@ import { RedisService } from '@infra/redis/redis.service';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
-import { internalToClientProviderName } from '@shared/utils/provider-label.util';
+import { internalToClientProviderName, InternalProviderName } from '@shared/utils/provider-label.util';
 import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
+import { denormalizeExchange } from '@shared/utils/exchange-normalizer';
 
 @Injectable()
 export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MarketDataStreamService.name);
   private isStreaming = false;
-  private subscribedInstruments: Set<number> = new Set();
+  private activeProviderState = new Map<
+    InternalProviderName,
+    { ticker: any; subscribedUirIds: Set<number>; isConnected: boolean }
+  >();
   private streamInterval: NodeJS.Timeout | null = null;
   private subscriptionQueue: Map<
     number,
@@ -44,10 +48,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   private readonly UNSUB_QUEUE_MAX = 50_000;
   /** Kite upstream WebSocket limit: max 3000 instruments per connection. */
   private readonly KITE_UPSTREAM_INSTRUMENT_LIMIT = 3000;
-  /** Prometheus label for stream metrics (internal: kite | vortex | massive). */
-  private streamMetricsProvider: 'kite' | 'vortex' | 'massive' | 'unknown' = 'unknown';
-  /** Client-visible provider name for stream_status and health (Falcon | Vayu). */
-  private streamClientProviderLabel = 'Falcon';
   /** Attach stream-level ticker handlers once per ticker instance (avoids duplicates on re-init). */
   private readonly tickerStreamHandlersBound = new WeakMap<object, true>();
   private readonly rateLogAt = new Map<string, number>();
@@ -167,71 +167,91 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
   private async initializeStreaming() {
     try {
-      const internal =
-        await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
-      this.streamMetricsProvider = internal;
-      this.streamClientProviderLabel =
-        internalToClientProviderName(internal);
+      const enabledProviders = this.providerResolver.getEnabledProviders();
+      if (enabledProviders.length === 0) {
+        this.logger.warn(
+          'No providers are ready; market data WS is in degraded mode (configure credentials).',
+        );
+        try {
+          this.redisService.publish('stream:status', {
+            event: 'degraded',
+            reason: 'no_providers',
+            ts: Date.now(),
+          });
+        } catch {}
+        return;
+      }
 
-      // Global provider for WS streaming
-      const provider = await this.providerResolver.resolveForWebsocket();
-      const ticker = provider.initializeTicker();
+      for (const providerName of enabledProviders) {
+        const provider = this.providerResolver.getProvider(providerName);
+        const ticker = provider.initializeTicker?.();
+        if (!ticker?.on) {
+          this.rateLimitedLog(
+            'warn',
+            `ticker_missing_${providerName}`,
+            `[${providerName}] Ticker not initialized; skipping (configure credentials).`,
+            60_000,
+          );
+          continue;
+        }
 
-      // Set up ticker event handlers (idempotent per ticker instance)
-      if (ticker?.on) {
+        const state = { ticker, subscribedUirIds: new Set<number>(), isConnected: false };
+        this.activeProviderState.set(providerName, state);
+
         if (!this.tickerStreamHandlersBound.has(ticker)) {
           this.tickerStreamHandlersBound.set(ticker, true);
+          const clientLabel = internalToClientProviderName(providerName);
 
           ticker.on('ticks', (ticks: any[]) => {
-            this.handleTicks(ticks);
+            void this.handleTicks(providerName, ticks);
           });
 
           ticker.on('connect', () => {
-            this.logger.log('Provider ticker connected');
+            this.logger.log(`[${providerName}] Provider ticker connected`);
+            state.isConnected = true;
             this.isStreaming = true;
             try {
-              this.metrics.marketDataStreamTickerConnected
-                .labels(this.streamMetricsProvider)
-                .set(1);
+              this.metrics.marketDataStreamTickerConnected.labels(providerName).set(1);
             } catch {}
             try {
               this.redisService.publish('stream:status', {
                 event: 'connected',
-                provider: this.streamClientProviderLabel,
+                provider: clientLabel,
+                providerName,
                 ts: Date.now(),
               });
             } catch {}
           });
 
           ticker.on('disconnect', () => {
-            this.logger.log('Provider ticker disconnected');
-            this.isStreaming = false;
+            this.logger.log(`[${providerName}] Provider ticker disconnected`);
+            state.isConnected = false;
+            this.isStreaming = Array.from(this.activeProviderState.values()).some((s) => s.isConnected);
             try {
-              this.metrics.marketDataStreamTickerConnected
-                .labels(this.streamMetricsProvider)
-                .set(0);
+              this.metrics.marketDataStreamTickerConnected.labels(providerName).set(0);
             } catch {}
             try {
               this.redisService.publish('stream:status', {
                 event: 'disconnected',
-                provider: this.streamClientProviderLabel,
+                provider: clientLabel,
+                providerName,
                 ts: Date.now(),
               });
             } catch {}
           });
 
           ticker.on('error', (error: any) => {
-            this.logger.error('Provider ticker error', error);
-            this.isStreaming = false;
+            this.logger.error(`[${providerName}] Provider ticker error`, error);
+            state.isConnected = false;
+            this.isStreaming = Array.from(this.activeProviderState.values()).some((s) => s.isConnected);
             try {
-              this.metrics.marketDataStreamTickerConnected
-                .labels(this.streamMetricsProvider)
-                .set(0);
+              this.metrics.marketDataStreamTickerConnected.labels(providerName).set(0);
             } catch {}
             try {
               this.redisService.publish('stream:status', {
                 event: 'error',
-                provider: this.streamClientProviderLabel,
+                provider: clientLabel,
+                providerName,
                 error: error?.message || 'unknown',
                 ts: Date.now(),
               });
@@ -239,65 +259,41 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           });
         }
 
-        // Connect to ticker with safe guard
-        // Connect without blocking startup; failures will be logged inside the provider
-        try {
-          setTimeout(() => {
-            try {
-              ticker.connect?.();
-            } catch (e2) {
-              this.logger.error('Error connecting provider ticker', e2);
-            }
-          }, 0);
-        } catch (e) {
-          this.logger.error('Error scheduling provider ticker connect', e);
-        }
-      } else {
-        this.rateLimitedLog(
-          'warn',
-          'ticker_missing',
-          'Ticker not initialized; market data WS is in degraded mode (configure credentials).',
-          60_000,
-        );
-        try {
-          this.metrics.marketDataStreamTickerConnected
-            .labels(this.streamMetricsProvider)
-            .set(0);
-        } catch {}
-        try {
-          this.redisService.publish('stream:status', {
-            event: 'degraded',
-            reason: 'no_ticker',
-            provider: this.streamClientProviderLabel,
-            ts: Date.now(),
-          });
-        } catch {}
+        setTimeout(() => {
+          try {
+            ticker.connect?.();
+          } catch (e) {
+            this.logger.error(`[${providerName}] Error connecting provider ticker`, e);
+          }
+        }, 0);
       }
 
-      this.logger.log('Market data streaming service initialized');
+      this.logger.log(
+        `Market data streaming initialized for providers: [${enabledProviders.join(', ')}]`,
+      );
     } catch (error) {
       this.logger.error('Failed to initialize market data streaming', error);
     }
   }
 
-  private async handleTicks(ticks: any[]) {
+  private async handleTicks(providerName: InternalProviderName, ticks: any[]) {
     try {
       if (!Array.isArray(ticks) || ticks.length === 0) return;
       try {
         this.metrics.marketDataStreamTicksIngestedTotal
-          .labels(this.streamMetricsProvider)
+          .labels(providerName)
           .inc(ticks.length);
       } catch {}
       this.logger.debug(
-        `[StreamBatching] Ingesting tick batch count=${ticks.length} provider=${this.streamMetricsProvider}`,
+        `[StreamBatching] Ingesting tick batch count=${ticks.length} provider=${providerName}`,
       );
 
       for (const tick of ticks) {
         const instrumentToken = tick.instrument_token;
 
-        // Phase 3: resolve to UIR ID — all internal state keyed by UIR
+        // Resolve to UIR ID — all internal state keyed by UIR
         const uirId = this.instrumentRegistry.resolveProviderToken(
-          this.streamMetricsProvider,
+          providerName,
           instrumentToken,
         );
         if (uirId === undefined) {
@@ -311,9 +307,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         }
         tick._uirId = uirId;
         tick._canonicalSymbol = this.instrumentRegistry.getCanonicalSymbol(uirId);
-
-        // All internal state keyed by UIR ID
-        this.subscribedInstruments.add(uirId);
 
         // Update in-memory LTP cache first for hot-read path
         try {
@@ -418,13 +411,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       if (!Array.isArray(pairs) || pairs.length === 0) {
         return;
       }
-      const provider = await this.providerResolver.resolveForWebsocket();
-      // Prime mapping so ticker.subscribe() can send correct exchange without defaulting
-      try {
-        provider.primeExchangeMapping?.(pairs);
-      } catch (e) {
-        this.logger.warn('[Stream] primeExchangeMapping failed', e as any);
-      }
+      // Exchange priming is handled per-provider inside processSubscriptionBatch
       const tokens = Array.from(new Set(pairs.map((p) => Number(p.token))));
       await this.subscribeToInstruments(tokens, mode, clientId);
     } catch (error) {
@@ -472,6 +459,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
   private async processSubscriptionBatch() {
     const t0 = Date.now();
+    const providerLabelsUsed = new Set<InternalProviderName>();
     try {
       if (
         this.subscriptionQueue.size === 0 &&
@@ -484,129 +472,157 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         `[StreamBatching] Processing batch: ${this.subscriptionQueue.size} subscriptions, ${this.unsubscriptionQueue.size} unsubscriptions`,
       );
 
-      const provider = await this.providerResolver.resolveForWebsocket();
-      const ticker = provider.getTicker();
-      if (!ticker || !this.isStreaming) {
-        this.rateLimitedLog(
-          'warn',
-          'batch_skip_no_ticker',
-          `[StreamBatching] Cannot process batch: ticker=${!!ticker}, isStreaming=${this.isStreaming} (will retry next tick)`,
-          15_000,
-        );
-        return;
-      }
-
-      // Process subscriptions (queue is keyed by UIR ID; translate to provider tokens for upstream)
+      // ── Subscriptions ────────────────────────────────────────────────────────
       if (this.subscriptionQueue.size > 0) {
-        let subscriptions = Array.from(this.subscriptionQueue.entries());
+        // Group queued UIR IDs by the best provider for each instrument
+        const byProvider = new Map<
+          InternalProviderName,
+          Map<number, { mode: 'ltp' | 'ohlcv' | 'full' }>
+        >();
+        for (const [uirId, sub] of this.subscriptionQueue) {
+          const prov = this.instrumentRegistry.getBestProviderForUirId(uirId);
+          if (!prov || !this.activeProviderState.has(prov)) continue;
+          if (!byProvider.has(prov)) byProvider.set(prov, new Map());
+          byProvider.get(prov)!.set(uirId, { mode: sub.mode });
+        }
 
-        // Enforce Kite upstream instrument limit (dynamic: 3000 × numShards via provider.getSubscriptionLimit())
-        if (provider.providerName === 'kite') {
-          const limit = (provider as any).getSubscriptionLimit?.() ?? this.KITE_UPSTREAM_INSTRUMENT_LIMIT;
-          const capacity = limit - this.subscribedInstruments.size;
+        for (const [providerName, uirGroup] of byProvider) {
+          const state = this.activeProviderState.get(providerName)!;
+          if (!state.isConnected) {
+            this.rateLimitedLog(
+              'warn',
+              `batch_skip_disconnected_${providerName}`,
+              `[StreamBatching][${providerName}] Provider not connected; will retry next tick`,
+              15_000,
+            );
+            continue;
+          }
+          providerLabelsUsed.add(providerName);
+          const provider = this.providerResolver.getProvider(providerName);
+          let subscriptions = Array.from(uirGroup.entries());
+
+          // Enforce provider upstream instrument limit
+          const limit =
+            (provider as any).getSubscriptionLimit?.() ??
+            this.KITE_UPSTREAM_INSTRUMENT_LIMIT;
+          const capacity = limit - state.subscribedUirIds.size;
           if (capacity <= 0) {
             this.logger.warn(
-              `[StreamBatching] Kite upstream limit (${limit}) reached; dropping ${subscriptions.length} queued UIR IDs`,
+              `[StreamBatching][${providerName}] Upstream limit (${limit}) reached; dropping ${subscriptions.length} queued UIR IDs`,
             );
-            this.metrics.marketDataStreamQueueDroppedTotal
-              .labels('kite_upstream_limit')
-              .inc(subscriptions.length);
-            this.subscriptionQueue.clear();
+            try {
+              this.metrics.marketDataStreamQueueDroppedTotal
+                .labels(`${providerName}_upstream_limit`)
+                .inc(subscriptions.length);
+            } catch {}
             subscriptions = [];
           } else if (subscriptions.length > capacity) {
             const dropped = subscriptions.length - capacity;
             this.logger.warn(
-              `[StreamBatching] Kite upstream limit: capping ${subscriptions.length} to ${capacity} (dropping ${dropped}, limit=${limit})`,
+              `[StreamBatching][${providerName}] Upstream limit: capping to ${capacity} (dropping ${dropped})`,
             );
-            this.metrics.marketDataStreamQueueDroppedTotal
-              .labels('kite_upstream_limit')
-              .inc(dropped);
+            try {
+              this.metrics.marketDataStreamQueueDroppedTotal
+                .labels(`${providerName}_upstream_limit`)
+                .inc(dropped);
+            } catch {}
             subscriptions = subscriptions.slice(0, capacity);
-            // Re-sync queue to only allowed entries
-            const allowedIds = new Set(subscriptions.map(([id]) => id));
-            for (const [id] of this.subscriptionQueue) {
-              if (!allowedIds.has(id)) this.subscriptionQueue.delete(id);
+          }
+
+          if (subscriptions.length === 0) continue;
+
+          // Vortex exchange priming — supply token→exchange pairs before subscribe
+          if (providerName === 'vortex') {
+            const primePairs: Array<{ token: number; exchange: string }> = [];
+            for (const [uirId] of subscriptions) {
+              const pt = this.instrumentRegistry.getProviderToken(uirId, 'vortex');
+              const canon = this.instrumentRegistry.getCanonicalSymbol(uirId);
+              const canonExch = canon?.split(':')[0] ?? '';
+              const vortexExch = denormalizeExchange(canonExch, 'vortex');
+              const tokenNum = parseInt((pt ?? '').split('-').pop() ?? pt ?? '', 10);
+              if (!isNaN(tokenNum)) primePairs.push({ token: tokenNum, exchange: vortexExch });
+            }
+            if (primePairs.length) {
+              try {
+                provider.primeExchangeMapping?.(primePairs);
+              } catch (e) {
+                this.logger.warn('[StreamBatching][vortex] primeExchangeMapping failed', e as any);
+              }
             }
           }
-        }
 
-        if (subscriptions.length > 0) {
-          const uirIdsToSubscribe = subscriptions.map(([uirId]) => uirId);
-
-          // Group by mode for efficient batching
+          // Group by mode then chunk-subscribe
           const modeGroups = new Map<string, number[]>();
-          subscriptions.forEach(([uirId, sub]) => {
-            if (!modeGroups.has(sub.mode)) {
-              modeGroups.set(sub.mode, []);
-            }
+          for (const [uirId, sub] of subscriptions) {
+            if (!modeGroups.has(sub.mode)) modeGroups.set(sub.mode, []);
             modeGroups.get(sub.mode)!.push(uirId);
-          });
+          }
 
-          // Subscribe by mode groups with chunking — translate UIR IDs to provider tokens.
-          // Tokens may be numeric (Kite/Vortex) or string symbols (Massive).
           for (const [mode, uirIds] of modeGroups) {
             const providerTokens: (number | string)[] = [];
             for (const uirId of uirIds) {
-              const pt = this.instrumentRegistry.getProviderToken(uirId, this.streamMetricsProvider);
+              const pt = this.instrumentRegistry.getProviderToken(uirId, providerName);
               if (pt != null) {
                 const numPt = Number(pt);
                 providerTokens.push(Number.isFinite(numPt) ? numPt : pt);
               }
             }
             this.logger.log(
-              `[StreamBatching] Subscribing ${providerTokens.length} provider tokens (${uirIds.length} UIR IDs) with mode=${mode} to upstream`,
+              `[StreamBatching][${providerName}] Subscribing ${providerTokens.length} tokens (${uirIds.length} UIR IDs) mode=${mode}`,
             );
             for (let i = 0; i < providerTokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
               const chunk = providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
-              ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
+              state.ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
             }
-            uirIds.forEach((uirId) => {
-              this.subscribedInstruments.add(uirId);
-            });
+            uirIds.forEach((uirId) => state.subscribedUirIds.add(uirId));
           }
 
-          this.logger.log(
-            `[StreamBatching] Processed ${uirIdsToSubscribe.length} subscriptions in ${modeGroups.size} mode groups`,
-          );
+          // Update Kite gauge
+          if (providerName === 'kite') {
+            try {
+              this.metrics.kiteTickerSubscribedInstruments.set(state.subscribedUirIds.size);
+            } catch {}
+          }
         }
+
         this.subscriptionQueue.clear();
-        // Update Kite subscribed instruments gauge
-        if (provider.providerName === 'kite') {
-          try {
-            this.metrics.kiteTickerSubscribedInstruments.set(this.subscribedInstruments.size);
-          } catch {}
-        }
       }
 
-      // Process unsubscriptions (queue is keyed by UIR ID; translate to provider tokens for upstream)
+      // ── Unsubscriptions ──────────────────────────────────────────────────────
       if (this.unsubscriptionQueue.size > 0) {
         const uirIdsToUnsubscribe = Array.from(this.unsubscriptionQueue);
-        const providerTokens: (number | string)[] = [];
-        for (const uirId of uirIdsToUnsubscribe) {
-          const pt = this.instrumentRegistry.getProviderToken(uirId, this.streamMetricsProvider);
-          if (pt != null) {
-            const numPt = Number(pt);
-            providerTokens.push(Number.isFinite(numPt) ? numPt : pt);
+
+        for (const [providerName, state] of this.activeProviderState) {
+          providerLabelsUsed.add(providerName);
+          const inThisProvider = uirIdsToUnsubscribe.filter((id) =>
+            state.subscribedUirIds.has(id),
+          );
+          if (inThisProvider.length === 0) continue;
+
+          const providerTokens: (number | string)[] = [];
+          for (const uirId of inThisProvider) {
+            const pt = this.instrumentRegistry.getProviderToken(uirId, providerName);
+            if (pt != null) {
+              const numPt = Number(pt);
+              providerTokens.push(Number.isFinite(numPt) ? numPt : pt);
+            }
+          }
+          for (let i = 0; i < providerTokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
+            state.ticker.unsubscribe(providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE));
+          }
+          inThisProvider.forEach((uirId) => state.subscribedUirIds.delete(uirId));
+
+          this.logger.log(
+            `[StreamBatching][${providerName}] Processed ${inThisProvider.length} unsubscriptions`,
+          );
+          if (providerName === 'kite') {
+            try {
+              this.metrics.kiteTickerSubscribedInstruments.set(state.subscribedUirIds.size);
+            } catch {}
           }
         }
-        for (let i = 0; i < providerTokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
-          const chunk = providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
-          ticker.unsubscribe(chunk);
-        }
-        uirIdsToUnsubscribe.forEach((uirId) => {
-          this.subscribedInstruments.delete(uirId);
-        });
 
-        this.logger.log(
-          `[StreamBatching] Processed ${uirIdsToUnsubscribe.length} unsubscriptions`,
-        );
         this.unsubscriptionQueue.clear();
-        // Update gauge after unsubscriptions too
-        if (provider.providerName === 'kite') {
-          try {
-            this.metrics.kiteTickerSubscribedInstruments.set(this.subscribedInstruments.size);
-          } catch {}
-        }
       }
     } catch (error) {
       this.logger.error(
@@ -616,22 +632,31 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     } finally {
       try {
         const elapsed = (Date.now() - t0) / 1000;
-        this.metrics.marketDataStreamBatchSeconds
-          .labels(this.streamMetricsProvider)
-          .observe(elapsed);
+        // Emit metric for each provider that participated in this batch
+        for (const prov of providerLabelsUsed) {
+          this.metrics.marketDataStreamBatchSeconds.labels(prov).observe(elapsed);
+        }
+        if (providerLabelsUsed.size === 0) {
+          this.metrics.marketDataStreamBatchSeconds.labels('none').observe(elapsed);
+        }
       } catch {}
     }
   }
 
   async setMode(mode: string, instrumentTokens: number[]) {
     try {
-      const provider = await this.providerResolver.resolveForWebsocket();
-      const ticker = provider.getTicker();
-      if (ticker && this.isStreaming) {
-        ticker.setMode(mode, instrumentTokens);
-        this.logger.log(
-          `Set mode ${mode} for ${instrumentTokens.length} instruments`,
-        );
+      for (const [providerName, state] of this.activeProviderState) {
+        if (!state.isConnected) continue;
+        const relevant = instrumentTokens.filter((id) => state.subscribedUirIds.has(id));
+        if (relevant.length === 0) continue;
+        try {
+          state.ticker.setMode(mode, relevant);
+          this.logger.log(
+            `[${providerName}] Set mode ${mode} for ${relevant.length} instruments`,
+          );
+        } catch (e) {
+          this.logger.warn(`[${providerName}] setMode failed`, e as any);
+        }
       }
     } catch (error) {
       this.logger.error('Error setting ticker mode', error);
@@ -743,17 +768,27 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
    * Health snapshot for /health and admin: streaming flags, queues, ticker presence.
    */
   async getMarketDataHealthSnapshot() {
-    const provider = await this.providerResolver.resolveForWebsocket();
-    const ticker = provider.getTicker?.();
-    const internal =
-      await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
+    const providers: Record<string, { isConnected: boolean; subscribedCount: number }> = {};
+    for (const [name, state] of this.activeProviderState) {
+      providers[name] = { isConnected: state.isConnected, subscribedCount: state.subscribedUirIds.size };
+    }
+    const anyConnected = Object.values(providers).some((p) => p.isConnected);
+    // Legacy fields derived from the first active provider for backward compat
+    const firstEntry = this.activeProviderState.entries().next().value as
+      | [InternalProviderName, { ticker: any; subscribedUirIds: Set<number>; isConnected: boolean }]
+      | undefined;
+    const legacyProviderLabel = firstEntry
+      ? internalToClientProviderName(firstEntry[0])
+      : 'Unknown';
+    const legacyTickerReady = firstEntry ? !!firstEntry[1].ticker : false;
     return {
-      provider: internalToClientProviderName(internal),
-      isStreaming: this.isStreaming,
-      wsTickerReady: !!ticker,
-      marketDataDegraded: !ticker,
+      provider: legacyProviderLabel,
+      isStreaming: anyConnected,
+      wsTickerReady: legacyTickerReady,
+      marketDataDegraded: this.activeProviderState.size === 0,
       queues: this.getQueueStatus(),
-      subscribedCount: this.subscribedInstruments.size,
+      subscribedCount: this.getSubscribedInstrumentCount(),
+      providers,
     };
   }
 
@@ -761,19 +796,22 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   async getStreamingStatus() {
     const snapshot = await this.getMarketDataHealthSnapshot();
     return {
-      isStreaming: this.isStreaming,
-      subscribedInstruments: Array.from(this.subscribedInstruments),
-      subscribedCount: this.subscribedInstruments.size,
+      isStreaming: snapshot.isStreaming,
+      subscribedCount: snapshot.subscribedCount,
       provider: snapshot.provider,
       wsTickerReady: snapshot.wsTickerReady,
       marketDataDegraded: snapshot.marketDataDegraded,
       queues: snapshot.queues,
+      providers: snapshot.providers,
+      enabledProviders: Array.from(this.activeProviderState.keys()),
     };
   }
 
-  /** Current count of instruments subscribed on the upstream ticker. */
+  /** Current count of instruments subscribed across all active providers. */
   getSubscribedInstrumentCount(): number {
-    return this.subscribedInstruments.size;
+    let total = 0;
+    for (const [, state] of this.activeProviderState) total += state.subscribedUirIds.size;
+    return total;
   }
 
   // Expose queue sizes for backpressure monitoring
@@ -803,17 +841,11 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         this.streamInterval = null;
       }
 
-      try {
-        this.metrics.marketDataStreamTickerConnected
-          .labels(this.streamMetricsProvider)
-          .set(0);
-      } catch {}
-
-      const provider = await this.providerResolver.resolveForWebsocket();
-      const ticker = provider.getTicker();
-      if (ticker) {
-        ticker.disconnect();
+      for (const [providerName, state] of this.activeProviderState) {
+        try { state.ticker?.disconnect?.(); } catch {}
+        try { this.metrics.marketDataStreamTickerConnected.labels(providerName).set(0); } catch {}
       }
+      this.activeProviderState.clear();
 
       this.isStreaming = false;
       this.logger.log('Market data streaming stopped');
@@ -837,32 +869,29 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     await this.startStreaming();
   }
 
-  // Reconnect the underlying provider ticker if streaming is active
+  // Reconnect all active provider tickers if streaming is active
   async reconnectIfStreaming() {
     try {
-      const status = await this.getStreamingStatus();
-      if (!status?.isStreaming) {
+      if (!this.isStreaming && this.activeProviderState.size === 0) {
         this.logger.log('reconnectIfStreaming: streaming not active; skipping');
         return;
       }
-      const provider = await this.providerResolver.resolveForWebsocket();
-      const ticker = provider.getTicker?.();
-      if (ticker?.disconnect && ticker?.connect) {
-        this.logger.log('Reconnecting provider ticker after token update');
-        try {
-          ticker.disconnect();
-        } catch {}
+      if (this.activeProviderState.size === 0) {
+        this.logger.log('reconnectIfStreaming: no active providers; re-initializing');
+        await this.initializeStreaming();
+        return;
+      }
+      for (const [providerName, state] of this.activeProviderState) {
+        if (!state.ticker?.disconnect || !state.ticker?.connect) continue;
+        this.logger.log(`[${providerName}] Reconnecting provider ticker after token update`);
+        try { state.ticker.disconnect(); } catch {}
         setTimeout(() => {
           try {
-            ticker.connect();
+            state.ticker.connect();
           } catch (e) {
-            this.logger.error('Ticker reconnect failed', e);
+            this.logger.error(`[${providerName}] Ticker reconnect failed`, e);
           }
         }, 100);
-      } else {
-        // Fallback: re-initialize streaming to attach handlers and connect
-        this.logger.log('Ticker not available; re-initializing streaming');
-        await this.initializeStreaming();
       }
     } catch (error) {
       this.logger.error('reconnectIfStreaming failed', error);

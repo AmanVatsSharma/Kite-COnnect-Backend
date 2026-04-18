@@ -12,6 +12,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not, IsNull } from 'typeorm';
 import { UniversalInstrument } from '../domain/universal-instrument.entity';
 import { InstrumentMapping } from '../domain/instrument-mapping.entity';
+import { getProviderForExchange } from '@shared/utils/exchange-to-provider.util';
+import { InternalProviderName } from '@shared/utils/provider-label.util';
 
 @Injectable()
 export class InstrumentRegistryService implements OnModuleInit {
@@ -22,6 +24,7 @@ export class InstrumentRegistryService implements OnModuleInit {
   private uirIdToCanonical = new Map<number, string>(); // 42 -> "NSE:RELIANCE"
   private canonicalToUirId = new Map<string, number>(); // "NSE:RELIANCE" -> 42
   private uirIdToProviderTokens = new Map<number, Map<string, string>>(); // 42 -> { kite: "256265", vortex: "NSE_EQ-22" }
+  private uirIdToExchange = new Map<number, string>(); // 42 -> "NSE"
 
   constructor(
     @InjectRepository(UniversalInstrument)
@@ -47,6 +50,7 @@ export class InstrumentRegistryService implements OnModuleInit {
       const id = Number(row.id); // bigint comes as string from TypeORM
       this.uirIdToCanonical.set(id, row.canonical_symbol);
       this.canonicalToUirId.set(row.canonical_symbol, id);
+      this.uirIdToExchange.set(id, row.exchange);
     }
 
     // Load all mappings that have a UIR ID assigned
@@ -110,6 +114,30 @@ export class InstrumentRegistryService implements OnModuleInit {
   }
 
   /**
+   * Determine the best streaming provider for a UIR ID (O(1), no async, no DB).
+   * Tier 1: canonical exchange → EXCHANGE_TO_PROVIDER (primary routing).
+   * Tier 2: fallback to whichever provider has a token (prefer vortex for Indian exchanges).
+   * Tier 3: no tokens → undefined.
+   */
+  getBestProviderForUirId(uirId: number): InternalProviderName | undefined {
+    const exchange = this.uirIdToExchange.get(uirId);
+    const primary = exchange ? getProviderForExchange(exchange) : undefined;
+    const providerMap = this.uirIdToProviderTokens.get(uirId);
+
+    if (primary && providerMap?.has(primary)) return primary;
+
+    if (providerMap?.size) {
+      const indian = new Set(['NSE', 'BSE', 'NFO', 'BFO', 'MCX', 'CDS', 'BCD']);
+      if (exchange && indian.has(exchange) && providerMap.has('vortex')) return 'vortex';
+      if (providerMap.has('kite')) return 'kite';
+      if (providerMap.has('massive')) return 'massive';
+      return providerMap.keys().next().value as InternalProviderName;
+    }
+
+    return undefined;
+  }
+
+  /**
    * Clear and rebuild all maps from the database.
    */
   async refresh(): Promise<void> {
@@ -118,6 +146,7 @@ export class InstrumentRegistryService implements OnModuleInit {
     this.uirIdToCanonical.clear();
     this.canonicalToUirId.clear();
     this.uirIdToProviderTokens.clear();
+    this.uirIdToExchange.clear();
     await this.warmMaps();
   }
 
