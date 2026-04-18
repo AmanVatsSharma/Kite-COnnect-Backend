@@ -37,6 +37,11 @@ describe('MarketDataStreamService', () => {
               initializeTicker: () => null,
               getTicker: () => null,
             })),
+            getEnabledProviders: jest.fn(() => []),
+            getProvider: jest.fn(() => ({
+              initializeTicker: () => null,
+              getTicker: () => null,
+            })),
           },
         },
         {
@@ -117,7 +122,7 @@ describe('MarketDataStreamService', () => {
     enqueuePersistMarketData.mockImplementation(() => {
       order.push('enqueue');
     });
-    await (service as any).handleTicks([
+    await (service as any).handleTicks('vortex', [
       { instrument_token: 42, last_price: 100 },
     ]);
     expect(order).toEqual(['forward', 'enqueue']);
@@ -134,7 +139,7 @@ describe('MarketDataStreamService', () => {
   it('runSyntheticPulse emits synthetic tick when upstream is stale', async () => {
     forwardRealtimeTick.mockClear();
     syntheticInc.mockClear();
-    await (service as any).handleTicks([
+    await (service as any).handleTicks('vortex', [
       { instrument_token: 1, last_price: 50 },
     ]);
     forwardRealtimeTick.mockClear();

@@ -164,4 +164,19 @@ export class MarketDataProviderResolverService {
     this.providerCache.set(name, instance);
     return instance;
   }
+
+  /**
+   * Returns providers that have valid credentials and are ready to stream.
+   * Kite: isClientInitialized() — access token loaded from Redis/DB.
+   * Massive: !isDegraded() — MASSIVE_API_KEY is set.
+   * Vortex: getDebugStatus()?.httpClientReady — VORTEX_API_KEY set.
+   */
+  getEnabledProviders(): InternalProviderName[] {
+    const enabled: InternalProviderName[] = [];
+    if (this.kite.isClientInitialized()) enabled.push('kite');
+    if (!this.massive.isDegraded()) enabled.push('massive');
+    const vortexStatus = this.vortex.getDebugStatus?.();
+    if (vortexStatus?.httpClientReady) enabled.push('vortex');
+    return enabled;
+  }
 }
