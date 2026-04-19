@@ -412,3 +412,19 @@ The RedisService is designed to be **resilient** and **optional**. It enhances a
 - 🛡️  Fault-tolerant production systems
 
 All operations are thoroughly logged and fail gracefully, ensuring your application remains stable regardless of Redis availability.
+
+## Changelog
+
+### 2026-04-19 — ioredis rewrite + circuit breaker + subscribe dispatcher
+- **RedisService fully rewritten** to use named ioredis clients from `RedisClientFactory` instead of node-redis v4.
+- Removed self-managed connection logic; clients now owned and lifecycle-managed by `RedisClientFactory`.
+- `isRedisAvailable()` now reads live `client.status === 'ready'` from ioredis (not a stored boolean flag).
+- Added **CircuitBreaker** (private class): CLOSED → OPEN after N consecutive failures, OPEN → HALF_OPEN after `resetMs`, HALF_OPEN → CLOSED on next success. Configurable via `REDIS_CIRCUIT_BREAKER_THRESHOLD` and `REDIS_CIRCUIT_BREAKER_RESET_MS`.
+- Added **subscribe dispatcher**: single `client.on('message', ...)` registered once in `onModuleInit`, fanned out to per-channel `Set<callback>` maps. `subscribe()` deduplicates ioredis subscribe calls per channel.
+- Added `getStats()` — returns `{ connected, circuitBreaker: { state, consecutiveFailures, openedAt }, hits, misses }`.
+- All ioredis API calls updated (lowercase: `setex`, `hset`, `hget`, `hgetall`, `hdel`, `lpush`, `rpop`, `lrange`, `ltrim`, `scan`, `pttl`).
+- `scanDelete`: cursor loop now uses `string` comparison (`cursor !== '0'`) per ioredis scan semantics.
+- `tryAcquireLock`: uses positional ioredis `set(key, '1', 'NX', 'PX', ttlMs)`.
+- Pub/sub methods (`publish`, `subscribe`, `unsubscribe`) use dedicated pub/sub clients; NOT circuit-breaker-wrapped.
+- Added `redis.service.spec.ts` with 27 unit tests covering all invariants.
+- No new circular imports introduced.
