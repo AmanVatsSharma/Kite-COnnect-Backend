@@ -25,6 +25,7 @@ import { MarketDataProviderResolverService } from '@features/market-data/applica
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
 import { VortexProviderService } from '@features/stock/infra/vortex-provider.service';
+import { MassiveProviderService } from '@features/massive/infra/massive-provider.service';
 import { RedisService } from '@infra/redis/redis.service';
 import { MarketDataGateway } from '@features/market-data/interface/market-data.gateway';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -52,6 +53,7 @@ export class AdminController {
     private kiteProvider: KiteProviderService,
     private stream: MarketDataStreamService,
     private vortexProvider: VortexProviderService,
+    private massiveProvider: MassiveProviderService,
     private redis: RedisService,
     private gateway: MarketDataGateway,
     private abuseDetection: AbuseDetectionService,
@@ -681,6 +683,85 @@ export class AdminController {
   @ApiOperation({ summary: 'Get debug status for Vayu provider/ticker' })
   async vortexDebug() {
     return this.vortexProvider.getDebugStatus?.() || {};
+  }
+
+  // ===== Provider Credential Management =====
+
+  @Get('provider/kite/config')
+  @ApiOperation({ summary: 'Get Falcon (Kite) credential status — values are masked' })
+  async getKiteConfig() {
+    return this.kiteProvider.getConfigStatus?.() || {};
+  }
+
+  @Post('provider/kite/credentials')
+  @ApiOperation({ summary: 'Set Falcon (Kite) API key + secret — persisted to DB, survives restart' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        apiKey: { type: 'string', description: 'Kite Connect API key' },
+        apiSecret: { type: 'string', description: 'Kite Connect API secret' },
+      },
+    },
+  })
+  async setKiteCredentials(@Body() body: { apiKey?: string; apiSecret?: string }) {
+    await this.kiteProvider.updateApiCredentials?.(body.apiKey, body.apiSecret);
+    return { success: true };
+  }
+
+  @Get('provider/vortex/config')
+  @ApiOperation({ summary: 'Get Vayu (Vortex) credential status — values are masked' })
+  async getVortexConfig() {
+    return this.vortexProvider.getConfigStatus?.() || {};
+  }
+
+  @Post('provider/vortex/credentials')
+  @ApiOperation({ summary: 'Set Vayu (Vortex) credentials — persisted to DB, survives restart' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        apiKey: { type: 'string', description: 'Vortex API key' },
+        appId: { type: 'string', description: 'Vortex App ID' },
+        baseUrl: { type: 'string', description: 'Vortex REST base URL' },
+        wsUrl: { type: 'string', description: 'Vortex WebSocket URL' },
+      },
+    },
+  })
+  async setVortexCredentials(
+    @Body() body: { apiKey?: string; appId?: string; baseUrl?: string; wsUrl?: string },
+  ) {
+    await this.vortexProvider.updateApiCredentials?.(body);
+    return { success: true };
+  }
+
+  @Get('provider/massive/config')
+  @ApiOperation({ summary: 'Get Massive (Polygon) credential status — values are masked' })
+  async getMassiveConfig() {
+    return this.massiveProvider.getConfigStatus();
+  }
+
+  @Post('provider/massive/credentials')
+  @ApiOperation({ summary: 'Set Massive (Polygon) API key + options — persisted to DB, survives restart' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        apiKey: { type: 'string', description: 'Polygon.io API key' },
+        realtime: { type: 'boolean', description: 'true = realtime feed, false = delayed (default)' },
+        assetClass: {
+          type: 'string',
+          enum: ['stocks', 'crypto', 'forex', 'options'],
+          description: 'WebSocket asset class (default: stocks)',
+        },
+      },
+    },
+  })
+  async setMassiveCredentials(
+    @Body() body: { apiKey?: string; realtime?: boolean; assetClass?: string },
+  ) {
+    await this.massiveProvider.updateApiCredentials(body);
+    return { success: true };
   }
 
   @Get('events')

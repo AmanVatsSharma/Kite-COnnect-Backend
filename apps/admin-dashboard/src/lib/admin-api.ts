@@ -190,26 +190,62 @@ export function getVortexDebug() {
   return apiFetch<Record<string, unknown>>('/api/admin/debug/vayu', { ...admin });
 }
 
-// ─── Vayu (Vortex) config ─────────────────────────────────────────────────────
+// ─── Provider credential management ──────────────────────────────────────────
+
+export interface CredKeyStatus { masked: string | null; source: 'db' | 'env' | 'none'; configured?: boolean; hasValue?: boolean }
+
+export interface KiteConfigStatus {
+  apiKey: CredKeyStatus;
+  apiSecret: CredKeyStatus;
+  accessToken: CredKeyStatus;
+  initialized: boolean;
+}
 
 export interface VayuConfigStatus {
-  apiKey: { masked: string | null; hasValue: boolean; source: 'db' | 'env' | 'none' };
+  apiKey: CredKeyStatus;
   baseUrl: { value: string | null; source: 'db' | 'env' | 'none' };
   wsUrl: { value: string | null; source: 'db' | 'env' | 'default' };
-  appId: { masked: string | null; hasValue: boolean; source: 'db' | 'env' | 'none' };
+  appId: CredKeyStatus;
   initialized: boolean;
   hasAccessToken: boolean;
 }
 
+export interface MassiveConfigStatus {
+  apiKey: CredKeyStatus;
+  realtime: boolean;
+  assetClass: string;
+  initialized: boolean;
+  degraded: boolean;
+}
+
+export function getKiteConfig() {
+  return apiFetch<KiteConfigStatus>('/api/admin/provider/kite/config', { ...admin });
+}
+
+export function setKiteCredentials(body: { apiKey?: string; apiSecret?: string }) {
+  return apiFetch<{ success: boolean }>('/api/admin/provider/kite/credentials', {
+    ...admin, method: 'POST', body: JSON.stringify(body),
+  });
+}
+
 export function getVayuConfig() {
-  return apiFetch<VayuConfigStatus>('/api/admin/vayu/config', { ...admin });
+  return apiFetch<VayuConfigStatus>('/api/admin/provider/vortex/config', { ...admin });
 }
 
 export function updateVayuConfig(body: { apiKey?: string; baseUrl?: string; wsUrl?: string; appId?: string }) {
-  return apiFetch<{ success: boolean; message: string }>(
-    '/api/admin/vayu/config',
-    { ...admin, method: 'PATCH', body: JSON.stringify(body) },
-  );
+  return apiFetch<{ success: boolean }>('/api/admin/provider/vortex/credentials', {
+    ...admin, method: 'POST', body: JSON.stringify(body),
+  });
+}
+
+export function getMassiveConfig() {
+  return apiFetch<MassiveConfigStatus>('/api/admin/provider/massive/config', { ...admin });
+}
+
+export function setMassiveCredentials(body: { apiKey?: string; realtime?: boolean; assetClass?: string }) {
+  return apiFetch<{ success: boolean }>('/api/admin/provider/massive/credentials', {
+    ...admin, method: 'POST', body: JSON.stringify(body),
+  });
 }
 
 export function getAuditConfig() {

@@ -3,11 +3,11 @@
  * @module massive
  * @description Massive (formerly Polygon.io) market data provider — implements MarketDataProvider
  *   for US stocks, forex, crypto, indices, and options.
- *   Credentials: MASSIVE_API_KEY env var.
+ *   Credentials: admin panel (app_configs table) preferred, MASSIVE_API_KEY env var as fallback.
  *   Realtime: MASSIVE_REALTIME=true (default: delayed).
  * @author BharatERP
  * @created 2026-04-18
- * @updated 2026-04-18
+ * @updated 2026-04-19
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -19,6 +19,8 @@ import {
 } from '@features/market-data/infra/market-data.provider';
 import { MassiveRestClient } from './massive-rest.client';
 import { MassiveWebSocketClient } from './massive-websocket.client';
+import { MassiveAssetClass } from '../massive.constants';
+import { AppConfigService } from '@infra/app-config/app-config.service';
 
 @Injectable()
 export class MassiveProviderService implements OnModuleInit, MarketDataProvider {
@@ -27,31 +29,112 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
   private ticker: MassiveWebSocketClient | undefined;
   private initialized = false;
 
+  // DB-persisted overrides (win over env vars)
+  private apiKeyOverride: string | null = null;
+  private realtimeOverride: boolean | null = null;
+  private assetClassOverride: MassiveAssetClass | null = null;
+
   constructor(
     private readonly config: ConfigService,
     private readonly rest: MassiveRestClient,
     private readonly ws: MassiveWebSocketClient,
+    private readonly appConfig: AppConfigService,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.loadConfigOverrides();
     await this.initialize();
   }
 
+  private async loadConfigOverrides(): Promise<void> {
+    const [apiKey, realtime, assetClass] = await Promise.all([
+      this.appConfig.get('config:massive:api_key').catch(() => null),
+      this.appConfig.get('config:massive:realtime').catch(() => null),
+      this.appConfig.get('config:massive:asset_class').catch(() => null),
+    ]);
+    if (apiKey) this.apiKeyOverride = apiKey;
+    if (realtime != null) this.realtimeOverride = realtime === 'true';
+    if (assetClass) this.assetClassOverride = assetClass as MassiveAssetClass;
+  }
+
   async initialize(): Promise<void> {
-    const apiKey = this.config.get<string>('MASSIVE_API_KEY');
+    const apiKey = this.apiKeyOverride ?? this.config.get<string>('MASSIVE_API_KEY');
     if (!apiKey) {
       this.logger.warn(
-        '[Massive] MASSIVE_API_KEY not set — provider operating in degraded mode.',
+        '[Massive] No API key configured — provider operating in degraded mode. Set via admin panel or MASSIVE_API_KEY env var.',
       );
+      this.initialized = false;
       return;
     }
-    const realtime = this.config.get<string>('MASSIVE_REALTIME') === 'true';
-    const assetClass = (this.config.get<string>('MASSIVE_WS_ASSET_CLASS') || 'stocks') as any;
+    const realtime =
+      this.realtimeOverride ?? (this.config.get<string>('MASSIVE_REALTIME') === 'true');
+    const assetClass = (
+      this.assetClassOverride ??
+      this.config.get<string>('MASSIVE_WS_ASSET_CLASS') ??
+      'stocks'
+    ) as MassiveAssetClass;
 
+    const wasConnected = this.ws.isWsConnected();
     this.rest.init(apiKey);
     this.ws.init(apiKey, realtime, assetClass);
     this.initialized = true;
     this.logger.log(`[Massive] Provider initialized (realtime=${realtime}, assetClass=${assetClass})`);
+    // Reconnect WS if it was previously connected (credential hot-reload)
+    if (wasConnected) {
+      try { this.ws.disconnect?.(); } catch {}
+      setTimeout(() => { try { this.ws.connect?.(); } catch {} }, 100);
+    }
+  }
+
+  async updateApiCredentials(params: {
+    apiKey?: string;
+    realtime?: boolean;
+    assetClass?: string;
+  }): Promise<void> {
+    if (params.apiKey?.trim()) {
+      this.apiKeyOverride = params.apiKey.trim();
+      await this.appConfig.set('config:massive:api_key', this.apiKeyOverride);
+    }
+    if (params.realtime != null) {
+      this.realtimeOverride = params.realtime;
+      await this.appConfig.set('config:massive:realtime', String(params.realtime));
+    }
+    if (params.assetClass?.trim()) {
+      this.assetClassOverride = params.assetClass.trim() as MassiveAssetClass;
+      await this.appConfig.set('config:massive:asset_class', this.assetClassOverride);
+    }
+    await this.initialize();
+  }
+
+  async getConfigStatus(): Promise<{
+    apiKey: { masked: string | null; source: 'db' | 'env' | 'none'; configured: boolean };
+    realtime: boolean;
+    assetClass: string;
+    initialized: boolean;
+    degraded: boolean;
+  }> {
+    const envKey = this.config.get<string>('MASSIVE_API_KEY') ?? null;
+    const effectiveKey = this.apiKeyOverride ?? envKey;
+    return {
+      apiKey: {
+        masked: this.maskCred(effectiveKey),
+        source: this.apiKeyOverride ? 'db' : (envKey ? 'env' : 'none'),
+        configured: !!effectiveKey,
+      },
+      realtime: this.realtimeOverride ?? (this.config.get<string>('MASSIVE_REALTIME') === 'true'),
+      assetClass:
+        this.assetClassOverride ??
+        this.config.get<string>('MASSIVE_WS_ASSET_CLASS') ??
+        'stocks',
+      initialized: this.initialized,
+      degraded: this.isDegraded(),
+    };
+  }
+
+  private maskCred(s: string | null): string | null {
+    if (!s) return null;
+    if (s.length < 8) return '***';
+    return s.slice(0, 4) + '****' + s.slice(-4);
   }
 
   /** Exchange priming is a no-op for Massive (symbol-based, no exchange mapping needed). */
