@@ -210,7 +210,12 @@ export class RedisClientFactory implements OnModuleInit, OnModuleDestroy {
     const url = this.config.get<string>('REDIS_URL', '');
     let client: Redis;
     if (url) {
-      client = new IORedis(url, { lazyConnect: true, retryStrategy } as any);
+      client = new IORedis(url, {
+        lazyConnect: true,
+        retryStrategy,
+        password,
+        connectTimeout,
+      } as RedisOptions);
     } else {
       client = new IORedis({
         host: this.config.get<string>('REDIS_HOST', 'localhost'),

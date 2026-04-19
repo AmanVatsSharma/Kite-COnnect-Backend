@@ -12,18 +12,17 @@ import { RedisClientFactory } from './redis-client.factory';
 
 // Mock ioredis so no real connections happen
 jest.mock('ioredis', () => {
-  const mockClient = {
+  const makeMockClient = () => ({
     status: 'ready',
     connect: jest.fn().mockResolvedValue(undefined),
     quit: jest.fn().mockResolvedValue(undefined),
     on: jest.fn().mockReturnThis(),
     once: jest.fn().mockReturnThis(),
     ping: jest.fn().mockResolvedValue('PONG'),
-  };
-  const MockRedis: any = jest.fn().mockImplementation(() => ({ ...mockClient }));
-  const MockCluster = jest.fn().mockImplementation(() => ({ ...mockClient }));
-  MockRedis.Cluster = MockCluster;
-  return { default: MockRedis, Redis: MockRedis, Cluster: MockCluster };
+  });
+  const MockRedis: any = jest.fn().mockImplementation(() => makeMockClient());
+  MockRedis.Cluster = jest.fn().mockImplementation(() => makeMockClient());
+  return { default: MockRedis, Redis: MockRedis, Cluster: MockRedis.Cluster };
 });
 
 const makeConfig = (overrides: Record<string, any> = {}) => ({
