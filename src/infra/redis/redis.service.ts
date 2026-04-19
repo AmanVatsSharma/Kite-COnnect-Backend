@@ -480,11 +480,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Scan-and-delete all keys matching a glob pattern using SCAN to avoid blocking.
    * CRITICAL: ioredis SCAN returns [string, string[]] — cursor is a STRING; compare with '0'.
    * Returns the number of deleted keys (0 if Redis unavailable).
+   * Wrapped with circuit breaker to protect against cascading Redis failures.
    */
   async scanDelete(pattern: string): Promise<number> {
     const client = this.defaultClient as Redis | null;
     if (!client) return 0;
-    try {
+    return this.withCircuitBreaker('scanDelete', async () => {
       let cursor = '0';
       let deleted = 0;
       do {
@@ -502,13 +503,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         }
       } while (cursor !== '0');
       this.logger.log(`[RedisService] scanDelete(${pattern}): deleted ${deleted} keys`);
-      this.emit('scanDelete', 'success');
       return deleted;
-    } catch (err: any) {
-      this.logger.error(`[RedisService] scanDelete(${pattern}) failed: ${err?.message}`);
-      this.emit('scanDelete', 'failure');
-      return 0;
-    }
+    }, 0);
   }
 
   // ─── Domain ops ───────────────────────────────────────────────────────────
