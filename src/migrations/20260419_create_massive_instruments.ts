@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateMassiveInstruments20260419 implements MigrationInterface {
-  name = 'CreateMassiveInstruments20260419';
+export class CreateMassiveInstruments1745075200000 implements MigrationInterface {
+  name = 'CreateMassiveInstruments1745075200000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     const exists = await queryRunner.hasTable('massive_instruments');
