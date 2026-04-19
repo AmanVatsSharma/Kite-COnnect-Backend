@@ -57,15 +57,16 @@ export class RedisHealthIndicator {
 
     const t0 = Date.now();
     try {
+      let timer: ReturnType<typeof setTimeout>;
       await Promise.race([
         client.ping(),
-        new Promise<never>((_, reject) =>
-          setTimeout(
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
             () => reject(new Error(`PING timeout after ${PING_TIMEOUT_MS}ms`)),
             PING_TIMEOUT_MS,
-          ),
-        ),
-      ]);
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
       const latencyMs = Date.now() - t0;
       this.logger.debug(`[RedisHealthIndicator] PING ok (${latencyMs}ms)`);
       return { healthy: true, status: 'connected', latencyMs };
