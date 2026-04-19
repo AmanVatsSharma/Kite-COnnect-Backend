@@ -41,8 +41,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     try {
       response.status(status).json(payload);
     } catch {
-      // fallback
-      response.status(status).send(payload);
+      // Headers already sent — cannot write error response; swallow to avoid process crash
     }
   }
 }

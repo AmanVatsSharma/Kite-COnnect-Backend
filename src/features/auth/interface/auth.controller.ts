@@ -4,14 +4,12 @@ import {
   Post,
   Body,
   Query,
-  Res,
   BadRequestException,
   Logger,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AdminGuard } from '@features/admin/guards/admin.guard';
-import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { KiteConnect } from 'kiteconnect';
 import { Repository } from 'typeorm';
@@ -68,7 +66,7 @@ export class AuthController {
       },
     },
   })
-  async login(@Res() res: Response) {
+  async login() {
     const dbApiKey = await this.appConfig.get('config:kite:api_key').catch(() => null);
     const dbApiSecret = await this.appConfig.get('config:kite:api_secret').catch(() => null);
     const apiKey = dbApiKey || this.configService.get<string>('KITE_API_KEY');
@@ -93,7 +91,7 @@ export class AuthController {
     const url = baseUrl
       ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}state=${state}`
       : baseUrl;
-    return res.json({ url, state });
+    return { url, state };
   }
 
   @Get('callback')
@@ -304,7 +302,7 @@ export class VortexAuthController {
       },
     },
   })
-  async login(@Res() res: Response) {
+  async login() {
     const dbAppId = await this.appConfig.get('config:vortex:app_id').catch(() => null);
     const appId = dbAppId || this.configService.get<string>('VORTEX_APP_ID');
     if (!appId)
@@ -312,7 +310,7 @@ export class VortexAuthController {
         'Vayu applicationId (VORTEX_APP_ID) not configured',
       );
     const url = `https://flow.rupeezy.in?applicationId=${encodeURIComponent(appId)}`;
-    return res.json({ url });
+    return { url };
   }
 
   @Get('callback')

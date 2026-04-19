@@ -1,0 +1,13 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+# Logging (Nest — current standard)
+
+- Use **`Logger` from `@nestjs/common`**: `private readonly logger = new Logger(MyService.name);` in injectable classes, or a shared wrapper service if the project adds one later.
+- Log levels: `debug` for verbose tracing (guarded in hot paths), `log` / `warn` / `error` for operational signals. **Do not use `console.log` in `src/`.**
+- Include **structured context** in messages (e.g. instrument id, user/apiKey id) where it aids support; avoid logging secrets or full tokens.
+- **requestId / correlation**: when available from interceptors or WS context, append to log messages or use a consistent prefix so logs correlate across services.
+- **Optional future:** adopt `nestjs-pino` or a `LoggerService` wrapper for JSON logs in production; until then, Nest `Logger` is the source of truth.

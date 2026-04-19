@@ -177,6 +177,8 @@ export class RedisClientFactory implements OnModuleInit, OnModuleDestroy {
           return { host, port: parseInt(port, 10) || 7000 };
         });
       const cluster = new Cluster(nodes, {
+        lazyConnect: true,
+        clusterRetryStrategy: retryStrategy,
         redisOptions: { password, connectTimeout, lazyConnect: true } as RedisOptions,
       });
       this.wireEvents(name, cluster as unknown as Redis);
@@ -206,19 +208,20 @@ export class RedisClientFactory implements OnModuleInit, OnModuleDestroy {
 
     // Standard mode
     const url = this.config.get<string>('REDIS_URL', '');
-    const opts: RedisOptions = url
-      ? ({ host: url, lazyConnect: true, retryStrategy } as any)
-      : {
-          host: this.config.get<string>('REDIS_HOST', 'localhost'),
-          port: this.config.get<number>('REDIS_PORT', 6379),
-          password,
-          db: 0,
-          connectTimeout,
-          lazyConnect: true,
-          retryStrategy,
-        };
-
-    const client = new IORedis(opts);
+    let client: Redis;
+    if (url) {
+      client = new IORedis(url, { lazyConnect: true, retryStrategy } as any);
+    } else {
+      client = new IORedis({
+        host: this.config.get<string>('REDIS_HOST', 'localhost'),
+        port: this.config.get<number>('REDIS_PORT', 6379),
+        password,
+        db: 0,
+        connectTimeout,
+        lazyConnect: true,
+        retryStrategy,
+      });
+    }
     this.wireEvents(name, client);
     return client;
   }

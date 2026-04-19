@@ -1,0 +1,13 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+# Error handling (Nest — current standard)
+
+- Use **`HttpException`** (and related Nest exceptions: `BadRequestException`, `UnauthorizedException`, etc.) with appropriate **`HttpStatus`** for HTTP and WebSocket surfaces. This matches existing services (e.g. throwing `HttpException` after mapping provider errors).
+- Prefer **explicit, user-safe messages** for client-facing errors; log **full detail** (stack, upstream body if safe) at `error` level with **requestId** when available.
+- **Domain naming:** optional dedicated error classes (e.g. `OrderValidationError`) may extend `HttpException` or wrap an internal cause; keep them **close to the feature** or under `src/shared/` if truly cross-cutting.
+- **Central filter:** use or extend a Nest **`ExceptionFilter`** to normalize error shape, status codes, and logging for unhandled errors (Sentry/metrics hooks live in `src/infra/observability/` where applicable).
+- **Legacy note:** `src/common/errors/` + `AppError` are **not** required unless the team introduces that layer; do not add new parallel error systems without updating this rule.

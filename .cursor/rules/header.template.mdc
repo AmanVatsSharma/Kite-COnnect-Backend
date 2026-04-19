@@ -1,0 +1,32 @@
+---
+description: Canonical top-of-file header for .ts and .tsx (backend and frontend)
+globs:
+alwaysApply: false
+---
+
+# Canonical file header
+
+Copy this JSDoc block to the **first lines** of every new or substantially edited `.ts` / `.tsx` file. Adjust placeholders; keep tags consistent so tooling and reviewers can scan quickly.
+
+```ts
+/**
+ * @file <filename>
+ * @module <feature-or-package-name>
+ * @description <one-line purpose>
+ * @author BharatERP
+ * @created YYYY-MM-DD
+ * @updated YYYY-MM-DD
+ *
+ * Notes:
+ * - <optional: behavior, side-effects, or "read X before Y">
+ */
+```
+
+**Rules**
+
+- `@file` — same as the filename (e.g. `stock.service.ts`).
+- `@module` — Nest feature (`stock`, `market-data`) or app area (`admin-dashboard`).
+- `@updated` — set when behavior or public API changes; omit only if unchanged since `@created`.
+- **Do not** use a second competing header format (this template supersedes older `File:` / `Purpose:` only blocks).
+
+For **React components** in `apps/`, `@description` should mention UI role and main props or data source in one line.

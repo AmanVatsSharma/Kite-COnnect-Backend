@@ -396,7 +396,7 @@ function VortexAuth() {
     setVortexLoading(true);
     try {
       const q = new URLSearchParams({ auth: vortexAuth.trim() });
-      const data = await apiFetch<{ success?: boolean }>(`/api/auth/vortex/callback?${q}`);
+      const data = await apiFetch<{ success?: boolean }>(`/api/auth/vayu/callback?${q}`);
       setVortexMsg(data && typeof data === 'object' ? JSON.stringify(data) : 'OK');
       setVortexOk(true);
       notify.ok('Vortex auth complete');
@@ -424,7 +424,7 @@ function VortexAuth() {
         <div className="panel-section-title" style={{ marginBottom: 6 }}>STEP 1 — OPEN LOGIN</div>
         <div style={{ marginBottom: 10 }}>
           <a
-            href={apiUrl('/api/auth/vortex/login')}
+            href={apiUrl('/api/auth/vayu/login')}
             target="_blank"
             rel="noreferrer"
             className="btn-xs"

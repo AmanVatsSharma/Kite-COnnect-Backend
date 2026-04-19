@@ -1,0 +1,109 @@
+---
+description: Frontend rules for apps/admin-dashboard (Vite + React)
+globs: apps/admin-dashboard/**/*
+alwaysApply: false
+---
+
+# Admin dashboard — UI rules
+
+**Scope:** These rules apply to **`apps/admin-dashboard/`** only. Backend logging and headers follow `master.mdc`, `logger_setup.mdc`, and `header.template.mdc`.
+
+**Stack:** Vite, React 19, TypeScript strict, **TanStack React Query**, **React Router**. No Next.js unless the app is migrated.
+
+---
+
+## 01 — Project layout
+
+Prefer feature-oriented folders under `src/`:
+
+```
+apps/admin-dashboard/src/
+  components/     # shared UI (presentational)
+  contexts/       # React context providers
+  lib/            # api-client, types, utilities
+  pages/          # route-level screens (PascalCase)
+  providers/      # QueryClientProvider, etc.
+  assets/         # static images
+  App.tsx         # routes / layout shell
+  main.tsx        # bootstrap
+```
+
+Add `hooks/` when custom hooks grow beyond one-off use in pages.
+
+---
+
+## 02 — Components & files
+
+- **Pages and shared UI:** `PascalCase.tsx` (e.g. `OverviewPage.tsx`).
+- **Utilities and API helpers:** `kebab-case.ts` (e.g. `api-client.ts`).
+- Prefer **composition**; keep route components thin — data loading in hooks or route loaders + React Query.
+- Exported components: include the **canonical JSDoc header** from `.cursor/rules/header.template.mdc`.
+- Accept `className` and spread sensible DOM props where it improves reuse; add `data-testid` for critical flows when you add E2E tests.
+
+---
+
+## 03 — Styling
+
+- Global styles: `index.css`, `App.css`. Prefer **CSS modules** or a single design token approach if the app grows; avoid inline style sprawl for layout systems.
+- Support **light/dark** if the product requires it (class on `document.documentElement` or a small theme hook).
+- Respect **`prefers-reduced-motion`** for any animation you add.
+
+---
+
+## 04 — Data & API
+
+- Use **`@tanstack/react-query`** for server state: queries/mutations in `lib/` or colocated `hooks/useX.ts`.
+- Centralize HTTP in **`lib/api-client.ts`** (or split `admin-api.ts` / `public-api.ts` as already structured): typed responses, consistent error parsing.
+- Keep components **presentational** where possible: pass data via props; avoid fetching inside deep leaf components unless isolated.
+
+---
+
+## 05 — Routing & code splitting
+
+- Declare routes in `App.tsx` (or a `routes.tsx` module if it grows).
+- Lazy-load heavy pages with **`React.lazy`** + **`Suspense`** (Vite-compatible). Do not use `next/dynamic`.
+
+---
+
+## 06 — Logging & debug (frontend only)
+
+- **Do not** use raw `console.log` in production code paths for feature work; use a tiny **`lib/logger.ts`** that wraps `console` and **no-ops or downgrades** when `import.meta.env.PROD` is true.
+- Verbose debug logging is **dev-only** — this avoids conflicting with backend `logger_setup.mdc`.
+
+---
+
+## 07 — Accessibility
+
+- Semantic HTML; labels for inputs; keyboard focus for interactive elements.
+- Aim for WCAG contrast on primary text and controls; test critical flows with keyboard only.
+
+---
+
+## 08 — Errors & boundaries
+
+- Use **route-level or app-level `ErrorBoundary`** for render failures; show a clear recovery UI.
+- Map API errors to user-visible messages (React Query `onError` / error render props).
+
+---
+
+## 09 — Quality gates
+
+- Run **`npm run lint`** and **`npm run build`** in `apps/admin-dashboard` before merge.
+- Add **Vitest + Testing Library** when you introduce non-trivial hooks or components worth unit testing (optional until scaffolded).
+
+---
+
+## 10 — Optional / future
+
+- **shadcn/ui** or a component library: if adopted, import from the project’s `components/ui/*` barrel — not deep from `node_modules` for app code.
+- **Storybook / Playwright:** add when the team commits to visual or E2E workflows; not required by this rule file today.
+
+---
+
+## Naming (aligned with `master.mdc`)
+
+| Kind | Convention |
+|------|----------------|
+| React page/component | `PascalCase.tsx` |
+| Hooks | `useThing.ts` (camelCase file name) |
+| lib/utils | `kebab-case.ts` |

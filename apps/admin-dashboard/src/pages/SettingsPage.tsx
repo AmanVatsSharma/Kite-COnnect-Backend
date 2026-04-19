@@ -19,8 +19,8 @@ export function SettingsPage() {
 
   function save() {
     setAdminToken(v.trim() || null);
+    qc.clear();
     setUnauthorized(false);
-    void qc.invalidateQueries();
   }
 
   return (
