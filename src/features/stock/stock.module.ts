@@ -25,6 +25,7 @@ import { VayuSearchService } from './application/vayu-search.service';
 import { VayuManagementService } from './application/vayu-management.service';
 import { VayuMarketDataService } from './application/vayu-market-data.service';
 import { VortexValidationCronService } from './application/vortex-validation.cron';
+import { UniversalLtpService } from './application/universal-ltp.service';
 
 import { VortexSession } from './domain/vortex-session.entity';
 import { VortexInstrument } from './domain/vortex-instrument.entity';
@@ -74,6 +75,7 @@ import { AdminModule } from '../admin/admin.module';
     VayuSearchService,
     VayuManagementService,
     VayuMarketDataService,
+    UniversalLtpService,
   ],
   exports: [
     StockService,

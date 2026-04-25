@@ -4,7 +4,7 @@
  * @description Warm in-memory registry mapping provider tokens <-> UIR IDs <-> canonical symbols.
  * @author BharatERP
  * @created 2026-04-17
- * @updated 2026-04-19
+ * @updated 2026-04-21
  */
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
@@ -14,6 +14,20 @@ import { UniversalInstrument } from '../domain/universal-instrument.entity';
 import { InstrumentMapping } from '../domain/instrument-mapping.entity';
 import { getProviderForExchange } from '@shared/utils/exchange-to-provider.util';
 import { InternalProviderName } from '@shared/utils/provider-label.util';
+
+/** Result of a flexible symbol resolution attempt. */
+export type FlexResolveResult =
+  | { status: 'resolved'; uirId: number; canonical: string }
+  | { status: 'ambiguous'; candidates: string[] }
+  | { status: 'not_found' };
+
+/** One entry in the underlying → entries warm map. */
+interface UnderlyingEntry {
+  uirId: number;
+  exchange: string;
+  instrument_type: string;
+  canonical: string;
+}
 
 @Injectable()
 export class InstrumentRegistryService implements OnModuleInit {
@@ -25,6 +39,8 @@ export class InstrumentRegistryService implements OnModuleInit {
   private canonicalToUirId = new Map<string, number>(); // "NSE:RELIANCE" -> 42
   private uirIdToProviderTokens = new Map<number, Map<string, string>>(); // 42 -> { kite: "256265", vortex: "NSE_EQ-22" }
   private uirIdToExchange = new Map<number, string>(); // 42 -> "NSE"
+  // Underlying name (uppercase) -> all UIR entries with that underlying, for flex symbol resolution
+  private underlyingToEntries = new Map<string, UnderlyingEntry[]>();
 
   constructor(
     @InjectRepository(UniversalInstrument)
@@ -51,6 +67,14 @@ export class InstrumentRegistryService implements OnModuleInit {
       this.uirIdToCanonical.set(id, row.canonical_symbol);
       this.canonicalToUirId.set(row.canonical_symbol, id);
       this.uirIdToExchange.set(id, row.exchange);
+
+      // Build underlying → entries map for flex symbol resolution ("RELIANCE" → [...])
+      if (row.underlying) {
+        const underlyingKey = row.underlying.toUpperCase();
+        const existing = this.underlyingToEntries.get(underlyingKey) ?? [];
+        existing.push({ uirId: id, exchange: row.exchange, instrument_type: row.instrument_type, canonical: row.canonical_symbol });
+        this.underlyingToEntries.set(underlyingKey, existing);
+      }
     }
 
     // Load all mappings that have a UIR ID assigned
@@ -105,6 +129,46 @@ export class InstrumentRegistryService implements OnModuleInit {
   }
 
   /**
+   * Flexible symbol resolution — accepts both canonical format ("NSE:RELIANCE") and
+   * plain underlying names ("RELIANCE", "NIFTY 50").
+   *
+   * Resolution order for plain names:
+   *   1. EQ entries — prefer NSE over other exchanges.
+   *   2. IDX entries — when no EQ match exists.
+   *   3. FUT/CE/PE — never auto-resolved (ambiguous without expiry).
+   *
+   * Hot-path: O(1) map lookups only, no async, no DB.
+   */
+  resolveFlexSymbol(symbol: string): FlexResolveResult {
+    // Fast path: exact canonical match (e.g. "NSE:RELIANCE")
+    const exactId = this.canonicalToUirId.get(symbol);
+    if (exactId != null) return { status: 'resolved', uirId: exactId, canonical: symbol };
+
+    // Underlying fallback: case-insensitive lookup (e.g. "RELIANCE", "reliance")
+    const key = symbol.trim().toUpperCase();
+    const entries = this.underlyingToEntries.get(key);
+    if (!entries || entries.length === 0) return { status: 'not_found' };
+
+    // Prefer EQ, then IDX. Never auto-resolve FUT/CE/PE (expiry makes them ambiguous).
+    const eq = entries.filter(e => e.instrument_type === 'EQ');
+    const pool = eq.length > 0 ? eq : entries.filter(e => e.instrument_type === 'IDX');
+
+    if (pool.length === 0) {
+      return { status: 'ambiguous', candidates: entries.map(e => e.canonical) };
+    }
+
+    if (pool.length === 1) {
+      return { status: 'resolved', uirId: pool[0].uirId, canonical: pool[0].canonical };
+    }
+
+    // Multiple EQ entries (e.g. NSE + BSE): prefer NSE as primary Indian exchange.
+    const nse = pool.find(e => e.exchange === 'NSE');
+    if (nse) return { status: 'resolved', uirId: nse.uirId, canonical: nse.canonical };
+
+    return { status: 'ambiguous', candidates: pool.map(e => e.canonical) };
+  }
+
+  /**
    * Get the provider-specific token for upstream subscribe calls.
    */
   getProviderToken(uirId: number, provider: string): string | undefined {
@@ -147,6 +211,7 @@ export class InstrumentRegistryService implements OnModuleInit {
     this.canonicalToUirId.clear();
     this.uirIdToProviderTokens.clear();
     this.uirIdToExchange.clear();
+    this.underlyingToEntries.clear();
     await this.warmMaps();
   }
 
@@ -170,6 +235,16 @@ export class InstrumentRegistryService implements OnModuleInit {
       vortexToken: providerMap?.get('vortex'),
       massiveToken: providerMap?.get('massive'),
     };
+  }
+
+  /** Provider tokens for one UIR ID (in-memory, O(1)). Used by UniversalLtpService. */
+  getProviderTokens(uirId: number): Map<string, string> | undefined {
+    return this.uirIdToProviderTokens.get(uirId);
+  }
+
+  /** Exchange for one UIR ID (in-memory, O(1)). Used by UniversalLtpService for kite pair-building. */
+  getExchange(uirId: number): string | undefined {
+    return this.uirIdToExchange.get(uirId);
   }
 
   /**

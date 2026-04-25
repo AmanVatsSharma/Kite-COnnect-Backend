@@ -29,6 +29,7 @@ const navItems = [
   { to: '/abuse', label: 'Security', abbr: 'SEC' },
   { to: '/audit', label: 'Audit', abbr: 'AUD' },
   { to: '/falcon', label: 'Falcon', abbr: 'FAL' },
+  { to: '/search', label: 'Search', abbr: 'SRCH' },
   { to: '/auth', label: 'Auth', abbr: 'AUTH' },
   { to: '/console', label: 'Console', abbr: 'CON' },
   { to: '/settings', label: 'Settings', abbr: 'SET' },

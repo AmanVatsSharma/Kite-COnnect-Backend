@@ -278,71 +278,43 @@ export class SearchService {
 
     const cacheTTL = Number(process.env.HYDRATE_TTL_MS || 800);
     const ttlSec = Math.ceil(cacheTTL / 1000);
-    const cacheKey = (t: number) => `q:ltp:${t}`;
+    const cacheKey = (id: number) => `q:ltp:uid:${id}`;
     const result: Record<string, any> = {};
+    const toFetch: number[] = [];
 
-    // Partition into vortex pairs and kite fallback tokens
-    const vortexPairs: Array<{ exchange: string; token: string }> = [];
-    const kiteTokens: number[] = [];
-    const pendingIds = new Set<number>(); // universal instrument ids
-
-    for (const item of items) {
-      // Check cache first (by whichever token we have)
-      const cacheToken = item.vortexToken ?? item.kiteToken;
-      if (cacheToken && this.redis) {
-        const cached = await this.redis.get(cacheKey(cacheToken));
-        if (cached) {
-          result[String(item.id)] = JSON.parse(cached);
-          continue;
-        }
+    // Check Redis cache keyed by universal instrument id
+    if (this.redis) {
+      for (const item of items) {
+        const cached = await this.redis.get(cacheKey(item.id));
+        if (cached) result[String(item.id)] = JSON.parse(cached);
+        else toFetch.push(item.id);
       }
-
-      if (item.vortexToken && item.vortexExchange) {
-        vortexPairs.push({ exchange: item.vortexExchange, token: String(item.vortexToken) });
-        pendingIds.add(item.id);
-      } else if (item.kiteToken) {
-        kiteTokens.push(item.kiteToken);
-        pendingIds.add(item.id);
-      }
+    } else {
+      toFetch.push(...items.map((i) => i.id));
     }
 
-    // Vortex pair-based hydration
-    if (vortexPairs.length) {
-      try {
-        const resp = await this.hydrator.post('/api/stock/vayu/ltp', { pairs: vortexPairs });
-        const data: Record<string, any> = resp.data?.data || {};
-        // data keyed as "EXCHANGE-TOKEN" → map back to universal id by vortexToken
-        const tokenToId = new Map(items.map((i) => [String(i.vortexToken), i.id]));
-        for (const [exTok, val] of Object.entries(data)) {
-          const tok = exTok.split('-').pop();
-          const uid = tok ? tokenToId.get(tok) : undefined;
-          if (uid !== undefined) {
-            result[String(uid)] = val;
-            if (this.redis && tok) {
-              await this.redis.setex(cacheKey(Number(tok)), ttlSec, JSON.stringify(val));
-            }
-          }
+    if (!toFetch.length) return result;
+
+    // Single call — trading-app resolves vortex vs kite internally by universal id
+    try {
+      const resp = await this.hydrator.post('/api/stock/universal/ltp', { ids: toFetch });
+      const data: Record<string, any> = resp.data?.data || {};
+      Object.assign(result, data);
+      if (this.redis) {
+        for (const [k, v] of Object.entries(data)) {
+          await this.redis.setex(cacheKey(Number(k)), ttlSec, JSON.stringify(v));
         }
+      }
+      this.hydrationFailures = 0;
+      this.hydrationBreakerUntil = 0;
+    } catch (err: any) {
+      this.hydrationFailures++;
+      const threshold = Number(process.env.HYDRATE_CB_THRESHOLD || 3);
+      const openMs = Number(process.env.HYDRATE_CB_OPEN_MS || 2000);
+      if (this.hydrationFailures >= threshold) {
+        this.hydrationBreakerUntil = Date.now() + openMs;
         this.hydrationFailures = 0;
-        this.hydrationBreakerUntil = 0;
-      } catch (err: any) {
-        this.logger.warn(`Vortex pair hydration failed: ${err?.message}`);
-        this.hydrationFailures++;
-      }
-    }
-
-    // Kite token fallback for instruments without vortex mapping
-    if (kiteTokens.length) {
-      try {
-        const resp = await this.hydrator.post('/api/stock/vayu/ltp', { instruments: kiteTokens });
-        const data: Record<string, any> = resp.data?.data || {};
-        const kiteToId = new Map(items.map((i) => [String(i.kiteToken), i.id]));
-        for (const [tok, val] of Object.entries(data)) {
-          const uid = kiteToId.get(tok);
-          if (uid !== undefined) result[String(uid)] = val;
-        }
-      } catch (err: any) {
-        this.logger.warn(`Kite token hydration failed: ${err?.message}`);
+        this.logger.warn(`Hydration circuit opened for ${openMs}ms`);
       }
     }
 
