@@ -1,17 +1,17 @@
 /**
  * @file provider-label.util.ts
  * @module shared
- * @description Maps public provider aliases (Falcon/Vayu/Massive) to internal names and client-visible brand names.
+ * @description Maps public provider aliases (Falcon/Vayu/Massive/Binance) to internal names and client-visible brand names.
  * @author BharatERP
  * @created 2026-03-28
- * @updated 2026-04-18
+ * @updated 2026-04-26
  */
 
-export type InternalProviderName = 'kite' | 'vortex' | 'massive';
-export type ClientVisibleProviderName = 'Falcon' | 'Vayu' | 'Massive';
+export type InternalProviderName = 'kite' | 'vortex' | 'massive' | 'binance';
+export type ClientVisibleProviderName = 'Falcon' | 'Vayu' | 'Massive' | 'Binance';
 
 /**
- * Normalize HTTP/header/admin input: falcon→kite, vayu→vortex, polygon→massive, plus canonical names.
+ * Normalize HTTP/header/admin input: falcon→kite, vayu→vortex, polygon→massive, binance is canonical.
  */
 export function normalizeProviderAlias(
   raw: string | null | undefined,
@@ -21,6 +21,7 @@ export function normalizeProviderAlias(
   if (v === 'kite' || v === 'falcon') return 'kite';
   if (v === 'vortex' || v === 'vayu') return 'vortex';
   if (v === 'massive' || v === 'polygon') return 'massive';
+  if (v === 'binance') return 'binance';
   return null;
 }
 
@@ -30,5 +31,6 @@ export function internalToClientProviderName(
 ): ClientVisibleProviderName {
   if (internal === 'vortex') return 'Vayu';
   if (internal === 'massive') return 'Massive';
+  if (internal === 'binance') return 'Binance';
   return 'Falcon';
 }

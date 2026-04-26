@@ -195,6 +195,7 @@ export class InstrumentRegistryService implements OnModuleInit {
       if (exchange && indian.has(exchange) && providerMap.has('vortex')) return 'vortex';
       if (providerMap.has('kite')) return 'kite';
       if (providerMap.has('massive')) return 'massive';
+      if (providerMap.has('binance')) return 'binance';
       return providerMap.keys().next().value as InternalProviderName;
     }
 
@@ -223,10 +224,17 @@ export class InstrumentRegistryService implements OnModuleInit {
     kiteToken: string | undefined;
     vortexToken: string | undefined;
     massiveToken: string | undefined;
+    binanceToken: string | undefined;
   } {
     const uirId = this.canonicalToUirId.get(canonical);
     if (uirId == null) {
-      return { uirId: undefined, kiteToken: undefined, vortexToken: undefined, massiveToken: undefined };
+      return {
+        uirId: undefined,
+        kiteToken: undefined,
+        vortexToken: undefined,
+        massiveToken: undefined,
+        binanceToken: undefined,
+      };
     }
     const providerMap = this.uirIdToProviderTokens.get(uirId);
     return {
@@ -234,6 +242,7 @@ export class InstrumentRegistryService implements OnModuleInit {
       kiteToken: providerMap?.get('kite'),
       vortexToken: providerMap?.get('vortex'),
       massiveToken: providerMap?.get('massive'),
+      binanceToken: providerMap?.get('binance'),
     };
   }
 

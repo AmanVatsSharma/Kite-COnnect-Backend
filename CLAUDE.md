@@ -60,7 +60,11 @@ src/                   NestJS backend
   public/dashboard/    Built admin dashboard (served statically)
 apps/
   admin-dashboard/     React 19 + Vite SPA (TanStack Query, React Router)
+  search-api/          Standalone NestJS microservice — instrument search over MeiliSearch
+  search-indexer/      One-shot / watch-mode worker syncing UIR rows → MeiliSearch index
 ```
+
+The two `apps/search-*` services run as separate Docker containers (see `docker-compose.yml`) and are **not** imported into the main NestJS bundle. They communicate with the trading-app over HTTP and share the Postgres + Redis instances.
 
 ### Feature module layout (hexagonal)
 
@@ -85,18 +89,30 @@ Cross-feature imports are forbidden; share code only through `src/shared/` or `s
 | `stock` | Vortex (Rupeezy) broker integration: REST + WS ticker, instrument sync/cache/search services, Vayu surface (equity/F&O/options) under `stock/vayu` |
 | `falcon` | Kite broker instrument catalog: daily sync cron, `falcon_instruments` table, `FalconProviderAdapter` |
 | `kite-connect` | Kite Connect HTTP + WebSocket ticker; implements `MarketDataProvider`; wraps `KiteTicker` via `kite-ticker.facade.ts` |
+| `massive` | Massive (formerly Polygon.io) provider for US stocks/forex/crypto/options/indices: REST + WS client, daily ticker sync into `massive_instruments`, multi-stream WS sharding |
+| `binance` | Binance.com global Spot crypto provider: public unauthenticated REST + combined-stream WebSocket (JSON-RPC SUBSCRIBE/UNSUBSCRIBE on a single connection, 1024-stream cap), daily sync into `binance_instruments` filtered by `BINANCE_QUOTES` |
 | `admin` | Admin endpoints (guarded by `ADMIN_TOKEN`), origin audit, abuse detection dashboard |
 | `auth` | JWT auth, API key management, abuse detection service |
 | `health` | `/api/health` and `/api/health/metrics` (Prometheus) |
 
 ### Provider abstraction
 
-`src/features/market-data/infra/market-data.provider.ts` defines `MarketDataProvider` — the contract both `KiteProviderService` and `VortexProviderService` implement.
+`src/features/market-data/infra/market-data.provider.ts` defines `MarketDataProvider` — the contract `KiteProviderService`, `VortexProviderService`, `MassiveProviderService`, and `BinanceProviderService` all implement.
 
-- `DATA_PROVIDER=kite|vortex` sets the default.
-- HTTP endpoints accept `x-provider: kite|vortex|falcon|vayu` header to override per-request. `falcon` and `vayu` are aliases for `kite` and `vortex` respectively.
+- `DATA_PROVIDER=kite|vortex|massive|binance` sets the default (`polygon` is accepted as an alias for `massive`).
+- HTTP endpoints accept `x-provider: kite|vortex|falcon|vayu|massive|polygon|binance` to override per-request. `falcon` and `vayu` are aliases for `kite` and `vortex` respectively; `polygon` is an alias for `massive`; `binance` is canonical.
 - The WebSocket provider is set globally by the admin via `POST /api/admin/provider/global`.
 - `MarketDataProviderResolverService` handles resolution for both HTTP and WS paths.
+
+### Universal Instrument Registry (UIR)
+
+`universal_instruments` (migration `1713340800000-CreateUniversalInstruments.ts`) is the canonical instrument table that decouples streaming and search from per-provider catalogs. Each row has a stable UIR `id`; per-provider mappings live in `instrument_mappings` (`provider`, `provider_token`, `instrument_token`, `uir_id`).
+
+- `InstrumentRegistryService` (`market-data/application/instrument-registry.service.ts`) is the in-process resolver. It is `refresh()`-ed after every provider's instrument-sync cron (Falcon for Kite, Vortex CSV, Massive `/v3/reference/tickers`).
+- The streaming layer subscribes by **UIR id**; the resolver maps it to the active provider's token before passing to the upstream WS.
+- The `apps/search-indexer` worker reads UIR + mappings into the MeiliSearch `instruments_v1` index. The `apps/search-api` queries that index and (optionally) hydrates LTP via `POST /api/stock/universal/ltp` on the trading-app.
+
+When adding a new provider: implement `MarketDataProvider`, write an instrument-sync that upserts into `universal_instruments` + `instrument_mappings`, then call `InstrumentRegistryService.refresh()`.
 
 ### Streaming architecture
 
@@ -104,12 +120,27 @@ Cross-feature imports are forbidden; share code only through `src/shared/` or `s
 Client (Socket.IO /market-data or WS /ws)
   → MarketDataGateway / NativeWsService
   → MarketDataStreamService
-  → MarketDataProviderResolverService → KiteProviderService | VortexProviderService
-  → Upstream ticker WS (Kite or Vortex shards)
+  → MarketDataProviderResolverService → Kite | Vortex | Massive | Binance ProviderService
+  → Upstream ticker WS (Kite single | Vortex shards | Massive multi-stream | Binance combined-stream)
   → tick → Redis last_tick:{token} + LTP memory cache → broadcast to rooms
 ```
 
-Vortex supports up to `VORTEX_WS_MAX_SHARDS` (default 3) × 1000 instruments per shard. Subscribe/unsubscribe are batched via a 500ms interval (chunk size 500). Queue is capped at 50,000 entries.
+- **Vortex** supports up to `VORTEX_WS_MAX_SHARDS` (default 3) × 1000 instruments per shard. Subscribe/unsubscribe are batched via a 500ms interval (chunk size 500). Queue cap: 50,000 entries.
+- **Massive** uses string symbols (e.g. `AAPL`, `BTC-USD`) as provider tokens; the multi-stream client (`massive-multi-stream.client.ts`) shards across asset classes (`stocks`, `forex`, `crypto`, `options`, `indices`) and re-subscribes on reconnect.
+- **Binance** uses uppercase symbol strings (e.g. `BTCUSDT`) as provider tokens; a single combined-stream WS connection (cap 1024 streams) sends `{"method":"SUBSCRIBE","params":["btcusdt@trade"],"id":N}` JSON-RPC frames on an open socket. No auth. Reconnects with exponential backoff and re-subscribes all tracked symbols. Routes via `EXCHANGE_TO_PROVIDER['BINANCE'] = 'binance'`.
+
+### Search service (apps/search-api + search-indexer)
+
+```
+search-indexer  ──reads──► Postgres (universal_instruments + instrument_mappings)
+                ──writes─► MeiliSearch instruments_v1
+
+Client ──GET /api/search──► search-api ──query──► MeiliSearch
+                                       ──POST /api/stock/universal/ltp──► trading-app (LTP hydration)
+                                       ──cache──► Redis (q:ltp:uid:{id}, TTL HYDRATE_TTL_MS)
+```
+
+`INDEXER_MODE` controls indexer behavior: `backfill` (one-shot), `incremental` (poll), `backfill-and-watch` (default), `synonyms-apply`. See `apps/search-indexer/MODULE_DOC.md` and `apps/search-api/MODULE_DOC.md`.
 
 ### Path aliases (tsconfig + jest)
 
@@ -178,7 +209,7 @@ Every `src/features/<name>/` directory must contain `MODULE_DOC.md`. After every
 
 | Variable | Description |
 |----------|-------------|
-| `DATA_PROVIDER` | `kite` or `vortex` — default provider |
+| `DATA_PROVIDER` | `kite` / `vortex` / `massive` / `binance` — default provider (`polygon` accepted as alias for `massive`) |
 | `ADMIN_TOKEN` | Bearer token for all `/api/admin/*` endpoints |
 | `KITE_API_KEY`, `KITE_ACCESS_TOKEN` | Kite Connect credentials |
 | `VORTEX_APP_ID`, `VORTEX_API_KEY`, `VORTEX_BASE_URL` | Vortex REST credentials |
@@ -187,7 +218,18 @@ Every `src/features/<name>/` directory must contain `MODULE_DOC.md`. After every
 | `FALCON_INSTRUMENT_SYNC_ENABLED` | `true`/`false` to toggle Kite daily instrument cron |
 | `FALCON_INSTRUMENTS_CRON` | Cron expression, default `45 9 * * *` (IST) |
 | `MARKET_DATA_SYNTHETIC_INTERVAL_MS` | `0` = off; >0 = ms interval for synthetic tick re-emit |
+| `MASSIVE_API_KEY` | Required for Massive/Polygon provider |
+| `MASSIVE_REALTIME` | `true` = realtime feed (`socket.massive.com`); `false` (default) = delayed feed |
+| `MASSIVE_WS_ASSET_CLASS` | `stocks` (default) / `forex` / `crypto` / `options` / `indices` |
+| `MASSIVE_INSTRUMENT_SYNC_ENABLED`, `MASSIVE_INSTRUMENTS_CRON` | Toggle + schedule Massive ticker sync (default `15 10 * * *` America/New_York) |
 | `MASSIVE_WS_REJECT_UNAUTHORIZED` | `false` to skip TLS verification for self-signed/proxy certs (dev only) |
+| `MASSIVE_POLL_INTERVAL_MS` | REST polling interval when WS is unavailable (default `5000`; min `2000` to avoid rate limits) |
+| `BINANCE_INSTRUMENT_SYNC_ENABLED` | `true`/`false` — daily Binance Spot exchangeInfo sync cron toggle |
+| `BINANCE_INSTRUMENTS_CRON`, `BINANCE_INSTRUMENTS_CRON_TZ` | Cron expression + tz (default `30 0 * * *` UTC) |
+| `BINANCE_QUOTES` | Comma-separated quote-asset whitelist for sync (default `USDT,USDC,BUSD,BTC,ETH`) |
+| `BINANCE_WS_RECONNECT_MAX_ATTEMPTS` | Cap on WS exponential-backoff reconnects (default `10`) |
+| `MEILI_HOST_PRIMARY`, `MEILI_MASTER_KEY`, `MEILI_INDEX` | MeiliSearch wiring for `apps/search-api` and `apps/search-indexer` |
+| `INDEXER_MODE` | `backfill` / `incremental` / `backfill-and-watch` (default) / `synonyms-apply` |
 | `SENTRY_DSN`, `OTEL_ENABLED` | Observability (optional) |
 
 

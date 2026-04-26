@@ -35,6 +35,7 @@ import { KiteConnectModule } from '../kite-connect/kite-connect.module';
 import { MarketDataModule } from '../market-data/market-data.module';
 import { AuthModule } from '../auth/auth.module'; // If guards or services needed
 import { AdminModule } from '../admin/admin.module';
+import { BinanceModule } from '../binance/binance.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { AdminModule } from '../admin/admin.module';
     ConfigModule,
     RedisModule,
     KiteConnectModule,
+    BinanceModule,
     forwardRef(() => MarketDataModule),
     forwardRef(() => AuthModule), // For ApiKeyGuard/Service?
     forwardRef(() => AdminModule),

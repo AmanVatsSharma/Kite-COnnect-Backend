@@ -14,6 +14,7 @@ import { KiteConnectModule } from './features/kite-connect/kite-connect.module';
 import { StockModule } from './features/stock/stock.module';
 import { FalconModule } from './features/falcon/falcon.module';
 import { MassiveModule } from './features/massive/massive.module';
+import { BinanceModule } from './features/binance/binance.module';
 import { HealthModule } from './features/health/health.module';
 import { ObservabilityModule } from './infra/observability/observability.module';
 
@@ -39,6 +40,7 @@ import { ObservabilityModule } from './infra/observability/observability.module'
     StockModule,
     FalconModule,
     MassiveModule,
+    BinanceModule,
     HealthModule,
   ],
   controllers: [AppController],

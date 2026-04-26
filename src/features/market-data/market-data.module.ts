@@ -5,6 +5,7 @@ import { RedisModule } from '@infra/redis/redis.module';
 import { KiteConnectModule } from '../kite-connect/kite-connect.module';
 import { StockModule } from '../stock/stock.module';
 import { MassiveModule } from '../massive/massive.module';
+import { BinanceModule } from '../binance/binance.module';
 import { AuthModule } from '../auth/auth.module'; // Import AuthModule
 import { AdminModule } from '../admin/admin.module';
 
@@ -43,6 +44,7 @@ import { ApiKey } from '../auth/domain/api-key.entity'; // Import ApiKey
     RedisModule,
     KiteConnectModule,
     MassiveModule,
+    BinanceModule,
     forwardRef(() => AuthModule), // Add AuthModule to imports
     forwardRef(() => StockModule),
     forwardRef(() => AdminModule),

@@ -52,7 +52,7 @@ export class ApiKey {
 
   // Optional provider override for this API key. When null, resolution falls back to global/env.
   @Column({ type: 'varchar', length: 16, nullable: true })
-  provider?: 'kite' | 'vortex' | 'massive' | null;
+  provider?: 'kite' | 'vortex' | 'massive' | 'binance' | null;
 
   @CreateDateColumn()
   created_at: Date;

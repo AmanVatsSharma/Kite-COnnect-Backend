@@ -81,7 +81,9 @@ export function getUsageReport(key: string) {
   return apiFetch<Record<string, unknown>>(`/api/admin/usage?${q}`, { ...admin });
 }
 
-export function setApiKeyProvider(body: { key: string; provider?: 'kite' | 'vortex' | null }) {
+export type AdminProviderName = 'kite' | 'vortex' | 'massive' | 'binance';
+
+export function setApiKeyProvider(body: { key: string; provider?: AdminProviderName | null }) {
   return apiFetch<{ success: boolean }>('/api/admin/apikeys/provider', {
     ...admin,
     method: 'POST',
@@ -89,7 +91,7 @@ export function setApiKeyProvider(body: { key: string; provider?: 'kite' | 'vort
   });
 }
 
-export function setGlobalProvider(provider: 'kite' | 'vortex') {
+export function setGlobalProvider(provider: AdminProviderName) {
   return apiFetch<{ success: boolean; message?: string }>('/api/admin/provider/global', {
     ...admin,
     method: 'POST',

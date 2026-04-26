@@ -469,9 +469,9 @@ export class AdminController {
       properties: {
         provider: {
           type: 'string',
-          enum: ['kite', 'vortex', 'falcon', 'vayu', 'massive', 'polygon'],
+          enum: ['kite', 'vortex', 'falcon', 'vayu', 'massive', 'polygon', 'binance'],
           description:
-            'Internal or alias: kite/falcon (Falcon), vortex/vayu (Vayu), massive/polygon (Massive)',
+            'Internal or alias: kite/falcon (Falcon), vortex/vayu (Vayu), massive/polygon (Massive), binance (Binance)',
         },
       },
       example: { provider: 'vortex' },
@@ -481,7 +481,7 @@ export class AdminController {
     const internal = normalizeProviderAlias(body.provider);
     if (!internal) {
       throw new BadRequestException(
-        'provider must be kite, vortex, falcon, vayu, massive, or polygon',
+        'provider must be kite, vortex, falcon, vayu, massive, polygon, or binance',
       );
     }
     await this.resolver.setGlobalProviderName(internal);
