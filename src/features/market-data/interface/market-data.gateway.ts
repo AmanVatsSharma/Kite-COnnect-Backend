@@ -13,7 +13,7 @@
  * Endpoint: /market-data
  * Protocol: Socket.IO over WebSocket Secure (WSS)
  * Authentication: Query parameter (?api_key=...) or header (x-api-key)
- * @updated 2026-03-28 — Subscription map extracted to MarketDataGatewaySubscriptionRegistry.
+ * @updated 2026-04-27 — resolveUirForPair() uses full Vortex exchange-token key; registry secondary numeric index.
  *
  * @class MarketDataGateway
  * @implements OnGatewayConnection, OnGatewayDisconnect
@@ -555,34 +555,54 @@ export class MarketDataGateway
       const { symbols, type = 'live', mode = 'ltp' } = data;
       let instruments = data.instruments || [];
 
-      // Resolve symbols to provider tokens if provided
-      const resolvedSymbols: Array<{ symbol: string; uirId: number; providerToken?: number }> = [];
+      // Resolve symbols to provider tokens if provided.
+      // Accepts both canonical format ("NSE:RELIANCE") and plain underlying names ("RELIANCE").
+      const resolvedSymbols: Array<{ symbol: string; uirId: number; providerToken?: number; resolvedAs?: string }> = [];
       const unresolvedSymbols: string[] = [];
+      // UIR IDs for instruments whose provider is not the global WS provider (e.g. massive US stocks).
+      // These bypass exchange-pair resolution and are routed directly by the streaming batch processor.
+      const directUirIds: number[] = [];
       if (Array.isArray(symbols) && symbols.length > 0) {
+        const providerName = this.streamService.activeProviderName;
         for (const sym of symbols) {
-          const uirId = this.instrumentRegistry.resolveCanonicalSymbol(sym);
-          if (uirId == null) {
+          const flexResult = this.instrumentRegistry.resolveFlexSymbol(sym);
+          if (flexResult.status === 'not_found') {
             unresolvedSymbols.push(sym);
             continue;
           }
-          // Find the provider token for the active WS provider
-          const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+          if (flexResult.status === 'ambiguous') {
+            unresolvedSymbols.push(`${sym} (ambiguous — try: ${flexResult.candidates.join(', ')})`);
+            continue;
+          }
+          const { uirId, canonical } = flexResult;
           const providerToken = this.instrumentRegistry.getProviderToken(uirId, providerName);
           if (providerToken != null) {
             const numToken = Number(providerToken);
             if (Number.isFinite(numToken)) {
               instruments = [...instruments, numToken];
-              resolvedSymbols.push({ symbol: sym, uirId, providerToken: numToken });
+              resolvedSymbols.push({
+                symbol: sym,
+                uirId,
+                providerToken: numToken,
+                resolvedAs: canonical !== sym ? canonical : undefined,
+              });
             }
           } else {
-            unresolvedSymbols.push(sym);
+            // No token for the global provider — check if another provider owns this UIR.
+            const bestProv = this.instrumentRegistry.getBestProviderForUirId(uirId);
+            if (bestProv) {
+              directUirIds.push(uirId);
+              resolvedSymbols.push({ symbol: sym, uirId, resolvedAs: canonical !== sym ? canonical : undefined });
+            } else {
+              unresolvedSymbols.push(sym);
+            }
           }
         }
       }
 
       // Validate payload shape (instruments may now include symbol-resolved tokens)
       const v = validateSubscribePayload({ instruments, mode });
-      if (!v.ok && (!instruments || instruments.length === 0)) {
+      if (!v.ok && (!instruments || instruments.length === 0) && directUirIds.length === 0) {
         client.emit('error', {
           code: 'invalid_payload',
           message: 'Invalid subscribe payload — provide instruments or symbols',
@@ -641,11 +661,8 @@ export class MarketDataGateway
         }
       } catch {}
 
-      if (
-        !instruments ||
-        !Array.isArray(instruments) ||
-        instruments.length === 0
-      ) {
+      // Allow subscriptions that consist solely of direct UIR IDs (e.g. massive US symbols).
+      if ((!instruments || !Array.isArray(instruments) || instruments.length === 0) && directUirIds.length === 0) {
         client.emit('error', { message: 'Invalid instruments array' });
         return;
       }
@@ -665,19 +682,31 @@ export class MarketDataGateway
         return;
       }
 
-      // Ensure streaming is active before delegating
-      try {
-        const status = await this.streamService.getStreamingStatus();
-        if (!status?.isStreaming) {
-          client.emit('error', {
-            code: 'stream_inactive',
-            message:
-              'Streaming is not active. Ask admin to set provider and start stream: POST /api/admin/provider/global, then /api/admin/provider/stream/start',
-          });
-          return;
+      // Ensure streaming is active; auto-start on first subscriber if needed.
+      // Pure massive/direct-UIR subscriptions skip this check — their provider ticker
+      // is lazy-init'd by the batch processor on first subscription.
+      const isPureDirectSubscription = instruments.length === 0 && directUirIds.length > 0;
+      if (!isPureDirectSubscription) {
+        try {
+          const status = await this.streamService.getStreamingStatus();
+          if (!status?.isStreaming) {
+            client.emit('stream_starting', {
+              message: 'Streaming not active — auto-starting provider ticker…',
+              ts: Date.now(),
+            });
+            const started = await this.streamService.autoStartIfNeeded();
+            if (!started) {
+              client.emit('error', {
+                code: 'stream_unavailable',
+                message:
+                  'Could not auto-start streaming. Ensure provider credentials are configured (KITE_ACCESS_TOKEN / VORTEX_API_KEY) or ask admin to start the stream manually.',
+              });
+              return;
+            }
+          }
+        } catch (e) {
+          this.logger.warn('Failed to read/auto-start streaming status', e as any);
         }
-      } catch (e) {
-        this.logger.warn('Failed to read streaming status', e as any);
       }
 
       // Parse instruments allowing both numeric tokens and EXCHANGE-TOKEN strings
@@ -749,7 +778,7 @@ export class MarketDataGateway
       }
 
       // Phase 3: resolve tokens to UIR IDs for internal tracking
-      const providerNameForResolve = (this.streamService as any).streamMetricsProvider || 'kite';
+      const providerNameForResolve = this.streamService.activeProviderName;
 
       // Enforce per-connection instrument subscription cap (using UIR IDs)
       const maxInstruments =
@@ -760,7 +789,7 @@ export class MarketDataGateway
       // Pre-resolve to UIR IDs for limit check
       const preResolvedNewIds = finalPairs
         .map((p) => {
-          const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, p.token);
+          const uirId = this.resolveUirForPair(providerNameForResolve, p);
           return uirId != null ? uirId : p.token;
         })
         .filter((id) => !new Set(subscription.instruments).has(id));
@@ -776,7 +805,7 @@ export class MarketDataGateway
         // Keep only pairs whose UIR ID is already in subscription
         const existingSet = new Set(subscription.instruments);
         finalPairs = finalPairs.filter((p) => {
-          const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, p.token);
+          const uirId = this.resolveUirForPair(providerNameForResolve, p);
           return existingSet.has(uirId != null ? uirId : p.token);
         });
       } else if (preResolvedNewIds.length > capacity) {
@@ -791,52 +820,54 @@ export class MarketDataGateway
         });
         const allowedSet = new Set([...subscription.instruments, ...allowedNewIds]);
         finalPairs = finalPairs.filter((p) => {
-          const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, p.token);
+          const uirId = this.resolveUirForPair(providerNameForResolve, p);
           return allowedSet.has(uirId != null ? uirId : p.token);
         });
       }
 
       const includedTokens = finalPairs.map((p) => p.token);
       const includedUirIds: number[] = [];
-      for (const token of includedTokens) {
-        const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, token);
+      for (const p of finalPairs) {
+        const uirId = this.resolveUirForPair(providerNameForResolve, p);
         if (uirId != null) {
           includedUirIds.push(uirId);
         } else {
-          // Fallback: use provider token as identifier for unmapped instruments
-          includedUirIds.push(token);
+          includedUirIds.push(p.token);
         }
       }
       const priorInstrumentSet = new Set(subscription.instruments);
+      // Merge direct UIR IDs (massive/non-Indian instruments resolved via symbol lookup)
+      const allIncludedUirIds = [...includedUirIds, ...directUirIds];
       subscription.instruments = [
-        ...new Set([...subscription.instruments, ...includedUirIds]),
+        ...new Set([...subscription.instruments, ...allIncludedUirIds]),
       ];
       subscription.subscriptionType = type;
-      includedUirIds.forEach((id) => {
+      allIncludedUirIds.forEach((id) => {
         subscription.modeByInstrument.set(id, mode);
       });
 
-      // Delegate to stream service via pairs to prime mapping first
-      if (finalPairs.length > 0) {
+      // Subscribe upstream using UIR IDs — the stream service's subscriptionQueue is keyed by UIR IDs.
+      if (allIncludedUirIds.length > 0) {
         this.logger.debug(
-          `[MarketDataGateway] Subscribing client ${client.id} pairs=${finalPairs.length} mode=${mode}`,
+          `[MarketDataGateway] Subscribing client ${client.id} uirIds=${allIncludedUirIds.length} mode=${mode}`,
         );
-        await this.streamService.subscribePairs(finalPairs, mode, client.id);
+        await this.streamService.subscribeToInstruments(allIncludedUirIds, mode, client.id);
       }
 
       // Phase 3: join UIR-keyed rooms only
-      const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+      const providerName = this.streamService.activeProviderName;
       includedTokens.forEach((token) => {
         const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
         if (uirId != null) {
           client.join(`instrument:${uirId}`);
         } else {
-          // Fallback for unmapped tokens — use provider token as room key
           client.join(`instrument:${token}`);
         }
       });
+      // Join rooms for direct UIR IDs (massive instruments)
+      directUirIds.forEach((id) => client.join(`instrument:${id}`));
 
-      for (const id of includedUirIds) {
+      for (const id of allIncludedUirIds) {
         if (!priorInstrumentSet.has(id)) {
           this.wsInterest.addInterest(id);
         }
@@ -888,7 +919,7 @@ export class MarketDataGateway
       client.emit('subscription_confirmed', {
         requested: requestedRaw,
         pairs: finalPairs.map((p) => `${p.exchange}-${p.token}`),
-        included: includedUirIds,
+        included: allIncludedUirIds,
         resolved: symbolEnrichment.length > 0 ? symbolEnrichment : undefined,
         unresolved,
         unresolvedSymbols: unresolvedSymbols.length > 0 ? unresolvedSymbols : undefined,
@@ -978,6 +1009,26 @@ export class MarketDataGateway
       this.logger.error('Error handling instrument subscription', error);
       client.emit('error', { code: 'subscribe_failed', message: 'Failed to subscribe to instruments' });
     }
+  }
+
+  /**
+   * Resolve a { token, exchange? } pair to a UIR ID.
+   * For Vortex, tries the full "NSE_EQ-213123" key first (primary registry key),
+   * then falls back to the numeric-only secondary key added in warmMaps().
+   * For all other providers, delegates directly to resolveProviderToken.
+   */
+  private resolveUirForPair(
+    provider: string,
+    pair: { token: number; exchange?: any },
+  ): number | undefined {
+    if (provider === 'vortex' && pair.exchange) {
+      const full = this.instrumentRegistry.resolveProviderToken(
+        'vortex',
+        `${pair.exchange}-${pair.token}`,
+      );
+      if (full != null) return full;
+    }
+    return this.instrumentRegistry.resolveProviderToken(provider, pair.token);
   }
 
   /**
@@ -1080,7 +1131,7 @@ export class MarketDataGateway
       }
 
       // Phase 3: resolve incoming provider tokens to UIR IDs for matching internal state
-      const providerNameForResolve = (this.streamService as any).streamMetricsProvider || 'kite';
+      const providerNameForResolve = this.streamService.activeProviderName;
       const requestedUirIds: number[] = [];
       for (const token of requestedTokens) {
         const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, token);
@@ -1456,7 +1507,7 @@ export class MarketDataGateway
       }
 
       // Phase 3: resolve provider tokens to UIR IDs for matching internal state
-      const providerNameForResolve = (this.streamService as any).streamMetricsProvider || 'kite';
+      const providerNameForResolve = this.streamService.activeProviderName;
       const uirIds: number[] = [];
       for (const token of tokens) {
         const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, token);

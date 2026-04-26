@@ -4,7 +4,7 @@
  * @description Native WebSocket /ws endpoint: API key auth, subscriptions, tick broadcast with mode shaping.
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-04-18
+ * @updated 2026-04-27
  * Changelog: added symbols[] canonical subscription support in handleSubscribe
  */
 import {
@@ -315,32 +315,51 @@ export class NativeWsService implements OnModuleDestroy {
 
     const { instruments: rawInstruments = [], symbols = [], mode = 'ltp' } = data || {};
 
-    // Resolve canonical symbols (e.g. "NSE:RELIANCE") to numeric provider tokens
+    // Parse instruments: accept both numeric tokens and Vortex EXCHANGE-TOKEN strings (e.g. "NSE_EQ-213123").
+    const vortexPairs: Array<{ token: number; exchange: string }> = [];
+    const numericInstruments: number[] = [];
+    for (const item of rawInstruments as any[]) {
+      if (typeof item === 'string') {
+        const m = String(item).trim().toUpperCase().match(/^([A-Z_]+)-(\d+)$/);
+        if (m && ['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'].includes(m[1])) {
+          const tok = Number(m[2]);
+          if (Number.isFinite(tok)) { vortexPairs.push({ token: tok, exchange: m[1] }); continue; }
+        }
+      }
+      const n = Number(item);
+      if (Number.isFinite(n)) numericInstruments.push(n);
+    }
+
+    // Resolve symbols to provider tokens — accepts canonical ("NSE:RELIANCE") and plain names ("RELIANCE").
     const resolvedSymbolTokens: number[] = [];
     const unresolvedSymbols: string[] = [];
     if (Array.isArray(symbols) && symbols.length > 0) {
-      const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+      const providerName = this.streamService.activeProviderName;
       for (const sym of symbols as string[]) {
-        const uirId = this.instrumentRegistry.resolveCanonicalSymbol(sym);
-        if (uirId == null) { unresolvedSymbols.push(sym); continue; }
-        const pt = this.instrumentRegistry.getProviderToken(uirId, providerName);
+        const flexResult = this.instrumentRegistry.resolveFlexSymbol(sym);
+        if (flexResult.status === 'not_found') { unresolvedSymbols.push(sym); continue; }
+        if (flexResult.status === 'ambiguous') {
+          unresolvedSymbols.push(`${sym} (ambiguous — try: ${flexResult.candidates.join(', ')})`);
+          continue;
+        }
+        const pt = this.instrumentRegistry.getProviderToken(flexResult.uirId, providerName);
         if (pt != null) resolvedSymbolTokens.push(Number(pt));
         else unresolvedSymbols.push(sym);
       }
     }
 
-    const instruments: number[] = [...(rawInstruments as number[]), ...resolvedSymbolTokens];
+    const totalInputCount = vortexPairs.length + numericInstruments.length;
 
-    if (instruments.length === 0 && symbols.length === 0) {
+    if (totalInputCount === 0 && symbols.length === 0) {
       this.sendError(
         client,
         'WS_INVALID_INSTRUMENTS',
-        'Provide instruments (numeric tokens) or symbols (canonical strings)',
+        'Provide instruments (numeric tokens, Vortex EXCHANGE-TOKEN strings, or canonical symbols)',
       );
       return;
     }
 
-    if (instruments.length === 0) {
+    if (totalInputCount === 0 && resolvedSymbolTokens.length === 0) {
       this.sendError(
         client,
         'WS_INVALID_INSTRUMENTS',
@@ -359,24 +378,44 @@ export class NativeWsService implements OnModuleDestroy {
     }
 
     try {
-      // Check streaming status
+      // Ensure streaming is active; auto-start on first subscriber if needed
       const status = await this.streamService.getStreamingStatus();
       if (!status?.isStreaming) {
-        this.sendError(
-          client,
-          'WS_STREAM_INACTIVE',
-          'Streaming is not active. Ask admin to start stream.',
-        );
-        return;
+        this.sendToClient(client, 'stream_starting', { message: 'Streaming not active — auto-starting provider ticker…', ts: Date.now() });
+        const started = await this.streamService.autoStartIfNeeded();
+        if (!started) {
+          this.sendError(
+            client,
+            'WS_STREAM_UNAVAILABLE',
+            'Could not auto-start streaming. Ensure provider credentials are configured (KITE_ACCESS_TOKEN / VORTEX_API_KEY).',
+          );
+          return;
+        }
       }
     } catch (e) {
-      this.logger.warn('Failed to read streaming status', e as any);
+      this.logger.warn('Failed to read/auto-start streaming status', e as any);
     }
 
-    // Phase 3: resolve provider tokens to UIR IDs for internal tracking
-    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    // Phase 3: resolve provider tokens to UIR IDs for internal tracking.
+    const providerName = this.streamService.activeProviderName;
+    const allInputTokens: number[] = [
+      ...numericInstruments,
+      ...vortexPairs.map((p) => p.token),
+      ...resolvedSymbolTokens,
+    ];
     const uirIds: number[] = [];
-    for (const token of instruments as number[]) {
+
+    // Vortex EXCHANGE-TOKEN pairs: try full key "NSE_EQ-213123" first (primary registry key),
+    // then fall back to numeric secondary key added during warmMaps().
+    for (const p of vortexPairs) {
+      const fullKey = `${p.exchange}-${p.token}`;
+      const uirId =
+        this.instrumentRegistry.resolveProviderToken('vortex', fullKey) ??
+        this.instrumentRegistry.resolveProviderToken(providerName, p.token);
+      uirIds.push(uirId != null ? uirId : p.token);
+    }
+    // Numeric tokens and symbol-resolved tokens — straightforward provider lookup.
+    for (const token of [...numericInstruments, ...resolvedSymbolTokens]) {
       const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
       uirIds.push(uirId != null ? uirId : token);
     }
@@ -396,9 +435,9 @@ export class NativeWsService implements OnModuleDestroy {
     }
 
     this.logger.debug(
-      `[NativeWsService] Subscribing client ${clientId} count=${instruments.length} uirIds=${uirIds.length} mode=${mode}`,
+      `[NativeWsService] Subscribing client ${clientId} count=${allInputTokens.length} uirIds=${uirIds.length} mode=${mode}`,
     );
-    await this.subscribeToInstruments(instruments, mode, clientId);
+    await this.subscribeToInstruments(uirIds, mode, clientId);
 
     let limits: Record<string, unknown> = {
       maxUpstreamInstruments: 1000,
@@ -430,7 +469,7 @@ export class NativeWsService implements OnModuleDestroy {
     });
 
     this.logger.log(
-      `Client ${clientId} subscribed to ${instruments.length} instruments with mode=${mode}; confirmation sent`,
+      `Client ${clientId} subscribed to ${allInputTokens.length} instruments with mode=${mode}; confirmation sent`,
     );
   }
 
@@ -454,7 +493,7 @@ export class NativeWsService implements OnModuleDestroy {
     }
 
     // Phase 3: resolve incoming provider tokens to UIR IDs
-    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    const providerName = this.streamService.activeProviderName;
     const requestedUirIds: number[] = [];
     for (const token of instruments as number[]) {
       const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
@@ -522,7 +561,7 @@ export class NativeWsService implements OnModuleDestroy {
       }
     }
     // Phase 3: resolve provider tokens to UIR IDs
-    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    const providerName = this.streamService.activeProviderName;
     const uirIds: number[] = [];
     for (const token of tokens) {
       const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);

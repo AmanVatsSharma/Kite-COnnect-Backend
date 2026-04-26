@@ -4,7 +4,7 @@
  * @description Warm in-memory registry mapping provider tokens <-> UIR IDs <-> canonical symbols.
  * @author BharatERP
  * @created 2026-04-17
- * @updated 2026-04-21
+ * @updated 2026-04-26
  */
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
@@ -87,6 +87,21 @@ export class InstrumentRegistryService implements OnModuleInit {
       const key = `${mapping.provider}:${mapping.provider_token}`;
 
       this.providerTokenToUirId.set(key, uirId);
+
+      // Vortex secondary index: also register by numeric token so callers can resolve with just
+      // the number (e.g. "vortex:213123" in addition to "vortex:NSE_EQ-213123").
+      // Vortex tokens are globally unique (PrimaryColumn on vortex_instruments.token).
+      if (mapping.provider === 'vortex' && mapping.instrument_token != null) {
+        const numericKey = `vortex:${mapping.instrument_token}`;
+        const existing = this.providerTokenToUirId.get(numericKey);
+        if (existing !== undefined && existing !== uirId) {
+          this.logger.warn(
+            `Vortex numeric token ${mapping.instrument_token} collision: existing uirId=${existing} vs ${uirId}; keeping existing`,
+          );
+        } else {
+          this.providerTokenToUirId.set(numericKey, uirId);
+        }
+      }
 
       // Populate nested provider token map
       let providerMap = this.uirIdToProviderTokens.get(uirId);

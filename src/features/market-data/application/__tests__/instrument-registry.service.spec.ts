@@ -4,7 +4,7 @@
  * @description Unit tests for InstrumentRegistryService in-memory maps.
  * @author BharatERP
  * @created 2026-04-17
- * @updated 2026-04-19
+ * @updated 2026-04-27
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -19,9 +19,9 @@ const mockUirRows = [
 ];
 
 const mockMappings = [
-  { provider: 'kite', provider_token: '256265', uir_id: 42 },
-  { provider: 'vortex', provider_token: 'NSE_EQ-22', uir_id: 42 },
-  { provider: 'kite', provider_token: '738561', uir_id: 108 },
+  { provider: 'kite', provider_token: '256265', instrument_token: null, uir_id: 42 },
+  { provider: 'vortex', provider_token: 'NSE_EQ-22', instrument_token: 22, uir_id: 42 },
+  { provider: 'kite', provider_token: '738561', instrument_token: null, uir_id: 108 },
 ];
 
 describe('InstrumentRegistryService', () => {
@@ -153,7 +153,7 @@ describe('InstrumentRegistryService', () => {
   describe('refresh', () => {
     it('should clear and repopulate all maps', async () => {
       await service.warmMaps();
-      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 3 });
+      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 4 });
 
       // Return different data on refresh
       uirRepoFind.mockResolvedValue([
@@ -183,7 +183,47 @@ describe('InstrumentRegistryService', () => {
 
     it('should return correct counts after warmMaps', async () => {
       await service.warmMaps();
-      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 3 });
+      // 3 primary mapping entries + 1 secondary numeric index for the Vortex mapping = 4
+      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 4 });
+    });
+  });
+
+  describe('Vortex secondary numeric index', () => {
+    it('resolves by full exchange-token key "NSE_EQ-22"', async () => {
+      await service.warmMaps();
+      expect(service.resolveProviderToken('vortex', 'NSE_EQ-22')).toBe(42);
+    });
+
+    it('resolves by numeric token 22 via secondary index', async () => {
+      await service.warmMaps();
+      expect(service.resolveProviderToken('vortex', 22)).toBe(42);
+    });
+
+    it('both lookups return the same UIR ID', async () => {
+      await service.warmMaps();
+      const byFull = service.resolveProviderToken('vortex', 'NSE_EQ-22');
+      const byNumeric = service.resolveProviderToken('vortex', 22);
+      expect(byFull).toBe(byNumeric);
+    });
+
+    it('collision: first uirId wins when two Vortex rows share an instrument_token', async () => {
+      mappingRepoFind.mockResolvedValue([
+        { provider: 'vortex', provider_token: 'NSE_EQ-99', instrument_token: 99, uir_id: 10 },
+        { provider: 'vortex', provider_token: 'NSE_FO-99', instrument_token: 99, uir_id: 20 },
+      ]);
+      await service.warmMaps();
+      // First entry (uirId=10) wins for the numeric secondary key
+      expect(service.resolveProviderToken('vortex', 99)).toBe(10);
+      // Primary keys for both are still intact
+      expect(service.resolveProviderToken('vortex', 'NSE_EQ-99')).toBe(10);
+      expect(service.resolveProviderToken('vortex', 'NSE_FO-99')).toBe(20);
+    });
+
+    it('Kite mapping with no instrument_token does not add secondary index', async () => {
+      await service.warmMaps();
+      // kite mapping has instrument_token: null, so no numeric secondary key
+      expect(service.resolveProviderToken('kite', 256265)).toBe(42); // numeric string coercion still works for kite
+      expect(service.resolveProviderToken('kite', null as any)).toBeUndefined();
     });
   });
 
