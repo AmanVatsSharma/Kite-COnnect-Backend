@@ -4,7 +4,7 @@
  * @description Warm in-memory registry mapping provider tokens <-> UIR IDs <-> canonical symbols.
  * @author BharatERP
  * @created 2026-04-17
- * @updated 2026-04-26
+ * @updated 2026-04-28
  */
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
@@ -18,6 +18,12 @@ import { InternalProviderName } from '@shared/utils/provider-label.util';
 /** Result of a flexible symbol resolution attempt. */
 export type FlexResolveResult =
   | { status: 'resolved'; uirId: number; canonical: string }
+  | { status: 'ambiguous'; candidates: string[] }
+  | { status: 'not_found' };
+
+/** Result of a provider-scoped symbol resolution attempt. */
+export type ProviderScopedResolveResult =
+  | { status: 'resolved'; uirId: number; canonical: string; providerToken: string }
   | { status: 'ambiguous'; candidates: string[] }
   | { status: 'not_found' };
 
@@ -130,6 +136,24 @@ export class InstrumentRegistryService implements OnModuleInit {
   }
 
   /**
+   * Provider-agnostic token resolution — tries every provider and returns the first match.
+   * Use when the caller has a token but doesn't know which provider issued it (multi-provider
+   * WS clients that pass raw numeric tokens). Returns undefined if no provider has a mapping.
+   *
+   * Hot-path: at most 4 sync Map.get() calls — no async, no DB.
+   */
+  resolveTokenAcrossProviders(
+    providerToken: string | number,
+  ): number | undefined {
+    const providers: InternalProviderName[] = ['kite', 'vortex', 'massive', 'binance'];
+    for (const p of providers) {
+      const id = this.providerTokenToUirId.get(`${p}:${providerToken}`);
+      if (id !== undefined) return id;
+    }
+    return undefined;
+  }
+
+  /**
    * Get the canonical symbol for a UIR ID.
    */
   getCanonicalSymbol(uirId: number): string | undefined {
@@ -181,6 +205,102 @@ export class InstrumentRegistryService implements OnModuleInit {
     if (nse) return { status: 'resolved', uirId: nse.uirId, canonical: nse.canonical };
 
     return { status: 'ambiguous', candidates: pool.map(e => e.canonical) };
+  }
+
+  /**
+   * Provider-scoped symbol resolution — used by the WS `Provider:identifier` prefix syntax
+   * (e.g. `Falcon:reliance`, `Vayu:26000`, `Vayu:NSE_EQ-26000`, `Binance:BTCUSDT`).
+   *
+   * Resolves the identifier ONLY within the requested provider's mappings — never falls
+   * back to another provider. This is the explicit-pin counterpart to `resolveFlexSymbol`.
+   *
+   * Resolution order (all O(1)):
+   *   1. Pure-numeric or pair-form `EXCHANGE-TOKEN` → `resolveProviderToken(provider, raw)`.
+   *      For Vortex this covers both `26000` (numeric secondary index) and `NSE_EQ-26000`
+   *      (primary key). For kite/massive/binance only numeric/string-token applies.
+   *   2. Exact canonical (`NSE:RELIANCE`) → `canonicalToUirId`, gated by the provider
+   *      having a token for that UIR (otherwise `not_found`).
+   *   3. Underlying fallback (`RELIANCE`, case-insensitive) → walk `underlyingToEntries`
+   *      filtered to entries whose UIR has a token for the requested provider; same
+   *      EQ-then-IDX preference as `resolveFlexSymbol`. Never auto-resolves FUT/CE/PE.
+   */
+  resolveProviderScopedSymbol(
+    provider: InternalProviderName,
+    identifier: string,
+  ): ProviderScopedResolveResult {
+    if (typeof identifier !== 'string' || identifier.length === 0) {
+      return { status: 'not_found' };
+    }
+
+    // 1a. Direct provider-token lookup (handles numeric inputs and Vortex pair-form).
+    const direct = this.providerTokenToUirId.get(`${provider}:${identifier}`);
+    if (direct != null) {
+      const canonical = this.uirIdToCanonical.get(direct);
+      const providerToken = this.uirIdToProviderTokens.get(direct)?.get(provider);
+      if (canonical && providerToken) {
+        return { status: 'resolved', uirId: direct, canonical, providerToken };
+      }
+    }
+
+    // 1b. Uppercased pair-form for case-insensitive Vortex pair input ("nse_eq-26000").
+    const upperId = identifier.toUpperCase();
+    if (upperId !== identifier) {
+      const upperHit = this.providerTokenToUirId.get(`${provider}:${upperId}`);
+      if (upperHit != null) {
+        const canonical = this.uirIdToCanonical.get(upperHit);
+        const providerToken = this.uirIdToProviderTokens.get(upperHit)?.get(provider);
+        if (canonical && providerToken) {
+          return { status: 'resolved', uirId: upperHit, canonical, providerToken };
+        }
+      }
+    }
+
+    // 2. Exact canonical match — must have a token in the requested provider.
+    const exactCanon = this.canonicalToUirId.get(identifier) ?? this.canonicalToUirId.get(upperId);
+    if (exactCanon != null) {
+      const providerToken = this.uirIdToProviderTokens.get(exactCanon)?.get(provider);
+      if (providerToken) {
+        const canonical = this.uirIdToCanonical.get(exactCanon)!;
+        return { status: 'resolved', uirId: exactCanon, canonical, providerToken };
+      }
+      // Canonical exists but the requested provider has no mapping for it — not_found in this provider's catalog.
+      return { status: 'not_found' };
+    }
+
+    // 3. Underlying fallback — same EQ-then-IDX preference as resolveFlexSymbol, but
+    //    filtered to entries whose UIR has a token for the requested provider.
+    const allEntries = this.underlyingToEntries.get(upperId);
+    if (!allEntries || allEntries.length === 0) return { status: 'not_found' };
+
+    const inProvider = allEntries.filter((e) =>
+      this.uirIdToProviderTokens.get(e.uirId)?.has(provider),
+    );
+    if (inProvider.length === 0) return { status: 'not_found' };
+
+    const eq = inProvider.filter((e) => e.instrument_type === 'EQ');
+    const pool = eq.length > 0 ? eq : inProvider.filter((e) => e.instrument_type === 'IDX');
+
+    if (pool.length === 0) {
+      return { status: 'ambiguous', candidates: inProvider.map((e) => e.canonical) };
+    }
+    if (pool.length === 1) {
+      const providerToken = this.uirIdToProviderTokens.get(pool[0].uirId)!.get(provider)!;
+      return {
+        status: 'resolved',
+        uirId: pool[0].uirId,
+        canonical: pool[0].canonical,
+        providerToken,
+      };
+    }
+
+    // Multiple EQ entries (e.g. NSE + BSE within same provider): prefer NSE.
+    const nse = pool.find((e) => e.exchange === 'NSE');
+    if (nse) {
+      const providerToken = this.uirIdToProviderTokens.get(nse.uirId)!.get(provider)!;
+      return { status: 'resolved', uirId: nse.uirId, canonical: nse.canonical, providerToken };
+    }
+
+    return { status: 'ambiguous', candidates: pool.map((e) => e.canonical) };
   }
 
   /**

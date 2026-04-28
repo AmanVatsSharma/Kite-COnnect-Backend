@@ -30,8 +30,36 @@ Real-time market data streaming (Socket.IO + native WebSocket), provider abstrac
 |----------|---------|-------------|
 | `MARKET_DATA_SYNTHETIC_INTERVAL_MS` | `0` (off) | When greater than 0, re-emits last known tick on this interval for subscribed tokens if upstream has been quiet for at least one interval; outbound frames include `syntheticLast: true`. |
 
+## WebSocket subscription syntax
+
+Both WS surfaces (`/market-data` Socket.IO and `/ws` native) accept the following identifier forms in `instruments[]` and `symbols[]`:
+
+| Form | Example | Behavior |
+|---|---|---|
+| Numeric provider token | `26000`, `738561` | Resolved against the active provider; multi-provider lookup fallback. |
+| Vortex `EXCHANGE-TOKEN` | `"NSE_EQ-26000"` | Vortex-specific full pair key. |
+| Canonical symbol | `"NSE:RELIANCE"`, `"BINANCE:BTCUSDT"` | Routed via `getBestProviderForUirId` (best provider for that exchange). |
+| Underlying name | `"RELIANCE"` | Flex resolved → EQ preferred over IDX, NSE preferred for India. |
+| **Provider prefix** | `"Falcon:reliance"`, `"Vayu:26000"`, `"Massive:AAPL"`, `"Binance:BTCUSDT"` | **Forces routing to that specific provider.** Resolved only within that provider's mappings. Skips kite↔vortex dual-subscribe. |
+
+**Provider prefix aliases** (case-insensitive):
+
+| Prefix | Routes to |
+|---|---|
+| `Falcon:` / `Kite:` | Kite |
+| `Vayu:` / `Vortex:` | Vortex |
+| `Massive:` / `Polygon:` | Massive |
+| `Binance:` | Binance |
+
+**Errors:**
+- `forced_provider_unavailable` — emitted when the requested provider has no active upstream connection (e.g. `KITE_ACCESS_TOKEN` missing). The subscription for that token is rejected with no fallback.
+- `unresolvedSymbols` — items not found in the requested provider's catalog or ambiguous within the provider scope are returned in this array on `subscription_confirmed`.
+
+**Confirmation enrichment:** `subscription_confirmed.forced` lists each pinned subscription as `{ symbol, uirId, provider, canonical }`.
+
 ## Changelog
 
+- **2026-04-28 (provider-prefixed WS subscriptions)** — Added `Provider:identifier` prefix syntax (`Falcon:reliance`, `Vayu:26000`, `Massive:AAPL`, `Binance:BTCUSDT`) to both Socket.IO `/market-data` and native `/ws` subscribe + unsubscribe handlers. New `parseProviderPrefix` util (`src/shared/utils/ws-provider-prefix.util.ts`) using `normalizeProviderAlias` (first-colon split — preserves nested canonical like `Falcon:NSE:RELIANCE`). New `InstrumentRegistryService.resolveProviderScopedSymbol(provider, identifier)` resolves only within that provider's mappings (numeric token → exact canonical → underlying with EQ-then-IDX preference). `MarketDataStreamService.subscribeToInstruments` accepts an optional `forcedProvider` param; `forcedProviderByUir` map pins routing per-UIR, bypassing `getBestProviderForUirId` and the kite↔vortex dual-subscribe path. Pin is cleared when the last client unsubscribes. Hard-fail with `forced_provider_unavailable` (no fallback) when the requested provider has no active upstream connection. `subscription_confirmed.forced` enriches the response with `{ symbol, uirId, provider, canonical }` per pinned subscription.
 - **2026-04-18** — Universal Symbol Architecture (Phase 3): UIR-primary internal state. All internal Maps (`subscribedInstruments`, `ltpCache`, `lastTickPayload`, `lastUpstreamAt`, `subscriptionQueue`, `modeByInstrument`, `wsInterest` refCounts) now keyed by UIR ID. `handleTicks` resolves provider tokens to UIR IDs via `InstrumentRegistryService`; unmapped tokens are skipped with rate-limited debug log. `processSubscriptionBatch` translates UIR IDs back to provider tokens for upstream `ticker.subscribe()`. Redis writes use `last_tick:{uirId}`. Socket.IO rooms use `instrument:{uirId}`. `broadcastMarketData` emits both `instrumentToken` and `uirId` fields. `doUnsubscribe`, `handleSetMode`, and `handleUnsubscribeAll` resolve provider tokens to UIR IDs. NativeWsService injects `InstrumentRegistryService` and resolves tokens in subscribe/unsubscribe/setMode. `MarketDataProvider.providerName` added to interface; `MarketDataExchangeToken.exchange` widened to `string`. Removed dual-key artifacts from Phase 2.
 - **2026-04-17** — Universal Symbol Architecture (Phase 1+2): Added `UniversalInstrument` entity (`universal_instruments` table) as canonical instrument registry across all providers. Added `InstrumentRegistryService` with warm in-memory Maps for O(1) provider token / UIR ID / canonical symbol resolution. Added exchange normalizer (`@shared/utils/exchange-normalizer.ts`) and canonical symbol generator (`@shared/utils/canonical-symbol.ts`). Wired UIR enrichment into `handleTicks()` tick hot path. Added dual-key Redis writes (`last_tick:{token}` + `last_tick:uir:{uirId}`). Gateway now accepts `symbols?: string[]` in subscribe events alongside legacy `instruments`. Subscription confirmations include `resolved` symbol data and `unresolvedSymbols`. Clients join dual-key rooms. Falcon + Vortex sync pipelines now upsert into `universal_instruments` and link `instrument_mappings.uir_id`.
 - **2026-03-28 (structure)** — `MarketDataGatewaySubscriptionRegistry` holds Socket.IO client subscription map; gateway delegates to it (behavior unchanged). ESLint **`max-lines`** / **`max-lines-per-function`** are **warnings** in root `.eslintrc.js`. `npm run verify:pr` runs build + tests + **`check:cycles:warn`** (madge report; known module cycles may still print — see script). **`check:cycles`** exits non-zero if circular imports are found.
