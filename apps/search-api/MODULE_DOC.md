@@ -51,7 +51,9 @@ Pass `?fields=symbol,exchange,last_price` to narrow the response to just those p
 | segment | string | EQ / FO / CUR / COM / spot / forex / crypto |
 | instrumentType | string | EQ / FUT / CE / PE / ETF |
 | vortexExchange | string | NSE_EQ / NSE_FO / NSE_CUR / MCX_FO |
-| streamProvider | string | kite / vortex / massive / binance — filter by routing fact |
+| streamProvider | string | Public: `falcon` / `vayu` / `atlas` / `drift` (also accepts internal `kite` / `vortex` / `massive` / `binance` for backward-compat) |
+| fields | string | Comma-separated allow-list of fields to return (anchors always included) — see Field projection |
+| include | string | `internal` (admin-only, requires `x-admin-token`) — adds `_internalProvider` + raw `*Token` fields |
 | mode | string | eq / fno / curr / commodities (shorthand for vortexExchange) |
 | ltp_only | boolean | When true, only return instruments with a live LTP > 0 |
 | expiry_from / expiry_to | string | ISO date range for derivatives |
@@ -59,18 +61,44 @@ Pass `?fields=symbol,exchange,last_price` to narrow the response to just those p
 
 ## Result Shape (per row)
 
+### Public response (default)
+
 ```json
 {
   "id": 355010,
   "canonicalSymbol": "BINANCE:BTCUSDT",
   "symbol": "BTCUSDT",
   "exchange": "BINANCE",
+  "segment": "spot",
+  "instrumentType": "EQ",
+  "assetClass": "crypto",
+  "streamProvider": "drift",
+  "wsSubscribeUirId": 355010,
+  "last_price": 50123.45,
+  "priceStatus": "live"
+}
+```
+
+- Internal token fields (`kiteToken`, `vortexToken`, `vortexExchange`, `massiveToken`, `binanceToken`) are **not** present in the public response. They are not actionable for clients (everyone subscribes by UIR id) and would expose the underlying broker stack.
+- `streamProvider` is the **public brand name** (`falcon` / `vayu` / `atlas` / `drift`) — never the internal canonical (`kite` / `vortex` / `massive` / `binance`).
+
+### Admin response (`?include=internal` + `x-admin-token`)
+
+Adds the internal token fields and the synthetic `_internalProvider` (raw internal name pre-mapping). Used by the admin dashboard's Search page to render the VIA badge tooltip and copy raw tokens during debugging.
+
+```json
+{
+  "id": 355010,
+  "canonicalSymbol": "BINANCE:BTCUSDT",
+  "symbol": "BTCUSDT",
+  "exchange": "BINANCE",
+  "streamProvider": "drift",
+  "_internalProvider": "binance",
+  "binanceToken": "BTCUSDT",
   "kiteToken": null,
   "vortexToken": null,
   "vortexExchange": null,
   "massiveToken": null,
-  "binanceToken": "BTCUSDT",
-  "streamProvider": "binance",
   "wsSubscribeUirId": 355010,
   "last_price": 50123.45,
   "priceStatus": "live"
@@ -79,7 +107,7 @@ Pass `?fields=symbol,exchange,last_price` to narrow the response to just those p
 
 - `wsSubscribeUirId` is always `id` — explicit hint that clients should pass it in the `/ws` subscribe payload `{event:"subscribe", data:{instruments:[<id>], mode:"ltp"}}`.
 - `priceStatus` is `"live"` when `last_price > 0`, otherwise `"stale"`. The default behavior is to return all rows and tag stale ones; pass `?ltp_only=true` to filter them out.
-- `streamProvider` is the routing fact (which provider streams this instrument's ticks). Useful for filtering and badging — clients should NOT derive subscribe routing from it (the backend's `UniversalLtpService` picks the right provider per-instrument).
+- `streamProvider` is the routing fact (which provider streams this instrument's ticks) as a public brand name. Useful for filtering and badging — clients should NOT derive subscribe routing from it (the backend's `UniversalLtpService` picks the right provider per-instrument).
 
 ## LTP Hydration
 
