@@ -1,10 +1,11 @@
 /**
  * @file ws-provider-prefix.util.ts
  * @module shared
- * @description Parses WebSocket subscription identifiers with provider prefix syntax (Falcon:reliance, Vayu:26000, ...).
+ * @description Parses WebSocket subscription identifiers with provider prefix syntax
+ *              (Falcon:reliance, Vayu:26000, Atlas:AAPL, Drift:BTCUSDT, …).
  * @author BharatERP
  * @created 2026-04-28
- * @updated 2026-04-28
+ * @updated 2026-05-01
  */
 
 import {
@@ -29,10 +30,10 @@ export type ProviderPrefixed = {
  * Parse a WS subscription input for the `Provider:identifier` prefix syntax.
  *
  * Recognized prefixes (case-insensitive, via `normalizeProviderAlias`):
- *   - falcon|kite      → kite
- *   - vayu|vortex      → vortex
- *   - polygon|massive  → massive
- *   - binance          → binance
+ *   - falcon|kite              → kite
+ *   - vayu|vortex              → vortex
+ *   - atlas|massive|polygon    → massive
+ *   - drift|binance            → binance
  *
  * Splits on the FIRST colon only, so `Falcon:NSE:RELIANCE` parses as
  *   { provider: 'kite', identifier: 'NSE:RELIANCE' }

@@ -7,7 +7,10 @@
  *
  * Exports:
  *   - SearchService              — NestJS injectable service
- *   - SearchResultItem           — shape of one search result document
+ *   - SearchResultItem           — internal shape of one search result document (full)
+ *   - StreamProviderName         — internal provider name union (kite/vortex/massive/binance)
+ *   - PUBLIC_FIELD_ALLOWLIST     — fields safe to return to retail clients
+ *   - INTERNAL_ONLY_FIELDS       — fields gated behind ?include=internal + admin token
  *
  * Depends on:
  *   - MEILI_HOST_PRIMARY         — primary MeiliSearch server URL
@@ -24,6 +27,8 @@
  *   - Both Meili servers down → returns empty hits (graceful degrade, never throws)
  *   - LTP hydration down → results still return, last_price is null
  *   - Document primary key is `id` (universal_instruments.id as number)
+ *   - Meili docs still carry internal provider names (kiteToken, streamProvider:'kite'); the
+ *     controller layer projects them to public brand names before returning to clients
  *
  * Read order:
  *   1. MeiliClientPool  — 2-server failover pool with per-server circuit breaker
@@ -31,7 +36,7 @@
  *   3. SearchService    — main service: searchInstruments, hydrateQuotes, telemetry
  *
  * Author:      BharatERP
- * Last-updated: 2026-04-22
+ * Last-updated: 2026-05-01
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -39,6 +44,9 @@ import axios, { AxiosInstance } from 'axios';
 import Redis from 'ioredis';
 
 // ─── MeiliSearch document shape ───────────────────────────────────────────────
+
+/** Provider that streams live ticks for an instrument (matches InternalProviderName in trading-app). */
+export type StreamProviderName = 'kite' | 'vortex' | 'massive' | 'binance';
 
 export type SearchResultItem = {
   id: number;                  // universal_instruments.id
@@ -59,7 +67,72 @@ export type SearchResultItem = {
   kiteToken?: number;
   vortexToken?: number;
   vortexExchange?: string;
+  /** Massive symbol (e.g. "AAPL", "EURUSD"). String — Massive has no numeric tokens. */
+  massiveToken?: string;
+  /** Binance Spot symbol (e.g. "BTCUSDT"). String — Binance has no numeric tokens. */
+  binanceToken?: string;
+  /**
+   * Routing fact: which provider streams this instrument's live ticks.
+   * Precomputed by the indexer from `exchange` via EXCHANGE_TO_PROVIDER.
+   */
+  streamProvider?: StreamProviderName;
 };
+
+// ─── Field projection allow-lists ─────────────────────────────────────────────
+
+/**
+ * Fields that are safe to expose to **end-user clients** (retail traders).
+ * Every field a public `?fields=` param can request must appear here, plus the
+ * always-included anchors (id, canonicalSymbol, wsSubscribeUirId, last_price,
+ * priceStatus, streamProvider) which are appended unconditionally.
+ *
+ * Notably absent: kiteToken, vortexToken, vortexExchange, massiveToken,
+ * binanceToken — these are internal routing tokens that retail clients never
+ * need (everyone subscribes by UIR id) and that leak the provider stack.
+ */
+export const PUBLIC_FIELD_ALLOWLIST: readonly string[] = [
+  'symbol',
+  'name',
+  'exchange',
+  'segment',
+  'instrumentType',
+  'assetClass',
+  'optionType',
+  'expiry',
+  'strike',
+  'lotSize',
+  'tickSize',
+  'isDerivative',
+  'underlyingSymbol',
+] as const;
+
+/**
+ * Fields the controller adds to every public response unconditionally.
+ * Clients always need: a stable id, a human label (canonicalSymbol), the WS
+ * subscribe hint (wsSubscribeUirId = id), the live price data (last_price +
+ * priceStatus), and the public brand of the routing provider (streamProvider).
+ */
+export const PUBLIC_ALWAYS_INCLUDED: readonly string[] = [
+  'id',
+  'canonicalSymbol',
+  'wsSubscribeUirId',
+  'last_price',
+  'priceStatus',
+  'streamProvider',
+] as const;
+
+/**
+ * Internal token fields gated behind ?include=internal + admin auth.
+ * The admin dashboard uses these for the "VIA" badge + per-provider debugging.
+ */
+export const INTERNAL_ONLY_FIELDS: readonly string[] = [
+  'kiteToken',
+  'vortexToken',
+  'vortexExchange',
+  'massiveToken',
+  'binanceToken',
+  '_internalProvider', // synthetic: raw streamProvider value before brand mapping
+] as const;
 
 // ─── 2-server failover pool ───────────────────────────────────────────────────
 
@@ -156,6 +229,20 @@ export class SearchService {
 
   // ── Search ───────────────────────────────────────────────────────────────
 
+  /**
+   * Default `attributesToRetrieve` used when the controller doesn't pass a custom one.
+   * Pulls every field the indexer might write — internal token fields included, since
+   * the search service itself is provider-agnostic; the controller decides what to
+   * expose to a given response.
+   */
+  private static readonly DEFAULT_ATTRS_TO_RETRIEVE: readonly string[] = [
+    'id', 'canonicalSymbol', 'symbol', 'name', 'exchange', 'segment',
+    'instrumentType', 'assetClass', 'optionType', 'expiry', 'strike',
+    'lotSize', 'tickSize', 'isDerivative', 'underlyingSymbol',
+    'kiteToken', 'vortexToken', 'vortexExchange',
+    'massiveToken', 'binanceToken', 'streamProvider',
+  ];
+
   async searchInstruments(
     q: string,
     limit = 10,
@@ -166,27 +253,32 @@ export class SearchService {
       vortexExchange?: string;
       optionType?: string;
       assetClass?: string;
+      streamProvider?: StreamProviderName;
       isDerivative?: boolean;
       expiry_from?: string;
       expiry_to?: string;
       strike_min?: number | string;
       strike_max?: number | string;
     } = {},
+    /**
+     * Optional override for Meili's `attributesToRetrieve`. When the caller knows
+     * exactly which fields it'll project (e.g. via the public `?fields=` param),
+     * passing a narrower set here reduces Meili payload size + parse cost.
+     * Pass `undefined` to use the default (all known fields).
+     */
+    attributesToRetrieve?: readonly string[],
   ): Promise<SearchResultItem[]> {
     const index = process.env.MEILI_INDEX || 'instruments_v1';
-    const attributesToRetrieve = [
-      'id', 'canonicalSymbol', 'symbol', 'name', 'exchange', 'segment',
-      'instrumentType', 'assetClass', 'optionType', 'expiry', 'strike',
-      'lotSize', 'tickSize', 'isDerivative', 'underlyingSymbol',
-      'kiteToken', 'vortexToken', 'vortexExchange',
-    ];
+    const attrs = attributesToRetrieve && attributesToRetrieve.length > 0
+      ? Array.from(attributesToRetrieve)
+      : Array.from(SearchService.DEFAULT_ATTRS_TO_RETRIEVE);
     const filterExpr = this.buildFilter(filters);
 
     // Primary: all-words matching (precise, higher quality)
     const precise = await this.meili.search(index, {
       q,
       limit,
-      attributesToRetrieve,
+      attributesToRetrieve: attrs,
       filter: filterExpr,
       matchingStrategy: 'all',
     });
@@ -198,7 +290,7 @@ export class SearchService {
     const broad = await this.meili.search(index, {
       q,
       limit,
-      attributesToRetrieve,
+      attributesToRetrieve: attrs,
       filter: filterExpr,
       matchingStrategy: 'last',
     });
@@ -356,6 +448,7 @@ export class SearchService {
     if (filters.vortexExchange) parts.push(`vortexExchange = ${JSON.stringify(filters.vortexExchange)}`);
     if (filters.optionType) parts.push(`optionType = ${JSON.stringify(filters.optionType)}`);
     if (filters.assetClass) parts.push(`assetClass = ${JSON.stringify(filters.assetClass)}`);
+    if (filters.streamProvider) parts.push(`streamProvider = ${JSON.stringify(filters.streamProvider)}`);
     if (filters.isDerivative !== undefined) parts.push(`isDerivative = ${!!filters.isDerivative}`);
 
     if (filters.expiry_from) parts.push(`expiry >= ${JSON.stringify(filters.expiry_from)}`);

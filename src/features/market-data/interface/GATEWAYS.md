@@ -46,8 +46,8 @@ Both surfaces accept a per-instrument prefix that pins the subscription to a spe
 |---|---|---|
 | `Falcon:reliance` / `Kite:reliance` | RELIANCE in Kite mappings (exact underlying or canonical) | Kite ticker only |
 | `Vayu:26000` / `Vortex:NSE_EQ-26000` | Vortex token (numeric or pair-form) | Vortex ticker only |
-| `Massive:AAPL` / `Polygon:AAPL` | Massive symbol | Massive ticker only |
-| `Binance:BTCUSDT` | Binance Spot symbol | Binance combined-stream only |
+| `Atlas:AAPL` / `Massive:AAPL` / `Polygon:AAPL` | Massive symbol | Massive ticker only |
+| `Drift:BTCUSDT` / `Binance:BTCUSDT` | Binance Spot symbol | Binance combined-stream only |
 
 **Resolution rules** (provider-scoped, O(1)):
 1. Numeric / pair-form input → direct `provider:token` key in `InstrumentRegistryService`.

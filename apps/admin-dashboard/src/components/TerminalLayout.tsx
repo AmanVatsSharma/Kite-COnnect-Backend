@@ -30,6 +30,7 @@ const navItems = [
   { to: '/audit', label: 'Audit', abbr: 'AUD' },
   { to: '/falcon', label: 'Falcon', abbr: 'FAL' },
   { to: '/search', label: 'Search', abbr: 'SRCH' },
+  { to: '/search-admin', label: 'Search Admin', abbr: 'SADM' },
   { to: '/auth', label: 'Auth', abbr: 'AUTH' },
   { to: '/console', label: 'Console', abbr: 'CON' },
   { to: '/settings', label: 'Settings', abbr: 'SET' },
