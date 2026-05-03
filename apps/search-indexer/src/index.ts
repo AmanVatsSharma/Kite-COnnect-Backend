@@ -444,7 +444,7 @@ async function backfill(): Promise<void> {
 
   const total: number = await withPg(async (pg) => {
     const r = await pg.query(
-      `SELECT COUNT(*)::int AS n FROM universal_instruments WHERE is_active = true ${filterClause}`,
+      `SELECT COUNT(*)::int AS n FROM universal_instruments u WHERE u.is_active = true ${filterClause}`,
     );
     return r.rows[0].n as number;
   });
