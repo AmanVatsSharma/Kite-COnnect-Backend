@@ -1,0 +1,43 @@
+# docker-compose.search-override.yml
+#
+# Overlay for running only the search stack (meilisearch + search-api + search-indexer)
+# when the trading-app and Redis are NOT Docker services (e.g. running via PM2 + system Redis).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.search-override.yml \
+#     up -d meilisearch search-indexer search-api
+#
+# Or via the deploy script:
+#   ./scripts/deploy-search.sh   (already uses this overlay)
+#
+# What this changes vs docker-compose.yml base:
+#   - search-api: removes depends_on trading-app/redis; routes to host via host.docker.internal
+#   - search-indexer: routes DB connection to external Postgres via host.docker.internal
+#   - Both services get extra_hosts so host.docker.internal resolves on Linux
+
+services:
+  search-api:
+    # Remove depends_on for trading-app and redis — they are NOT Docker services.
+    # Only meilisearch needs to be up first.
+    depends_on:
+      meilisearch:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # trading-app runs via PM2 on the host, not in Docker
+      - HYDRATION_BASE_URL=http://host.docker.internal:3000
+      # Redis runs as a system service on the host, not in Docker
+      - REDIS_HOST=host.docker.internal
+
+  search-indexer:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Override indexer DB to use external Postgres (from .env INDEXER_DB_* vars)
+      # These are read from .env — set INDEXER_DB_HOST=<real postgres host> there
+      - DB_HOST=${INDEXER_DB_HOST}
+      - DB_PORT=${INDEXER_DB_PORT:-5432}
+      - DB_USERNAME=${INDEXER_DB_USER}
+      - DB_PASSWORD=${INDEXER_DB_PASSWORD}
+      - DB_DATABASE=${INDEXER_DB_NAME}

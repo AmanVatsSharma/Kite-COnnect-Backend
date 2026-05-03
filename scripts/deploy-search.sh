@@ -56,7 +56,7 @@ ensure_meili_key() {
 }
 
 show_compose_ps() {
-  echo ""; info "Current container status:"; docker compose ps; echo ""
+  echo ""; info "Current container status:"; $COMPOSE_CMD ps; echo ""
 }
 
 wait_for_http() {
@@ -92,9 +92,16 @@ if [ ! -f docker-compose.yml ]; then
   err "docker-compose.yml not found. Run from project root"; exit 1
 fi
 
+# Use the search override file when present (hybrid PM2 + Docker deployment)
+COMPOSE_CMD="docker compose"
+if [ -f docker-compose.search-override.yml ]; then
+  COMPOSE_CMD="docker compose -f docker-compose.yml -f docker-compose.search-override.yml"
+  ok "Using docker-compose.search-override.yml (hybrid mode)"
+fi
+
 # Check host port usage (allow if it's our search-api service)
 if port_in_use 3002; then
-  if docker compose ps search-api 2>/dev/null | grep -q "0.0.0.0:3002->3000"; then
+  if $COMPOSE_CMD ps search-api 2>/dev/null | grep -q "0.0.0.0:3002->3000"; then
     ok "Host port 3002 is in use by search-api (expected)"
   else
     err "Host port 3002 is already in use by another process. Free it or change mapping in docker-compose.yml"
@@ -117,22 +124,22 @@ fi
 ensure_meili_key
 
 info "Building images (meilisearch, search-indexer, search-api) ..."
-docker compose build meilisearch search-indexer search-api
+$COMPOSE_CMD build meilisearch search-indexer search-api
 ok "Images built"
 
 # -----------------------------------------------------------------------------
 # Bring up services
 # -----------------------------------------------------------------------------
 info "Starting Meilisearch ..."
-docker compose up -d meilisearch
+$COMPOSE_CMD up -d meilisearch
 ok "Meilisearch started"
 
 info "Starting Search Indexer (backfill-and-watch) ..."
-docker compose up -d search-indexer
+$COMPOSE_CMD up -d search-indexer
 ok "Search Indexer started"
 
 info "Starting Search API ..."
-docker compose up -d search-api
+$COMPOSE_CMD up -d search-api
 ok "Search API started"
 
 show_compose_ps
@@ -143,15 +150,15 @@ show_compose_ps
 wait_for_http http://localhost:3002/api/health 30 2
 
 info "Checking Meilisearch health from inside search-api container ..."
-if ! docker compose exec -T search-api sh -lc "curl -fsS http://meilisearch:7700/health >/dev/null"; then
+if ! $COMPOSE_CMD exec -T search-api sh -lc "curl -fsS http://meilisearch:7700/health >/dev/null"; then
   err "Meilisearch health failed from search-api"
-  docker compose logs --tail 200 search-api meilisearch | sed 's/^/  /'
+  $COMPOSE_CMD logs --tail 200 search-api meilisearch | sed 's/^/  /'
   exit 1
 fi
 ok "Meilisearch is healthy"
 
 info "Verifying index presence (instruments_v1) ..."
-if ! docker compose exec -T trading-search-api sh -lc "curl -fsS -H 'Authorization: Bearer '"$(printenv MEILI_MASTER_KEY || true)" http://meilisearch:7700/indexes | grep -q instruments_v1"; then
+if ! $COMPOSE_CMD exec -T search-api sh -lc "curl -fsS -H 'Authorization: Bearer \${MEILI_MASTER_KEY}' http://meilisearch:7700/indexes | grep -q instruments_v1"; then
   info "Index not visible yet; the indexer may still be backfilling. This is OK."
 fi
 
