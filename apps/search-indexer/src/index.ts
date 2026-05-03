@@ -95,6 +95,80 @@ const EXCHANGE_TO_PROVIDER: Readonly<Record<string, StreamProviderName>> = {
   BINANCE: 'binance',
 };
 
+// ─── Crypto full-name lookup ─────────────────────────────────────────────────
+// Maps base coin (first part of BTCUSDT → BTC) to its human-readable full name.
+// Enables broker-style search: "bitcoin" → BTCUSDT, "ethereum" → ETHUSDT.
+// The name is injected into searchKeywords so relevance ranking works naturally.
+
+const CRYPTO_BASE_NAMES: Record<string, string> = {
+  BTC: 'Bitcoin',
+  ETH: 'Ethereum',
+  BNB: 'BNB Binance Coin',
+  SOL: 'Solana',
+  ADA: 'Cardano',
+  XRP: 'Ripple',
+  DOGE: 'Dogecoin',
+  DOT: 'Polkadot',
+  MATIC: 'Polygon Matic',
+  AVAX: 'Avalanche',
+  LINK: 'Chainlink',
+  LTC: 'Litecoin',
+  UNI: 'Uniswap',
+  ATOM: 'Cosmos',
+  TRX: 'TRON',
+  SHIB: 'Shiba Inu',
+  FIL: 'Filecoin',
+  NEAR: 'NEAR Protocol',
+  APT: 'Aptos',
+  ARB: 'Arbitrum',
+  OP: 'Optimism',
+  SUI: 'Sui',
+  ICP: 'Internet Computer',
+  VET: 'VeChain',
+  ALGO: 'Algorand',
+  HBAR: 'Hedera',
+  GRT: 'The Graph',
+  AAVE: 'Aave',
+  SAND: 'The Sandbox',
+  MANA: 'Decentraland',
+  CRO: 'Cronos',
+  FTM: 'Fantom',
+  FLOW: 'Flow',
+  EGLD: 'MultiversX Elrond',
+  THETA: 'Theta Network',
+  EOS: 'EOS',
+  XLM: 'Stellar Lumens',
+  XMR: 'Monero',
+  CAKE: 'PancakeSwap',
+  ENS: 'Ethereum Name Service',
+  LDO: 'Lido DAO',
+  MKR: 'Maker',
+  SNX: 'Synthetix',
+  CRV: 'Curve Finance',
+  COMP: 'Compound',
+  YFI: 'Yearn Finance',
+  SUSHI: 'SushiSwap',
+  ZEC: 'Zcash',
+  DASH: 'Dash',
+  NEO: 'NEO',
+  IOTA: 'IOTA',
+  BCH: 'Bitcoin Cash',
+  ETC: 'Ethereum Classic',
+  BSV: 'Bitcoin SV',
+};
+
+/** Extract the base coin from a Binance symbol like BTCUSDT → BTC, ETHBTC → ETH */
+function extractCoinBase(symbol: string): string {
+  // Common quote assets — strip the longest matching suffix
+  const quotes = ['USDT', 'USDC', 'BUSD', 'TUSD', 'FDUSD', 'BTC', 'ETH', 'BNB'];
+  for (const q of quotes) {
+    if (symbol.endsWith(q) && symbol.length > q.length) {
+      return symbol.slice(0, symbol.length - q.length);
+    }
+  }
+  return symbol;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function env(key: string, def?: string): string | undefined {
@@ -183,7 +257,22 @@ function toDoc(r: UniversalRow): MeiliDoc {
     massiveToken,
     binanceToken,
     streamProvider,
-    searchKeywords: [symbol, r.name].filter(Boolean),
+    searchKeywords: (() => {
+      const kw: string[] = [symbol, r.name].filter(Boolean) as string[];
+      // For crypto instruments inject the coin's full human name so broker-style
+      // queries like "bitcoin" resolve to BTCUSDT without relying on synonyms.
+      if (r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto') {
+        const base = extractCoinBase(symbol);
+        const fullName = CRYPTO_BASE_NAMES[base];
+        if (fullName) kw.push(fullName);
+        // Also push quote pairs like "BTC/USDT" for slash-style queries
+        if (symbol.length > 4 && (symbol.endsWith('USDT') || symbol.endsWith('USDC') || symbol.endsWith('BTC'))) {
+          const q = symbol.slice(-4);
+          kw.push(`${base}/${q}`);
+        }
+      }
+      return kw;
+    })(),
   };
 }
 
@@ -285,21 +374,8 @@ async function applySettings(meiliBase: string, apiKey: string, index: string): 
         BAJAJ_AUTO: ['BAJAJ AUTO'],
         NTPC: ['NTPC LIMITED'],
         GRASIM: ['GRASIM INDUSTRIES'],
-        // ── Crypto / Binance instruments ────────────────────────────────────
-        BTCUSDT: ['BITCOIN', 'BTC', 'BTC/USDT'],
-        ETHUSDT: ['ETHEREUM', 'ETH', 'ETH/USDT', 'ETHER'],
-        BNBUSDT: ['BNB', 'BINANCE COIN', 'BNB/USDT'],
-        SOLUSDT: ['SOLANA', 'SOL', 'SOL/USDT'],
-        ADAUSDT: ['CARDANO', 'ADA', 'ADA/USDT'],
-        XRPUSDT: ['RIPPLE', 'XRP', 'XRP/USDT'],
-        DOGEUSDT: ['DOGECOIN', 'DOGE', 'DOGE/USDT'],
-        DOTUSDT: ['POLKADOT', 'DOT', 'DOT/USDT'],
-        MATICUSDT: ['POLYGON', 'MATIC', 'MATIC/USDT'],
-        AVAXUSDT: ['AVALANCHE', 'AVAX', 'AVAX/USDT'],
-        LINKUSDT: ['CHAINLINK', 'LINK', 'LINK/USDT'],
-        LTCUSDT: ['LITECOIN', 'LTC', 'LTC/USDT'],
-        UNIUSDT: ['UNISWAP', 'UNI', 'UNI/USDT'],
-        ATOMUSDT: ['COSMOS', 'ATOM', 'ATOM/USDT'],
+        // Crypto instruments use CRYPTO_BASE_NAMES injected into searchKeywords (bidirectional,
+        // ranking-aware). Synonyms here would only be one-directional and are not needed.
       },
     },
     { headers: h },
@@ -363,22 +439,25 @@ async function backfill(): Promise<void> {
 
   await applySettings(meiliBase, meiliKey, index);
 
+  const exchangeFilter = env('INDEXER_EXCHANGE_FILTER');
+  const filterClause = exchangeFilter ? `AND u.exchange = '${exchangeFilter.toUpperCase()}'` : '';
+
   const total: number = await withPg(async (pg) => {
     const r = await pg.query(
-      'SELECT COUNT(*)::int AS n FROM universal_instruments WHERE is_active = true',
+      `SELECT COUNT(*)::int AS n FROM universal_instruments WHERE is_active = true ${filterClause}`,
     );
     return r.rows[0].n as number;
   });
 
   // eslint-disable-next-line no-console
-  console.log(`[indexer] backfill start: total=${total}, batchSize=${batchSize}`);
+  console.log(`[indexer] backfill start: total=${total}, batchSize=${batchSize}${exchangeFilter ? `, exchange=${exchangeFilter}` : ''}`);
 
   let offset = 0;
   while (offset < total) {
     const rows: UniversalRow[] = await withPg(async (pg) => {
       const r = await pg.query(
         `SELECT ${SELECT_COLS} ${FROM_JOIN}
-         WHERE u.is_active = true
+         WHERE u.is_active = true ${filterClause}
          GROUP BY u.id
          ORDER BY u.id ASC
          OFFSET $1 LIMIT $2`,
