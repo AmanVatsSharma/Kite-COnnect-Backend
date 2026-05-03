@@ -27,7 +27,11 @@ services:
     environment:
       # trading-app runs via PM2 on the host — override the default docker service URL
       - HYDRATION_BASE_URL=http://host.docker.internal:3000
-      # Redis runs as a system service on the host — use SEARCH_REDIS_HOST env var
+      # Redis runs as a system service on the host.
+      # Must set REDIS_HOST directly here because the base file interpolates
+      # ${SEARCH_REDIS_HOST:-redis} at compose-up time from the host env, not from
+      # this overlay's env block. Setting REDIS_HOST in the overlay wins via merge.
+      - REDIS_HOST=host.docker.internal
       - SEARCH_REDIS_HOST=host.docker.internal
 
   search-indexer:
