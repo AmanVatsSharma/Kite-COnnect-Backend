@@ -11,7 +11,6 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MassiveRestClient } from './infra/massive-rest.client';
-import { MassiveWebSocketClient } from './infra/massive-websocket.client';
 import { MassiveProviderService } from './infra/massive-provider.service';
 import { MassiveInstrument } from './domain/massive-instrument.entity';
 import { MassiveInstrumentSyncService } from './application/massive-instrument-sync.service';
@@ -29,7 +28,7 @@ import { UniversalInstrument } from '@features/market-data/domain/universal-inst
     forwardRef(() => MarketDataModule),
   ],
   controllers: [AdminMassiveController],
-  providers: [MassiveRestClient, MassiveWebSocketClient, MassiveProviderService, MassiveInstrumentSyncService],
+  providers: [MassiveRestClient, MassiveProviderService, MassiveInstrumentSyncService],
   exports: [MassiveProviderService, MassiveInstrumentSyncService],
 })
 export class MassiveModule {}

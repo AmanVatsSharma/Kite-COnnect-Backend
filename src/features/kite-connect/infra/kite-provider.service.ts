@@ -4,7 +4,7 @@
  * @description Kite Connect HTTP + ticker provider implementing MarketDataProvider; ticker wrapped for stream mode parity with Vortex (ohlcv → quote).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-14 — multi-shard KiteShardedTicker, KITE_WS_MAX_SHARDS, getSubscriptionLimit/getShardStatus, exponential-backoff reconnect, resolveExchanges(), Redis pub/sub events, kite reconnect metrics
+ * @updated 2026-04-21 — fix: persist currentApiKey in initialize() before early return; appConfig fallback in updateAccessToken, KITE_WS_MAX_SHARDS, getSubscriptionLimit/getShardStatus, exponential-backoff reconnect, resolveExchanges(), Redis pub/sub events, kite reconnect metrics
  *
  * Notes:
  * - refreshSession / isClientInitialized support scheduled Falcon instrument sync.
@@ -26,6 +26,7 @@ import {
 } from '@features/market-data/infra/market-data.provider';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.entity';
+import { KiteSession } from '@features/kite-connect/domain/kite-session.entity';
 import { KiteConnect } from 'kiteconnect';
 import { KiteShardedTicker, KiteShardStatus } from '@features/kite-connect/infra/kite-sharded-ticker';
 
@@ -74,6 +75,8 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     private appConfig: AppConfigService,
     @InjectRepository(FalconInstrument)
     private falconInstrumentRepo: Repository<FalconInstrument>,
+    @InjectRepository(KiteSession)
+    private kiteSessionRepo: Repository<KiteSession>,
   ) {}
 
   async onModuleInit() {
@@ -91,7 +94,7 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         const dbApiKey = await this.appConfig.get(KiteProviderService.REDIS_API_KEY);
         if (dbApiKey) apiKey = dbApiKey;
       } catch {}
-      // Prefer dynamic token from Redis, then env var set by OAuth
+      // Prefer dynamic token from Redis, then env var set by OAuth, then DB session
       let accessToken = this.configService.get('KITE_ACCESS_TOKEN');
       if (!accessToken && this.redisService?.isRedisAvailable?.()) {
         try {
@@ -102,6 +105,23 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
             this.logger.log('[Kite] Loaded access token from Redis cache');
         } catch {}
       }
+      // Last-resort: read from kite_sessions table (survives restarts when Redis is unavailable)
+      if (!accessToken) {
+        try {
+          const session = await this.kiteSessionRepo.findOne({
+            where: { is_active: true },
+            order: { created_at: 'DESC' },
+          });
+          if (session?.access_token) {
+            accessToken = session.access_token;
+            this.logger.log('[Kite] Loaded access token from kite_sessions DB table');
+          }
+        } catch {}
+      }
+
+      // Persist the API key even when access token is absent — updateAccessToken()
+      // needs it later when the OAuth callback fires after a server restart.
+      if (apiKey) this.currentApiKey = apiKey;
 
       if (!apiKey || !accessToken) {
         this.logger.warn(
@@ -132,8 +152,11 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     try {
       this.currentAccessToken = accessToken;
       if (!this.kite) {
-        const apiKey =
-          this.currentApiKey || this.configService.get('KITE_API_KEY');
+        let apiKey = this.currentApiKey || this.configService.get('KITE_API_KEY');
+        // Last-resort: API key was saved to DB after initialize() ran (e.g. via admin UI)
+        if (!apiKey) {
+          apiKey = await this.appConfig.get(KiteProviderService.REDIS_API_KEY).catch(() => null);
+        }
         if (!apiKey) throw new Error('Kite API key not configured');
         this.currentApiKey = apiKey;
         this.kite = new KiteConnect({

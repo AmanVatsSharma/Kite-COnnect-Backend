@@ -1,13 +1,13 @@
 /**
  * @file massive-provider.service.ts
  * @module massive
- * @description Massive (formerly Polygon.io) market data provider — implements MarketDataProvider
- *   for US stocks, forex, crypto, indices, and options.
+ * @description Massive market data provider — implements MarketDataProvider for US stocks,
+ *   forex, and crypto via three parallel WebSocket connections (one per asset class).
  *   Credentials: admin panel (app_configs table) preferred, MASSIVE_API_KEY env var as fallback.
- *   Realtime: MASSIVE_REALTIME=true (default: delayed).
+ *   Always uses realtime feed (personal plan includes realtime WS; delayed requires upgrade).
  * @author BharatERP
  * @created 2026-04-18
- * @updated 2026-04-19
+ * @updated 2026-04-27
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -18,26 +18,25 @@ import {
   TickerLike,
 } from '@features/market-data/infra/market-data.provider';
 import { MassiveRestClient } from './massive-rest.client';
-import { MassiveWebSocketClient } from './massive-websocket.client';
-import { MassiveAssetClass } from '../massive.constants';
+import { MassiveMultiStreamClient } from './massive-multi-stream.client';
 import { AppConfigService } from '@infra/app-config/app-config.service';
 
 @Injectable()
 export class MassiveProviderService implements OnModuleInit, MarketDataProvider {
   readonly providerName = 'massive' as const;
   private readonly logger = new Logger(MassiveProviderService.name);
-  private ticker: MassiveWebSocketClient | undefined;
+  private ticker: MassiveMultiStreamClient | undefined;
   private initialized = false;
+
+  // Permanent composite WS facade — created once, reused across credential reloads.
+  private readonly multiStream = new MassiveMultiStreamClient();
 
   // DB-persisted overrides (win over env vars)
   private apiKeyOverride: string | null = null;
-  private realtimeOverride: boolean | null = null;
-  private assetClassOverride: MassiveAssetClass | null = null;
 
   constructor(
     private readonly config: ConfigService,
     private readonly rest: MassiveRestClient,
-    private readonly ws: MassiveWebSocketClient,
     private readonly appConfig: AppConfigService,
   ) {}
 
@@ -47,14 +46,8 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
   }
 
   private async loadConfigOverrides(): Promise<void> {
-    const [apiKey, realtime, assetClass] = await Promise.all([
-      this.appConfig.get('config:massive:api_key').catch(() => null),
-      this.appConfig.get('config:massive:realtime').catch(() => null),
-      this.appConfig.get('config:massive:asset_class').catch(() => null),
-    ]);
+    const apiKey = await this.appConfig.get('config:massive:api_key').catch(() => null);
     if (apiKey) this.apiKeyOverride = apiKey;
-    if (realtime != null) this.realtimeOverride = realtime === 'true';
-    if (assetClass) this.assetClassOverride = assetClass as MassiveAssetClass;
   }
 
   async initialize(): Promise<void> {
@@ -66,23 +59,16 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
       this.initialized = false;
       return;
     }
-    const realtime =
-      this.realtimeOverride ?? (this.config.get<string>('MASSIVE_REALTIME') === 'true');
-    const assetClass = (
-      this.assetClassOverride ??
-      this.config.get<string>('MASSIVE_WS_ASSET_CLASS') ??
-      'stocks'
-    ) as MassiveAssetClass;
 
-    const wasConnected = this.ws.isWsConnected();
+    const wasConnected = this.multiStream.isWsConnected();
     this.rest.init(apiKey);
-    this.ws.init(apiKey, realtime, assetClass);
+    this.multiStream.init(apiKey, this.rest);
     this.initialized = true;
-    this.logger.log(`[Massive] Provider initialized (realtime=${realtime}, assetClass=${assetClass})`);
-    // Reconnect WS if it was previously connected (credential hot-reload)
+    this.logger.log('[Massive] Provider initialized (realtime=true, streams=stocks+forex+crypto)');
+    // Reconnect all streams when credentials are hot-reloaded
     if (wasConnected) {
-      try { this.ws.disconnect?.(); } catch {}
-      setTimeout(() => { try { this.ws.connect?.(); } catch {} }, 100);
+      this.multiStream.disconnect();
+      setTimeout(() => this.multiStream.connect(), 100);
     }
   }
 
@@ -95,14 +81,8 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
       this.apiKeyOverride = params.apiKey.trim();
       await this.appConfig.set('config:massive:api_key', this.apiKeyOverride);
     }
-    if (params.realtime != null) {
-      this.realtimeOverride = params.realtime;
-      await this.appConfig.set('config:massive:realtime', String(params.realtime));
-    }
-    if (params.assetClass?.trim()) {
-      this.assetClassOverride = params.assetClass.trim() as MassiveAssetClass;
-      await this.appConfig.set('config:massive:asset_class', this.assetClassOverride);
-    }
+    // realtime and assetClass params are accepted for API compatibility but ignored —
+    // the multi-stream client always uses realtime=true and streams all three asset classes.
     await this.initialize();
   }
 
@@ -110,6 +90,7 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
     apiKey: { masked: string | null; source: 'db' | 'env' | 'none'; configured: boolean };
     realtime: boolean;
     assetClass: string;
+    streams: Array<{ name: string; isConnected: boolean; subscribedCount: number }>;
     initialized: boolean;
     degraded: boolean;
   }> {
@@ -121,11 +102,9 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
         source: this.apiKeyOverride ? 'db' : (envKey ? 'env' : 'none'),
         configured: !!effectiveKey,
       },
-      realtime: this.realtimeOverride ?? (this.config.get<string>('MASSIVE_REALTIME') === 'true'),
-      assetClass:
-        this.assetClassOverride ??
-        this.config.get<string>('MASSIVE_WS_ASSET_CLASS') ??
-        'stocks',
+      realtime: true,
+      assetClass: 'stocks+forex+crypto',
+      streams: this.multiStream.getClientStatuses(),
       initialized: this.initialized,
       degraded: this.isDegraded(),
     };
@@ -291,11 +270,11 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
 
   initializeTicker(): TickerLike {
     if (this.ticker) return this.ticker;
-    if (!this.ws.isReady()) {
+    if (!this.multiStream.isReady()) {
       this.logger.warn('[Massive] initializeTicker: API key not set — ticker unavailable');
       return undefined as any;
     }
-    this.ticker = this.ws;
+    this.ticker = this.multiStream;
     return this.ticker;
   }
 
@@ -308,25 +287,25 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
     return 100_000;
   }
 
-  /** Massive uses a single WS connection per asset class — report as one shard. */
+  /** Reports one shard per asset-class stream (stocks / forex / crypto). */
   getShardStatus(): Array<{
     index: number;
+    name?: string;
     isConnected: boolean;
     subscribedCount: number;
     reconnectAttempts: number;
     reconnectCount: number;
     disableReconnect: boolean;
   }> {
-    return [
-      {
-        index: 0,
-        isConnected: this.ws.isWsConnected(),
-        subscribedCount: this.ws.getSubscribedCount(),
-        reconnectAttempts: 0,
-        reconnectCount: 0,
-        disableReconnect: false,
-      },
-    ];
+    return this.multiStream.getClientStatuses().map((s, i) => ({
+      index: i,
+      name: s.name,
+      isConnected: s.isConnected,
+      subscribedCount: s.subscribedCount,
+      reconnectAttempts: 0,
+      reconnectCount: 0,
+      disableReconnect: false,
+    }));
   }
 
   isDegraded(): boolean {

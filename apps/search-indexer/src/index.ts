@@ -2,11 +2,12 @@
  * @file apps/search-indexer/src/index.ts
  * @module search-indexer
  * @description Batch and incremental sync of universal_instruments into MeiliSearch.
- *              Joins instrument_mappings to embed kite/vortex provider tokens per document.
+ *              Joins instrument_mappings to embed kite/vortex/massive/binance provider tokens
+ *              per document and precomputes streamProvider via the canonical exchange→provider map.
  *              Supports modes: backfill | incremental | backfill-and-watch | synonyms-apply.
  * @author BharatERP
  * @created 2025-12-01
- * @updated 2026-04-22
+ * @updated 2026-04-27
  */
 
 import axios from 'axios';
@@ -31,9 +32,14 @@ type UniversalRow = {
   is_active: boolean;
   asset_class: string;
   updated_at: string;
-  kite_token: string | null;   // pivoted from instrument_mappings (provider='kite')
-  vortex_token: string | null; // pivoted from instrument_mappings (provider='vortex')
+  kite_token: string | null;    // pivoted from instrument_mappings (provider='kite', provider_token)
+  vortex_token: string | null;  // pivoted from instrument_mappings (provider='vortex', provider_token like "NSE_EQ-22")
+  massive_token: string | null; // pivoted from instrument_mappings (provider='massive', symbol string e.g. "AAPL")
+  binance_token: string | null; // pivoted from instrument_mappings (provider='binance', symbol string e.g. "BTCUSDT")
 };
+
+/** Internal provider name a frontend can display / filter by. Mirrors InternalProviderName in src/. */
+type StreamProviderName = 'kite' | 'vortex' | 'massive' | 'binance';
 
 type MeiliDoc = {
   id: number;
@@ -55,7 +61,38 @@ type MeiliDoc = {
   underlyingSymbol?: string;
   kiteToken?: number;
   vortexToken?: number;
+  /** Massive symbol (e.g. "AAPL", "EURUSD"). Strings — Massive has no numeric instrument tokens. */
+  massiveToken?: string;
+  /** Binance Spot symbol (e.g. "BTCUSDT"). Strings — Binance has no numeric instrument tokens. */
+  binanceToken?: string;
+  /**
+   * Which provider streams this instrument (canonical routing fact derived from `exchange`).
+   * Lets the search-api / frontend show "Live via Binance" without an extra registry lookup,
+   * and lets clients filter `?streamProvider=binance` for crypto-only views.
+   */
+  streamProvider?: StreamProviderName;
   searchKeywords: string[];
+};
+
+/**
+ * Canonical exchange → streaming provider map. **Mirror of**
+ * `src/shared/utils/exchange-to-provider.util.ts` — duplicated here because the
+ * search-indexer is a separate Docker container with no `src/` import path.
+ * Keep these two literals in sync when adding new providers/exchanges.
+ */
+const EXCHANGE_TO_PROVIDER: Readonly<Record<string, StreamProviderName>> = {
+  NSE: 'kite',
+  BSE: 'kite',
+  NFO: 'kite',
+  BFO: 'kite',
+  MCX: 'kite',
+  CDS: 'kite',
+  BCD: 'kite',
+  US: 'massive',
+  FX: 'massive',
+  CRYPTO: 'massive',
+  IDX: 'massive',
+  BINANCE: 'binance',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -98,6 +135,31 @@ function toDoc(r: UniversalRow): MeiliDoc {
   const underlyingSymbol = isDerivative ? (symbol.match(/^[A-Z]+/)?.[0] ?? undefined) : undefined;
   const vortexExchange = toVortexExchange(r.exchange, r.segment, r.instrument_type);
 
+  // Vortex provider_token is "NSE_EQ-22" — split on last '-' and take the numeric tail for vortexToken.
+  // (Older indexer code just pulled m.instrument_token; we now share the same string-pivot column the
+  // other providers use, so do the parse here.)
+  let vortexToken: number | undefined;
+  if (r.vortex_token) {
+    const dash = r.vortex_token.lastIndexOf('-');
+    const tail = dash >= 0 ? r.vortex_token.slice(dash + 1) : r.vortex_token;
+    const n = Number(tail);
+    if (Number.isFinite(n)) vortexToken = n;
+  }
+  const kiteToken = r.kite_token ? Number(r.kite_token) : undefined;
+  const massiveToken = r.massive_token ? r.massive_token.toUpperCase() : undefined;
+  const binanceToken = r.binance_token ? r.binance_token.toUpperCase() : undefined;
+
+  // Routing: prefer the exchange→provider table (canonical fact). Fall back to whichever
+  // mapping exists when an exchange isn't in the table (defensive — shouldn't happen for
+  // active rows, but keeps us from emitting docs with an undefined streamProvider).
+  let streamProvider: StreamProviderName | undefined = EXCHANGE_TO_PROVIDER[r.exchange];
+  if (!streamProvider) {
+    if (vortexToken !== undefined) streamProvider = 'vortex';
+    else if (kiteToken !== undefined) streamProvider = 'kite';
+    else if (binanceToken) streamProvider = 'binance';
+    else if (massiveToken) streamProvider = 'massive';
+  }
+
   return {
     id: Number(r.id),
     canonicalSymbol: r.canonical_symbol,
@@ -116,8 +178,11 @@ function toDoc(r: UniversalRow): MeiliDoc {
     isDerivative,
     vortexExchange,
     underlyingSymbol,
-    kiteToken: r.kite_token ? Number(r.kite_token) : undefined,
-    vortexToken: r.vortex_token ? Number(r.vortex_token) : undefined,
+    kiteToken,
+    vortexToken,
+    massiveToken,
+    binanceToken,
+    streamProvider,
     searchKeywords: [symbol, r.name].filter(Boolean),
   };
 }
@@ -148,6 +213,8 @@ async function applySettings(meiliBase: string, apiKey: string, index: string): 
         'strike',
         'vortexExchange',
         'lotSize',
+        // New routing/coverage facets — let clients filter "all binance pairs", "all massive crypto", etc.
+        'streamProvider',
       ],
       sortableAttributes: ['symbol', 'name', 'expiry', 'strike'],
       rankingRules: [
@@ -242,8 +309,10 @@ const SELECT_COLS = `
   u.is_active,
   u.asset_class,
   u.updated_at::text,
-  MAX(CASE WHEN m.provider = 'kite'   THEN m.provider_token ELSE NULL END) AS kite_token,
-  MAX(CASE WHEN m.provider = 'vortex' THEN m.provider_token ELSE NULL END) AS vortex_token
+  MAX(CASE WHEN m.provider = 'kite'    THEN m.provider_token ELSE NULL END) AS kite_token,
+  MAX(CASE WHEN m.provider = 'vortex'  THEN m.provider_token ELSE NULL END) AS vortex_token,
+  MAX(CASE WHEN m.provider = 'massive' THEN m.provider_token ELSE NULL END) AS massive_token,
+  MAX(CASE WHEN m.provider = 'binance' THEN m.provider_token ELSE NULL END) AS binance_token
 `;
 
 const FROM_JOIN = `

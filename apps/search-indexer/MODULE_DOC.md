@@ -26,16 +26,20 @@ One-shot / watch-mode indexer that syncs the `universal_instruments` + `instrume
 SELECT u.id, u.canonical_symbol, u.symbol, u.name, u.exchange, u.segment,
        u.instrument_type, u.asset_class, u.option_type, u.expiry, u.strike,
        u.lot_size, u.tick_size, u.is_derivative, u.underlying,
-       MAX(CASE WHEN m.provider = 'kite'   THEN m.instrument_token END) AS kite_token,
-       MAX(CASE WHEN m.provider = 'vortex' THEN m.instrument_token END) AS vortex_token,
-       MAX(CASE WHEN m.provider = 'vortex' THEN m.provider_token  END) AS vortex_provider_token
+       MAX(CASE WHEN m.provider = 'kite'    THEN m.instrument_token END) AS kite_token,
+       MAX(CASE WHEN m.provider = 'vortex'  THEN m.instrument_token END) AS vortex_token,
+       MAX(CASE WHEN m.provider = 'vortex'  THEN m.provider_token   END) AS vortex_provider_token,
+       MAX(CASE WHEN m.provider = 'massive' THEN m.provider_token   END) AS massive_token,
+       MAX(CASE WHEN m.provider = 'binance' THEN m.provider_token   END) AS binance_token
 FROM universal_instruments u
 LEFT JOIN instrument_mappings m ON m.uir_id = u.id
 WHERE u.is_active = true
 GROUP BY u.id
 ```
 
-The `vortex_provider_token` (format `"NSE_EQ-22"`) is split by the indexer into `vortexExchange` and `vortexToken` in the MeiliSearch document.
+The `vortex_provider_token` (format `"NSE_EQ-22"`) is split by the indexer into `vortexExchange` and `vortexToken` in the MeiliSearch document. `massive_token` and `binance_token` are stored as raw symbol strings (e.g. `"AAPL"`, `"BTCUSDT"`) — those providers have no numeric token concept.
+
+The indexer also computes a `streamProvider` field at index time using a small inline `EXCHANGE_TO_PROVIDER` table (mirrored from `src/shared/utils/exchange-to-provider.util.ts` — kept duplicated because the indexer is a separate Docker package with no shared imports). This lets clients filter `?streamProvider=binance` to scope a query to a single provider.
 
 ## MeiliSearch Document Shape
 
@@ -52,6 +56,9 @@ The `vortex_provider_token` (format `"NSE_EQ-22"`) is split by the indexer into 
   "kiteToken": 738561,
   "vortexToken": 22,
   "vortexExchange": "NSE_EQ",
+  "massiveToken": null,
+  "binanceToken": null,
+  "streamProvider": "vortex",
   "expiry": null,
   "strike": null,
   "optionType": null,
@@ -62,10 +69,34 @@ The `vortex_provider_token` (format `"NSE_EQ-22"`) is split by the indexer into 
 }
 ```
 
+A binance crypto pair looks like:
+
+```json
+{
+  "id": 355010,
+  "canonicalSymbol": "BINANCE:BTCUSDT",
+  "symbol": "BTCUSDT",
+  "exchange": "BINANCE",
+  "segment": "spot",
+  "instrumentType": "EQ",
+  "assetClass": "crypto",
+  "kiteToken": null,
+  "vortexToken": null,
+  "vortexExchange": null,
+  "massiveToken": null,
+  "binanceToken": "BTCUSDT",
+  "streamProvider": "binance",
+  "tickSize": 0.01,
+  "lotSize": 1,
+  "isDerivative": false,
+  "underlyingSymbol": "BTCUSDT"
+}
+```
+
 ## Index Settings Applied on Each Run
 
 - **searchableAttributes**: `["symbol", "canonicalSymbol", "name", "underlyingSymbol"]`
-- **filterableAttributes**: `["exchange", "segment", "instrumentType", "vortexExchange", "optionType", "assetClass", "isDerivative", "expiry", "strike"]`
+- **filterableAttributes**: `["exchange", "segment", "instrumentType", "vortexExchange", "optionType", "assetClass", "isDerivative", "expiry", "strike", "streamProvider"]`
 - **typoTolerance**: `{ minWordSizeForTypos: { oneTypo: 4, twoTypos: 8 } }`
 
 ## Environment Variables
@@ -103,4 +134,5 @@ docker compose logs -f search-indexer
 
 ## Changelog
 
+- **2026-04-28** — Multi-provider parity. SQL pivot extended to also project `massive_token` and `binance_token` from `instrument_mappings.provider_token`. New MeiliDoc fields: `massiveToken`, `binanceToken`, `streamProvider`. `streamProvider` is precomputed per-document from an inline `EXCHANGE_TO_PROVIDER` mirror so `?streamProvider=<name>` filters work in one Meili query without joining back to Postgres. `streamProvider` added to `filterableAttributes`.
 - **2026-04-22** — Initial implementation. Migrated from old `instruments`/`vortex_instruments` table queries to `universal_instruments` + `instrument_mappings` JOIN with vortex token pivot.

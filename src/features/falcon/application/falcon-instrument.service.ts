@@ -4,7 +4,7 @@
  * @description Sync Kite Connect instruments into falcon_instruments with batched upserts, daily cron, retries, and optional reconciliation (Vortex-style).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-17
+ * @updated 2026-04-22
  *
  * Notes:
  * - Requires Kite OAuth (KITE_ACCESS_TOKEN or Redis kite:access_token) for sync.
@@ -217,7 +217,10 @@ export class FalconInstrumentService implements OnModuleInit {
           tradingsymbol: String(row.tradingsymbol || ''),
           name: String(row.name || ''),
           last_price: Number(row.last_price) || 0,
-          expiry: String(row.expiry || ''),
+          // Kite SDK parses CSV date → JS Date object; ISO string is 24 chars but column is varchar(16).
+          expiry: row.expiry
+            ? (row.expiry instanceof Date ? row.expiry.toISOString() : String(row.expiry)).slice(0, 10)
+            : '',
           strike: Number(row.strike) || 0,
           tick_size: Number(row.tick_size) || 0.05,
           lot_size: Number(row.lot_size) || 1,
@@ -327,10 +330,11 @@ export class FalconInstrumentService implements OnModuleInit {
         this.logger.warn('[FalconInstrumentService] Symbol cache population failed (non-fatal)', e as Error);
       }
 
-      // Upsert universal instruments and refresh registry
+      // Upsert universal instruments, cross-link vortex mappings, then refresh registry
       try {
         const uirCount = await this.upsertUniversalInstruments(payloads);
         this.logger.log(`[FalconInstrumentService] UIR upsert: ${uirCount} instruments linked`);
+        await this.crossLinkProviderMappings();
         await this.instrumentRegistry.refresh();
       } catch (uirErr) {
         this.logger.warn('[FalconInstrumentService] UIR upsert failed (non-fatal)', uirErr as Error);
@@ -425,6 +429,46 @@ export class FalconInstrumentService implements OnModuleInit {
   }
 
   /**
+   * After kite UIR linking, propagate uir_id to vortex rows sharing the same instrument_token,
+   * and vice-versa. Both providers store identical numeric instrument_token values (e.g. 738561)
+   * so a JOIN on that column reliably cross-links the two sets of mappings.
+   */
+  private async crossLinkProviderMappings(): Promise<void> {
+    try {
+      const [r1, r2] = await Promise.all([
+        // kite → vortex: give vortex rows the UIR ID that kite already has
+        this.mappingRepo.query(`
+          UPDATE instrument_mappings AS vx
+          SET uir_id = kx.uir_id
+          FROM instrument_mappings AS kx
+          WHERE kx.provider = 'kite'
+            AND vx.provider = 'vortex'
+            AND kx.instrument_token = vx.instrument_token
+            AND kx.uir_id IS NOT NULL
+            AND (vx.uir_id IS NULL OR vx.uir_id != kx.uir_id)
+        `),
+        // vortex → kite: the reverse pass handles instruments vortex synced first
+        this.mappingRepo.query(`
+          UPDATE instrument_mappings AS kx
+          SET uir_id = vx.uir_id
+          FROM instrument_mappings AS vx
+          WHERE vx.provider = 'vortex'
+            AND kx.provider = 'kite'
+            AND vx.instrument_token = kx.instrument_token
+            AND vx.uir_id IS NOT NULL
+            AND (kx.uir_id IS NULL OR kx.uir_id != vx.uir_id)
+        `),
+      ]);
+      this.logger.log(
+        `[FalconInstrumentService] Cross-link complete: kite→vortex updated, vortex→kite updated`,
+      );
+      void r1; void r2;
+    } catch (e) {
+      this.logger.warn('[FalconInstrumentService] Cross-link pass failed (non-fatal)', e as Error);
+    }
+  }
+
+  /**
    * Upsert universal instrument rows for each Falcon instrument and link them
    * to existing instrument_mappings via uir_id.
    */
@@ -435,73 +479,100 @@ export class FalconInstrumentService implements OnModuleInit {
     for (let i = 0; i < payloads.length; i += CHUNK) {
       const chunk = payloads.slice(i, i + CHUNK);
 
+      // Build the UIR rows and a token→canonical map for this chunk
+      type UirRow = {
+        canonical_symbol: string; exchange: string; underlying: string;
+        instrument_type: string; expiry: Date | null; strike: number;
+        option_type: string | null; lot_size: number; tick_size: number;
+        name: string; segment: string; is_active: boolean; asset_class: string;
+      };
+      const uirRows: UirRow[] = [];
+      const tokenToCanonical = new Map<string, string>(); // provider_token → canonical
+
       for (const p of chunk) {
         try {
-          // Normalize exchange
           const normalizedExchange = normalizeExchange(p.exchange, 'kite');
-
-          // Determine underlying: for equities use 'name' field (it has the clean name),
-          // for derivatives also use 'name' (Kite's name field = underlying for derivatives)
-          // If name is empty, fall back to tradingsymbol
-          const underlying = (p.name || p.tradingsymbol).toUpperCase().trim();
+          // tradingsymbol is the exchange-level trading identifier (e.g. "RELIANCE");
+          // name is the company display name (e.g. "RELIANCE INDUSTRIES") and must NOT be
+          // used as the canonical underlying — clients subscribe by tradingsymbol.
+          const underlying = (p.tradingsymbol || p.name).toUpperCase().trim();
           if (!underlying) continue;
-
-          // Map instrument_type: Kite uses EQ, FUT, CE, PE directly
-          // For indices (segment contains 'INDICES'), use IDX
           const instrumentType = p.segment?.includes('INDICES') ? 'IDX' : (p.instrument_type || 'EQ');
-
-          // Parse expiry from string (YYYY-MM-DD format in Kite) to Date
           let expiry: Date | null = null;
           if (p.expiry && p.expiry.length >= 10) {
             expiry = new Date(p.expiry);
             if (isNaN(expiry.getTime())) expiry = null;
           }
-
           const strike = Number(p.strike) || null;
           const optionType = (instrumentType === 'CE' || instrumentType === 'PE') ? instrumentType : null;
-
-          // Compute canonical symbol
           const canonicalSymbol = computeCanonicalSymbol({
-            exchange: normalizedExchange,
-            underlying,
-            instrument_type: instrumentType,
-            expiry,
-            strike,
-            option_type: optionType,
+            exchange: normalizedExchange, underlying, instrument_type: instrumentType,
+            expiry, strike, option_type: optionType,
           });
-
-          // Upsert into universal_instruments
-          await this.uirRepo.upsert({
-            canonical_symbol: canonicalSymbol,
-            exchange: normalizedExchange,
-            underlying,
-            instrument_type: instrumentType,
-            expiry,
-            strike: strike || 0,
-            option_type: optionType,
-            lot_size: p.lot_size || 1,
-            tick_size: Number(p.tick_size) || 0.05,
-            name: p.name || '',
-            segment: p.segment || '',
-            is_active: true,
+          uirRows.push({
+            canonical_symbol: canonicalSymbol, exchange: normalizedExchange,
+            underlying, instrument_type: instrumentType, expiry,
+            strike: strike || 0, option_type: optionType,
+            lot_size: p.lot_size || 1, tick_size: Number(p.tick_size) || 0.05,
+            name: p.name || '', segment: p.segment || '', is_active: true,
             asset_class: normalizedExchange === 'MCX' ? 'commodity' : (normalizedExchange === 'CDS' ? 'currency' : 'equity'),
-          }, {
-            conflictPaths: ['canonical_symbol'],
-            skipUpdateIfNoValuesChanged: false,
           });
+          tokenToCanonical.set(String(p.instrument_token), canonicalSymbol);
+        } catch { /* skip malformed row */ }
+      }
 
-          // Find the UIR row to get its ID
-          const uirRow = await this.uirRepo.findOne({ where: { canonical_symbol: canonicalSymbol } });
-          if (uirRow) {
-            // Update the instrument_mapping with uir_id
-            await this.mappingRepo.update(
-              { provider: 'kite' as const, provider_token: String(p.instrument_token) },
-              { uir_id: Number(uirRow.id) },
-            );
-            uirCount++;
-          }
+      if (!uirRows.length) continue;
+
+      // Deduplicate by canonical_symbol — Postgres rejects ON CONFLICT UPDATE when
+      // the same conflict key appears twice in the same VALUES batch.
+      const dedupedUirRows = Array.from(
+        new Map(uirRows.map((r) => [r.canonical_symbol, r])).values(),
+      );
+
+      // 1. Bulk upsert all UIR rows for this chunk (1 DB call)
+      try {
+        await this.uirRepo.upsert(dedupedUirRows, {
+          conflictPaths: ['canonical_symbol'],
+          skipUpdateIfNoValuesChanged: false,
+        });
+      } catch (err) {
+        this.logger.warn(`[FalconInstrumentService] UIR bulk upsert chunk failed: ${(err as Error)?.message}`);
+        continue;
+      }
+
+      // 2. Fetch the IDs back in one query (1 DB call)
+      const canonicals = dedupedUirRows.map((r) => r.canonical_symbol);
+      let idRows: { id: string; canonical_symbol: string }[] = [];
+      try {
+        idRows = await this.uirRepo
+          .createQueryBuilder('u')
+          .select(['u.id', 'u.canonical_symbol'])
+          .where('u.canonical_symbol IN (:...canonicals)', { canonicals })
+          .getMany() as any;
+      } catch (err) {
+        this.logger.warn(`[FalconInstrumentService] UIR ID fetch failed: ${(err as Error)?.message}`);
+        continue;
+      }
+      const canonicalToId = new Map<string, number>(
+        idRows.map((r) => [r.canonical_symbol, Number((r as any).id ?? (r as any).u_id)]),
+      );
+
+      // 3. Bulk update instrument_mappings with uir_id (1 DB call via CASE WHEN)
+      const updates: { token: string; uirId: number }[] = [];
+      for (const [token, canonical] of tokenToCanonical) {
+        const uirId = canonicalToId.get(canonical);
+        if (uirId) { updates.push({ token, uirId }); uirCount++; }
+      }
+      if (updates.length) {
+        try {
+          const tokens = updates.map((u) => u.token);
+          const cases = updates.map((u) => `WHEN provider_token = '${u.token}' THEN ${u.uirId}`).join(' ');
+          await this.mappingRepo.query(
+            `UPDATE instrument_mappings SET uir_id = CASE ${cases} END WHERE provider = 'kite' AND provider_token = ANY($1)`,
+            [tokens],
+          );
         } catch (err) {
-          this.logger.debug(`[FalconInstrumentService] UIR upsert failed for token=${p.instrument_token}: ${(err as Error)?.message}`);
+          this.logger.warn(`[FalconInstrumentService] Mapping uir_id bulk update failed: ${(err as Error)?.message}`);
         }
       }
     }
