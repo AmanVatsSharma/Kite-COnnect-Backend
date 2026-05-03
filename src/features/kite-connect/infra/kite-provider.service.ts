@@ -94,9 +94,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         const dbApiKey = await this.appConfig.get(KiteProviderService.REDIS_API_KEY);
         if (dbApiKey) apiKey = dbApiKey;
       } catch {}
-      // Prefer dynamic token from Redis, then env var set by OAuth, then DB session
-      let accessToken = this.configService.get('KITE_ACCESS_TOKEN');
-      if (!accessToken && this.redisService?.isRedisAvailable?.()) {
+      // Priority: Redis (freshest, set by OAuth callback) → env var (startup default) → DB session
+      let accessToken: string | undefined;
+      if (this.redisService?.isRedisAvailable?.()) {
         try {
           accessToken =
             (await this.redisService.get<string>('kite:access_token')) ||
@@ -104,6 +104,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
           if (accessToken)
             this.logger.log('[Kite] Loaded access token from Redis cache');
         } catch {}
+      }
+      if (!accessToken) {
+        accessToken = this.configService.get('KITE_ACCESS_TOKEN') || undefined;
       }
       // Last-resort: read from kite_sessions table (survives restarts when Redis is unavailable)
       if (!accessToken) {
