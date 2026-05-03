@@ -4,10 +4,10 @@
  * @description Batch and incremental sync of universal_instruments into MeiliSearch.
  *              Joins instrument_mappings to embed kite/vortex/massive/binance provider tokens
  *              per document and precomputes streamProvider via the canonical exchange→provider map.
- *              Supports modes: backfill | incremental | backfill-and-watch | synonyms-apply.
+ *              Supports modes: backfill | incremental | backfill-and-watch | synonyms-apply | settings-apply.
  * @author BharatERP
  * @created 2025-12-01
- * @updated 2026-04-27
+ * @updated 2026-05-03
  */
 
 import axios from 'axios';
@@ -522,6 +522,13 @@ async function main(): Promise<void> {
     await incremental();
   } else if (mode === 'synonyms-apply') {
     await applySynonymsFromRedis();
+  } else if (mode === 'settings-apply') {
+    const meiliBase = env('MEILI_HOST', 'http://meilisearch:7700')!;
+    const meiliKey = env('MEILI_MASTER_KEY', '')!;
+    const index = env('MEILI_INDEX', 'instruments_v1')!;
+    await applySettings(meiliBase, meiliKey, index);
+    // eslint-disable-next-line no-console
+    console.log('[indexer] settings-apply complete');
   } else {
     // eslint-disable-next-line no-console
     console.error(`[indexer] unknown INDEXER_MODE=${mode}`);
