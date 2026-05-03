@@ -140,12 +140,13 @@ services:
 
   # Search API (NestJS) - exposes only to host via 3002 for Nginx proxy
   search-api:
-    build: ./services/search-api
+    build: ./apps/search-api
     container_name: trading-search-api
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - MEILI_HOST=http://meilisearch:7700
+      - MEILI_HOST_PRIMARY=http://meilisearch:7700
+      - MEILI_HOST_SECONDARY=${MEILI_HOST_SECONDARY:-}
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
       - HYDRATION_BASE_URL=http://trading-app:3000
       - HYDRATION_API_KEY=${HYDRATION_API_KEY}
@@ -209,7 +210,7 @@ services:
 
   # Search Indexer (read-only) - builds and syncs Meili index from Postgres
   search-indexer:
-    build: ./services/search-indexer
+    build: ./apps/search-indexer
     container_name: trading-search-indexer
     environment:
       - DB_HOST=${INDEXER_DB_HOST:-postgres}

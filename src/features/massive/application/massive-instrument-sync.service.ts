@@ -42,6 +42,34 @@ const MARKET_TO_ASSET_CLASS: Record<string, string> = {
   options: 'equity',
 };
 
+/**
+ * Maps Massive/Polygon instrument types to the UIR canonical type set.
+ * UIR only knows EQ, IDX, FUT, CE, PE — everything else must be normalized.
+ * Equity-like instruments (CS, ETF, ADRC, etc.) → EQ so canonical is "US:AAPL" not "US:AAPL:CS".
+ */
+function toUirInstrumentType(massiveType: string, market: string): string {
+  if (market === 'indices') return 'IDX';
+  const equityTypes = new Set([
+    'CS', 'ETF', 'ADRC', 'ADRW', 'ADRP', 'GDR', 'GDRS',
+    'PFD', 'RIGHT', 'WARRANT', 'UNIT', 'SP', 'FUND', 'ELT',
+    'OS', 'OTHER',
+  ]);
+  if (equityTypes.has(massiveType?.toUpperCase())) return 'EQ';
+  return 'EQ'; // safe default for unknown types
+}
+
+/**
+ * Polygon prefixes its market tickers with a namespace: "C:EURUSD" (forex), "X:BTCUSD" (crypto).
+ * Strip these so the UIR underlying is the clean human symbol ("EURUSD", "BTCUSD").
+ * The raw provider_token in instrument_mappings keeps the original Polygon form so the
+ * WS subscribe call can reconstruct the correct channel (e.g. "C.EURUSD" for forex endpoint).
+ */
+function toCleanUnderlying(ticker: string, market: string): string {
+  if (market === 'forex') return ticker.replace(/^C:/i, '');
+  if (market === 'crypto') return ticker.replace(/^X:/i, '');
+  return ticker;
+}
+
 export interface MassiveSyncResult {
   market: string;
   synced: number;
@@ -157,7 +185,7 @@ export class MassiveInstrumentSyncService implements OnModuleInit {
               market,
               locale: r.locale || 'us',
               instrument_type: r.type || 'EQ',
-              currency: r.currency_name || 'USD',
+              currency: (r.currency_symbol || r.currency_name || 'USD').substring(0, 8),
               is_active: true,
             }),
           );
@@ -183,10 +211,11 @@ export class MassiveInstrumentSyncService implements OnModuleInit {
         }
       }
 
-      // Upsert instrument_mappings rows
+      // Upsert instrument_mappings rows — use clean underlying as provider_token
+      // so the streaming layer subscribes with the right symbol (e.g. "EURUSD" not "C:EURUSD").
       const mappingRows = allRows.map((r) => ({
         provider: 'massive' as any,
-        provider_token: r.ticker,
+        provider_token: toCleanUnderlying(r.ticker, r.market),
         instrument_token: 0,
         uir_id: null as number | null,
       }));
@@ -224,8 +253,11 @@ export class MassiveInstrumentSyncService implements OnModuleInit {
       for (const row of chunk) {
         try {
           const exchange = MARKET_TO_EXCHANGE[row.market] ?? row.market.toUpperCase();
-          const underlying = row.ticker;
-          const instrumentType = row.instrument_type || 'EQ';
+          // Strip Polygon market prefix (C:EURUSD→EURUSD, X:BTCUSD→BTCUSD) for clean
+          // canonical symbols and human-readable search. The raw ticker is kept as
+          // provider_token so the WS layer can reconstruct the correct channel prefix.
+          const underlying = toCleanUnderlying(row.ticker, row.market);
+          const instrumentType = toUirInstrumentType(row.instrument_type, row.market);
           const assetClass = MARKET_TO_ASSET_CLASS[row.market] ?? 'equity';
 
           const canonicalSymbol = computeCanonicalSymbol({
@@ -240,7 +272,7 @@ export class MassiveInstrumentSyncService implements OnModuleInit {
               exchange,
               underlying,
               instrument_type: instrumentType,
-              name: row.name || '',
+              name: (row.name || '').substring(0, 128),
               segment: row.market,
               is_active: true,
               asset_class: assetClass,
@@ -259,7 +291,7 @@ export class MassiveInstrumentSyncService implements OnModuleInit {
           const uirRow = await this.uirRepo.findOne({ where: { canonical_symbol: canonicalSymbol } });
           if (uirRow) {
             await this.mappingRepo.update(
-              { provider: 'massive' as any, provider_token: row.ticker },
+              { provider: 'massive' as any, provider_token: toCleanUnderlying(row.ticker, row.market) },
               { uir_id: Number(uirRow.id) },
             );
             linked++;

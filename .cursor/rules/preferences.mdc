@@ -1,0 +1,52 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+# STYLE
+- Always generate clean, readable, enterprise-grade code.
+- Prefer explicit imports over wildcard imports.
+- Use async/await only, never .then() chaining.
+- Keep functions small & composable (max 40 lines).
+- Prefer dependency injection over direct instantiation.
+- Update changelog in module doc after every edit.
+
+# COMMENTS & DOCS
+- Always add detailed file header at top.
+- Inline comments where logic may confuse a new developer.
+- Auto-update MODULE_DOC.md after edits.
+- Generate flowcharts for complex flows using Mermaid or Draw.io.
+
+# LOGGING & DEBUG
+- Backend `src/`: inject or construct Nest `Logger`; never `console.log` (see `logger_setup.mdc`).
+- For debugging, use `logger.debug` at meaningful boundaries — avoid spamming every line in hot paths.
+- Frontend `apps/*`: prefer a small `lib/` logger that no-ops or downgrades in production (see `uirules.mdc`, scoped to admin-dashboard).
+- Mark all TODOs with `[SonuRamTODO]` for easy search.
+
+# STRUCTURE
+- Features live under `src/features/<name>/` with `application/`, `domain/`, `infra/`, `interface/` (see `master.mdc`).
+- Keep controllers and gateways thin → delegate to application services.
+- Application services own orchestration; domain holds entities; infra holds outbound adapters.
+- No circular dependencies (check with madge).
+
+# API
+- For external APIs: always wrap in provider class.
+- For internal APIs: choose REST vs GraphQL based on:
+  - REST for transactional endpoints (orders, auth, funds).
+  - GraphQL for dashboards & data aggregation (positions, reporting).
+
+# CODING
+- Use TypeScript strict mode.
+- Enforce consistent return types.
+- Export shared interfaces from a feature `index.ts` when other features must import a narrow public API.
+
+# INTERACTION WITH CURSOR
+- Always confirm the plan with me before proceeding.
+- Ask me if multiple solutions exist → then suggest the best.
+- Generate docs + tests along with code in same PR.
+- Regularly scan for duplicate files and unused imports.
+
+# PERSONAL
+- Respect Hindu date-time format (IST) in logs.
+- Keep naming spiritual/inspiring if possible (like `dharmaGuard` for auth middleware).

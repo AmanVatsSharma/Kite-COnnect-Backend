@@ -25,6 +25,8 @@ import { AuthPage } from './pages/AuthPage';
 import { ConsolePage } from './pages/ConsolePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { FalconPage } from './pages/FalconPage';
+import { SearchPage } from './pages/SearchPage';
+import { SearchAdminPage } from './pages/SearchAdminPage';
 
 export default function App() {
   return (
@@ -44,6 +46,8 @@ export default function App() {
                   <Route path="abuse" element={<AbusePage />} />
                   <Route path="audit" element={<AuditDebugPage />} />
                   <Route path="falcon" element={<FalconPage />} />
+                  <Route path="search" element={<SearchPage />} />
+                  <Route path="search-admin" element={<SearchAdminPage />} />
                   <Route path="auth" element={<AuthPage />} />
                   <Route path="console" element={<ConsolePage />} />
                   <Route path="settings" element={<SettingsPage />} />

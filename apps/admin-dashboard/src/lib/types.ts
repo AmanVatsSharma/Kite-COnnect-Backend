@@ -11,7 +11,7 @@ export interface ApiKeyRow {
   ws_subscribe_rps?: number | null;
   ws_unsubscribe_rps?: number | null;
   ws_mode_rps?: number | null;
-  provider?: 'kite' | 'vortex' | null;
+  provider?: 'kite' | 'vortex' | 'massive' | 'binance' | null;
   metadata?: { exchanges?: string[] } | null;
   created_at?: string;
 }

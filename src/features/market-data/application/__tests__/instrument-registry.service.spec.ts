@@ -4,7 +4,7 @@
  * @description Unit tests for InstrumentRegistryService in-memory maps.
  * @author BharatERP
  * @created 2026-04-17
- * @updated 2026-04-19
+ * @updated 2026-04-28
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -19,9 +19,9 @@ const mockUirRows = [
 ];
 
 const mockMappings = [
-  { provider: 'kite', provider_token: '256265', uir_id: 42 },
-  { provider: 'vortex', provider_token: 'NSE_EQ-22', uir_id: 42 },
-  { provider: 'kite', provider_token: '738561', uir_id: 108 },
+  { provider: 'kite', provider_token: '256265', instrument_token: null, uir_id: 42 },
+  { provider: 'vortex', provider_token: 'NSE_EQ-22', instrument_token: 22, uir_id: 42 },
+  { provider: 'kite', provider_token: '738561', instrument_token: null, uir_id: 108 },
 ];
 
 describe('InstrumentRegistryService', () => {
@@ -153,7 +153,7 @@ describe('InstrumentRegistryService', () => {
   describe('refresh', () => {
     it('should clear and repopulate all maps', async () => {
       await service.warmMaps();
-      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 3 });
+      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 4 });
 
       // Return different data on refresh
       uirRepoFind.mockResolvedValue([
@@ -183,7 +183,47 @@ describe('InstrumentRegistryService', () => {
 
     it('should return correct counts after warmMaps', async () => {
       await service.warmMaps();
-      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 3 });
+      // 3 primary mapping entries + 1 secondary numeric index for the Vortex mapping = 4
+      expect(service.getStats()).toMatchObject({ instruments: 2, mappings: 4 });
+    });
+  });
+
+  describe('Vortex secondary numeric index', () => {
+    it('resolves by full exchange-token key "NSE_EQ-22"', async () => {
+      await service.warmMaps();
+      expect(service.resolveProviderToken('vortex', 'NSE_EQ-22')).toBe(42);
+    });
+
+    it('resolves by numeric token 22 via secondary index', async () => {
+      await service.warmMaps();
+      expect(service.resolveProviderToken('vortex', 22)).toBe(42);
+    });
+
+    it('both lookups return the same UIR ID', async () => {
+      await service.warmMaps();
+      const byFull = service.resolveProviderToken('vortex', 'NSE_EQ-22');
+      const byNumeric = service.resolveProviderToken('vortex', 22);
+      expect(byFull).toBe(byNumeric);
+    });
+
+    it('collision: first uirId wins when two Vortex rows share an instrument_token', async () => {
+      mappingRepoFind.mockResolvedValue([
+        { provider: 'vortex', provider_token: 'NSE_EQ-99', instrument_token: 99, uir_id: 10 },
+        { provider: 'vortex', provider_token: 'NSE_FO-99', instrument_token: 99, uir_id: 20 },
+      ]);
+      await service.warmMaps();
+      // First entry (uirId=10) wins for the numeric secondary key
+      expect(service.resolveProviderToken('vortex', 99)).toBe(10);
+      // Primary keys for both are still intact
+      expect(service.resolveProviderToken('vortex', 'NSE_EQ-99')).toBe(10);
+      expect(service.resolveProviderToken('vortex', 'NSE_FO-99')).toBe(20);
+    });
+
+    it('Kite mapping with no instrument_token does not add secondary index', async () => {
+      await service.warmMaps();
+      // kite mapping has instrument_token: null, so no numeric secondary key
+      expect(service.resolveProviderToken('kite', 256265)).toBe(42); // numeric string coercion still works for kite
+      expect(service.resolveProviderToken('kite', null as any)).toBeUndefined();
     });
   });
 
@@ -221,6 +261,127 @@ describe('InstrumentRegistryService', () => {
     it('unknown UIR ID → undefined', async () => {
       await service.warmMaps();
       expect(service.getBestProviderForUirId(9999)).toBeUndefined();
+    });
+  });
+
+  describe('resolveProviderScopedSymbol', () => {
+    // Custom fixture: include underlying + instrument_type so the underlying-fallback path is exercised.
+    const scopedUirRows = [
+      {
+        id: '42',
+        canonical_symbol: 'NSE:RELIANCE',
+        exchange: 'NSE',
+        underlying: 'RELIANCE',
+        instrument_type: 'EQ',
+        is_active: true,
+      },
+      {
+        id: '43',
+        canonical_symbol: 'BSE:RELIANCE',
+        exchange: 'BSE',
+        underlying: 'RELIANCE',
+        instrument_type: 'EQ',
+        is_active: true,
+      },
+      {
+        id: '200',
+        canonical_symbol: 'BINANCE:BTCUSDT',
+        exchange: 'BINANCE',
+        underlying: 'BTCUSDT',
+        instrument_type: 'EQ',
+        is_active: true,
+      },
+      {
+        id: '300',
+        canonical_symbol: 'NFO:NIFTY:FUT:20250424',
+        exchange: 'NFO',
+        underlying: 'NIFTY',
+        instrument_type: 'FUT',
+        is_active: true,
+      },
+    ];
+    const scopedMappings = [
+      { provider: 'kite',    provider_token: '256265',     instrument_token: null, uir_id: 42 },
+      { provider: 'vortex',  provider_token: 'NSE_EQ-22',  instrument_token: 22,   uir_id: 42 },
+      { provider: 'kite',    provider_token: '128083202',  instrument_token: null, uir_id: 43 },
+      { provider: 'binance', provider_token: 'BTCUSDT',    instrument_token: null, uir_id: 200 },
+      { provider: 'kite',    provider_token: '12345',      instrument_token: null, uir_id: 300 },
+    ];
+
+    beforeEach(async () => {
+      uirRepoFind.mockResolvedValue(scopedUirRows);
+      mappingRepoFind.mockResolvedValue(scopedMappings);
+      await service.warmMaps();
+    });
+
+    it('numeric token resolves within provider scope (kite)', () => {
+      const r = service.resolveProviderScopedSymbol('kite', '256265');
+      expect(r).toMatchObject({ status: 'resolved', uirId: 42, canonical: 'NSE:RELIANCE', providerToken: '256265' });
+    });
+
+    it('numeric Vortex token resolves via secondary index', () => {
+      const r = service.resolveProviderScopedSymbol('vortex', '22');
+      expect(r).toMatchObject({ status: 'resolved', uirId: 42, canonical: 'NSE:RELIANCE', providerToken: 'NSE_EQ-22' });
+    });
+
+    it('Vortex EXCHANGE-TOKEN pair form resolves', () => {
+      const r = service.resolveProviderScopedSymbol('vortex', 'NSE_EQ-22');
+      expect(r).toMatchObject({ status: 'resolved', uirId: 42, providerToken: 'NSE_EQ-22' });
+    });
+
+    it('Vortex pair form is case-insensitive', () => {
+      const r = service.resolveProviderScopedSymbol('vortex', 'nse_eq-22');
+      expect(r).toMatchObject({ status: 'resolved', uirId: 42 });
+    });
+
+    it('exact canonical (NSE:RELIANCE) resolves only when provider has a mapping', () => {
+      const kite = service.resolveProviderScopedSymbol('kite', 'NSE:RELIANCE');
+      expect(kite.status).toBe('resolved');
+      const massive = service.resolveProviderScopedSymbol('massive', 'NSE:RELIANCE');
+      expect(massive.status).toBe('not_found');
+    });
+
+    it('underlying name (case-insensitive) — single EQ entry resolves directly', () => {
+      // Kite has a token only for NSE:RELIANCE, not BSE — so underlying RELIANCE has only 1 in-provider entry.
+      const r = service.resolveProviderScopedSymbol('kite', 'reliance');
+      expect(r).toMatchObject({ status: 'resolved', uirId: 42, canonical: 'NSE:RELIANCE' });
+    });
+
+    it('underlying with multiple EQ entries (NSE+BSE) prefers NSE within the provider', () => {
+      // Add a second kite mapping so RELIANCE has both NSE+BSE tokens in kite.
+      mappingRepoFind.mockResolvedValue([
+        ...scopedMappings,
+        { provider: 'kite', provider_token: '128083203', instrument_token: null, uir_id: 43 },
+      ]);
+      return service.refresh().then(() => {
+        const r = service.resolveProviderScopedSymbol('kite', 'RELIANCE');
+        expect(r).toMatchObject({ status: 'resolved', uirId: 42, canonical: 'NSE:RELIANCE' });
+      });
+    });
+
+    it('Binance underlying resolves to BINANCE canonical', () => {
+      const r = service.resolveProviderScopedSymbol('binance', 'btcusdt');
+      expect(r).toMatchObject({ status: 'resolved', uirId: 200, canonical: 'BINANCE:BTCUSDT', providerToken: 'BTCUSDT' });
+    });
+
+    it('underlying not in this provider catalog → not_found', () => {
+      const r = service.resolveProviderScopedSymbol('vortex', 'BTCUSDT');
+      expect(r.status).toBe('not_found');
+    });
+
+    it('FUT-only underlying does not auto-resolve (ambiguous)', () => {
+      const r = service.resolveProviderScopedSymbol('kite', 'NIFTY');
+      expect(r.status).toBe('ambiguous');
+    });
+
+    it('unknown identifier → not_found', () => {
+      const r = service.resolveProviderScopedSymbol('kite', 'NOSUCHSYMBOL');
+      expect(r.status).toBe('not_found');
+    });
+
+    it('empty / non-string identifier → not_found', () => {
+      expect(service.resolveProviderScopedSymbol('kite', '').status).toBe('not_found');
+      expect(service.resolveProviderScopedSymbol('kite', undefined as any).status).toBe('not_found');
     });
   });
 });

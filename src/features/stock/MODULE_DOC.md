@@ -28,6 +28,10 @@ Keep `StockModule` as the composition root re-exporting providers until cycle ri
 
 ## Changelog
 
+- **2026-04-25** — Added `POST /api/stock/universal/ltp` endpoint (`UniversalLtpService` + wired in `StockQuotesController`). Accepts `{ ids: number[] }` (universal instrument IDs); resolves to vortex or kite provider via `InstrumentRegistryService` in-memory maps; returns `{ success, data: { "[uirId]": { last_price } } }`. Added `getProviderTokens()` and `getExchange()` public accessors to `InstrumentRegistryService`. Fixed `VayuMarketDataService.getVortexLtp()` to handle `body.pairs` (exchange-token pairs) before `body.instruments` — previously returned 400, silently breaking search-api vortex LTP hydration.
+
+- **2026-04-22** — Added `crossLinkProviderMappings()` to `VortexInstrumentSyncService`: after UIR upsert and before `instrumentRegistry.refresh()`, runs two raw SQL UPDATEs that JOIN `instrument_mappings` on `instrument_token` to copy `uir_id` bidirectionally between kite and vortex rows. Enables the streaming service to dual-subscribe and use per-provider tick fallback.
+
 - **2026-04-17** — UIR integration: during Vortex instrument sync, each instrument is upserted into `universal_instruments` via `upsertUniversalInstrument()` and its `instrument_mappings` row gets `uir_id` set; `InstrumentRegistryService.refresh()` called after sync completes. New constructor deps on `VortexInstrumentSyncService`: `UniversalInstrument` repo and `InstrumentRegistryService`. Non-fatal error handling preserves existing sync behaviour.
 
 - **2026-04-14** — Runtime credential management: added `AdminVayuController` (`interface/admin-vayu.controller.ts`) with `GET /api/admin/vayu/config` + `PATCH /api/admin/vayu/config` endpoints; `VortexProviderService` gains `updateApiCredentials(params)` + `getConfigStatus()` + `loadConfigOverrides()` to load DB-persisted credential overrides on startup; `VortexAuthController` (Vayu login/callback) reads appId/apiKey/baseUrl from `app_configs` DB table before env vars; `StockModule` wires `AdminVayuController` + `AdminGuard`; ProviderPage.tsx gains "Vayu API Credentials" section for updating without SSH.

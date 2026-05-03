@@ -4,7 +4,7 @@
  * @description Orchestrates provider ticker streaming, subscription batching, LTP cache, and Redis stream status.
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-04-19
+ * @updated 2026-04-28
  */
 import {
   Injectable,
@@ -56,6 +56,22 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   /** Wall-clock ms of last upstream tick per token (real ticks only). */
   private readonly lastUpstreamAt = new Map<number, number>();
   private syntheticPulseTimer: NodeJS.Timeout | null = null;
+  /** Per-provider last valid (lp > 0) tick per UIR — enables cross-provider fallback. */
+  private readonly perProviderTickCache = new Map<InternalProviderName, Map<number, any>>();
+  /** Persistent per-UIR mode — survives batch-queue clears; authoritative for reconnect and disconnect re-routing. */
+  private readonly subscribedUirModes = new Map<number, 'ltp' | 'ohlcv' | 'full'>();
+  /**
+   * Per-UIR forced provider — pinned by `Provider:identifier` WS prefix subscriptions.
+   * When set, the batch processor skips `getBestProviderForUirId` and the kite↔vortex
+   * dual-subscribe path. Cleared when the last client unsubscribes from that UIR.
+   */
+  private readonly forcedProviderByUir = new Map<number, InternalProviderName>();
+  /** Set by admin stop; prevents auto-start from overriding an explicit admin decision. Cleared on admin start. */
+  private adminStopped = false;
+  /** Prevents concurrent auto-start races when multiple clients subscribe simultaneously. */
+  private isStartingStreaming = false;
+  /** Callbacks waiting for the in-progress auto-start to resolve. */
+  private readonly streamingStartWaiters: Array<(ok: boolean) => void> = [];
 
   constructor(
     private providerResolver: MarketDataProviderResolverService,
@@ -67,6 +83,14 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
+
+  get activeProviderName(): InternalProviderName {
+    for (const [name, state] of this.activeProviderState) {
+      if (state.isConnected) return name;
+    }
+    const enabled = this.providerResolver.getEnabledProviders();
+    return enabled[0] ?? 'kite';
+  }
 
   async onModuleInit() {
     // Do not auto-start streaming; wait for admin trigger
@@ -195,8 +219,15 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        const state = { ticker, subscribedUirIds: new Set<number>(), isConnected: false };
-        this.activeProviderState.set(providerName, state);
+        // Reuse existing state if the same ticker instance is already registered to
+        // preserve subscribedUirIds across restarts and avoid orphaning the state object
+        // that event-handler closures reference. A new state is only created when the
+        // ticker instance itself changes (e.g. after restartTicker).
+        let state = this.activeProviderState.get(providerName);
+        if (!state || state.ticker !== ticker) {
+          state = { ticker, subscribedUirIds: new Set<number>(), isConnected: false };
+          this.activeProviderState.set(providerName, state);
+        }
 
         if (!this.tickerStreamHandlersBound.has(ticker)) {
           this.tickerStreamHandlersBound.set(ticker, true);
@@ -208,7 +239,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
           ticker.on('connect', () => {
             this.logger.log(`[${providerName}] Provider ticker connected`);
-            state.isConnected = true;
+            // Look up live state by name — avoids stale-closure issue when
+            // initializeStreaming() is called multiple times with the same ticker.
+            const liveState = this.activeProviderState.get(providerName);
+            if (liveState) liveState.isConnected = true;
             this.isStreaming = true;
             try {
               this.metrics.marketDataStreamTickerConnected.labels(providerName).set(1);
@@ -221,11 +255,25 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
                 ts: Date.now(),
               });
             } catch {}
+            // Re-queue all known subscriptions so this newly (re)connected provider
+            // receives any instruments that migrated to peers during its outage.
+            if (this.subscribedUirModes.size > 0) {
+              this.logger.log(
+                `[${providerName}] Reconnected — re-queuing ${this.subscribedUirModes.size} UIR entries for dual-coverage restore`,
+              );
+              for (const [uirId, mode] of this.subscribedUirModes) {
+                if (!this.subscriptionQueue.has(uirId)) {
+                  this.subscriptionQueue.set(uirId, { mode, timestamp: Date.now(), clients: new Set() });
+                }
+              }
+              if (!this.subscriptionBatchInterval) this.startSubscriptionBatching();
+            }
           });
 
           ticker.on('disconnect', () => {
             this.logger.log(`[${providerName}] Provider ticker disconnected`);
-            state.isConnected = false;
+            const liveState = this.activeProviderState.get(providerName);
+            if (liveState) liveState.isConnected = false;
             this.isStreaming = Array.from(this.activeProviderState.values()).some((s) => s.isConnected);
             try {
               this.metrics.marketDataStreamTickerConnected.labels(providerName).set(0);
@@ -238,11 +286,27 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
                 ts: Date.now(),
               });
             } catch {}
+            // Re-route this provider's subscribed instruments to any still-connected peer.
+            // The batch processor will call getBestProviderForUirId() and pick an available peer.
+            const orphaned = liveState?.subscribedUirIds ?? new Set<number>();
+            if (orphaned.size > 0) {
+              this.logger.warn(
+                `[${providerName}] Disconnected with ${orphaned.size} subscribed UIRs — re-routing to peer providers`,
+              );
+              for (const uirId of orphaned) {
+                const mode = this.subscribedUirModes.get(uirId) ?? 'ltp';
+                if (!this.subscriptionQueue.has(uirId)) {
+                  this.subscriptionQueue.set(uirId, { mode, timestamp: Date.now(), clients: new Set() });
+                }
+              }
+              if (!this.subscriptionBatchInterval) this.startSubscriptionBatching();
+            }
           });
 
           ticker.on('error', (error: any) => {
             this.logger.error(`[${providerName}] Provider ticker error`, error);
-            state.isConnected = false;
+            const liveState = this.activeProviderState.get(providerName);
+            if (liveState) liveState.isConnected = false;
             this.isStreaming = Array.from(this.activeProviderState.values()).some((s) => s.isConnected);
             try {
               this.metrics.marketDataStreamTickerConnected.labels(providerName).set(0);
@@ -273,6 +337,51 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       );
     } catch (error) {
       this.logger.error('Failed to initialize market data streaming', error);
+    }
+  }
+
+  /**
+   * Lazily connect a provider's WS ticker on first subscription.
+   * Called from the batch processor when a UIR ID maps to a provider that isn't yet active.
+   */
+  private async lazyInitProvider(providerName: InternalProviderName): Promise<void> {
+    try {
+      const provider = this.providerResolver.getProvider(providerName);
+      const ticker = provider.initializeTicker?.();
+      if (!ticker?.on) return;
+
+      let state = this.activeProviderState.get(providerName);
+      if (!state || state.ticker !== ticker) {
+        state = { ticker, subscribedUirIds: new Set<number>(), isConnected: false };
+        this.activeProviderState.set(providerName, state);
+      }
+
+      if (!this.tickerStreamHandlersBound.has(ticker)) {
+        this.tickerStreamHandlersBound.set(ticker, true);
+        ticker.on('ticks', (ticks: any[]) => void this.handleTicks(providerName, ticks));
+        ticker.on('connect', () => {
+          const s = this.activeProviderState.get(providerName);
+          if (s) s.isConnected = true;
+          this.isStreaming = true;
+          this.logger.log(`[${providerName}] Lazy-initialized provider ticker connected`);
+        });
+        ticker.on('disconnect', () => {
+          const s = this.activeProviderState.get(providerName);
+          if (s) s.isConnected = false;
+          this.isStreaming = Array.from(this.activeProviderState.values()).some((st) => st.isConnected);
+        });
+        ticker.on('error', (error: any) => {
+          this.logger.error(`[${providerName}] Ticker error`, error);
+        });
+      }
+
+      setTimeout(() => {
+        try { ticker.connect?.(); } catch {}
+      }, 0);
+
+      this.logger.log(`[${providerName}] Lazy-initialized provider ticker for first subscription`);
+    } catch (e) {
+      this.logger.warn(`[${providerName}] lazyInitProvider failed`, e as any);
     }
   }
 
@@ -309,18 +418,41 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         tick._canonicalSymbol = this.instrumentRegistry.getCanonicalSymbol(uirId);
 
         // Update in-memory LTP cache first for hot-read path
+        const lp = Number(tick.last_price);
+        const lpValid = Number.isFinite(lp) && lp > 0;
         try {
-          const lp = Number(tick.last_price);
-          if (Number.isFinite(lp) && lp > 0) {
+          if (lpValid) {
             this.ltpCache.set(uirId, lp);
+            // Store per-provider tick so the other provider can fall back to this value
+            let provCache = this.perProviderTickCache.get(providerName);
+            if (!provCache) {
+              provCache = new Map();
+              this.perProviderTickCache.set(providerName, provCache);
+            }
+            provCache.set(uirId, { ...tick });
           }
         } catch {}
 
-        this.lastTickPayload.set(uirId, { ...tick });
+        // When primary provider gives no price, substitute the last valid tick from the
+        // peer provider (kite↔vortex) so downstream consumers always see a price.
+        let effectiveTick = tick;
+        if (!lpValid) {
+          const peers: InternalProviderName[] =
+            providerName === 'kite' ? ['vortex'] : providerName === 'vortex' ? ['kite'] : [];
+          for (const peer of peers) {
+            const peerTick = this.perProviderTickCache.get(peer)?.get(uirId);
+            if (peerTick) {
+              effectiveTick = { ...peerTick, ...tick, last_price: peerTick.last_price, _fallbackProvider: peer };
+              break;
+            }
+          }
+        }
+
+        this.lastTickPayload.set(uirId, { ...effectiveTick });
         this.lastUpstreamAt.set(uirId, Date.now());
 
         try {
-          await this.stockService.forwardRealtimeTick(uirId, tick);
+          await this.stockService.forwardRealtimeTick(uirId, effectiveTick);
         } catch (storeError: any) {
           this.rateLimitedLog(
             'debug',
@@ -329,7 +461,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             30_000,
           );
         }
-        this.stockService.enqueuePersistMarketData(uirId, tick);
+        this.stockService.enqueuePersistMarketData(uirId, effectiveTick);
       }
     } catch (error) {
       this.logger.error('Error handling ticks', error);
@@ -340,10 +472,11 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     instrumentTokens: number[],
     mode: 'ltp' | 'ohlcv' | 'full' = 'ltp',
     clientId?: string,
+    forcedProvider?: InternalProviderName,
   ) {
     try {
       this.logger.log(
-        `[StreamBatching] Received subscription request for ${instrumentTokens.length} instruments with mode=${mode} from client=${clientId || 'unknown'}`,
+        `[StreamBatching] Received subscription request for ${instrumentTokens.length} instruments with mode=${mode} from client=${clientId || 'unknown'}${forcedProvider ? ` forcedProvider=${forcedProvider}` : ''}`,
       );
 
       const prospectiveNew = instrumentTokens.filter(
@@ -377,7 +510,27 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         if (modePriority[mode] > modePriority[subscription.mode]) {
           subscription.mode = mode;
         }
+
+        // Pin provider if requested (keep first-writer on conflict — re-pinning a UIR
+        // mid-flight to a different provider is a client-side ambiguity, not a routing fault).
+        if (forcedProvider) {
+          const existingPin = this.forcedProviderByUir.get(token);
+          if (!existingPin) {
+            this.forcedProviderByUir.set(token, forcedProvider);
+          } else if (existingPin !== forcedProvider) {
+            this.logger.warn(
+              `[StreamBatching] UIR ${token} already pinned to ${existingPin}; ignoring conflicting pin to ${forcedProvider}`,
+            );
+          }
+        }
       });
+
+      // Persist highest-priority mode per UIR (survives batch-queue clears; authoritative for reconnect/re-routing)
+      const modeP = { ltp: 1, ohlcv: 2, full: 3 } as const;
+      for (const token of instrumentTokens) {
+        const cur = this.subscribedUirModes.get(token);
+        if (!cur || modeP[mode] > modeP[cur]) this.subscribedUirModes.set(token, mode);
+      }
 
       // Start batching interval if not already started
       if (!this.subscriptionBatchInterval) {
@@ -393,32 +546,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Subscribe using explicit exchange-token pairs. This primes the provider's
-   * internal exchange mapping to ensure the upstream subscribe frames are
-   * constructed with the correct exchange for each token, avoiding any default
-   * fallbacks (e.g., NSE_EQ).
-   */
-  async subscribePairs(
-    pairs: Array<{
-      token: number;
-      exchange: string;
-    }>,
-    mode: 'ltp' | 'ohlcv' | 'full' = 'ltp',
-    clientId?: string,
-  ) {
-    try {
-      if (!Array.isArray(pairs) || pairs.length === 0) {
-        return;
-      }
-      // Exchange priming is handled per-provider inside processSubscriptionBatch
-      const tokens = Array.from(new Set(pairs.map((p) => Number(p.token))));
-      await this.subscribeToInstruments(tokens, mode, clientId);
-    } catch (error) {
-      this.logger.error('Error in subscribePairs', error);
-      throw error;
-    }
-  }
 
   async unsubscribeFromInstruments(
     instrumentTokens: number[],
@@ -431,13 +558,17 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           const subscription = this.subscriptionQueue.get(token)!;
           subscription.clients.delete(clientId);
 
-          // If no clients left, queue for unsubscription
+          // If no clients left, queue for unsubscription and remove from durable ledger
           if (subscription.clients.size === 0) {
             this.subscriptionQueue.delete(token);
             this.unsubscriptionQueue.add(token);
+            this.subscribedUirModes.delete(token);
+            this.forcedProviderByUir.delete(token);
           }
         } else {
           this.unsubscriptionQueue.add(token);
+          this.subscribedUirModes.delete(token);
+          this.forcedProviderByUir.delete(token);
         }
       });
       this.trimUnsubscriptionQueue();
@@ -480,11 +611,40 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           Map<number, { mode: 'ltp' | 'ohlcv' | 'full' }>
         >();
         for (const [uirId, sub] of this.subscriptionQueue) {
-          const prov = this.instrumentRegistry.getBestProviderForUirId(uirId);
-          if (!prov || !this.activeProviderState.has(prov)) continue;
+          // Pinned provider (from `Provider:identifier` WS prefix) overrides best-provider routing.
+          const pinned = this.forcedProviderByUir.get(uirId);
+          const prov = pinned ?? this.instrumentRegistry.getBestProviderForUirId(uirId);
+          if (!prov) continue;
+          // Lazy-init provider ticker on first subscription (e.g. massive for US stocks)
+          if (!this.activeProviderState.has(prov)) {
+            await this.lazyInitProvider(prov);
+          }
+          if (!this.activeProviderState.has(prov)) continue;
           if (!byProvider.has(prov)) byProvider.set(prov, new Map());
           byProvider.get(prov)!.set(uirId, { mode: sub.mode });
+
+          // Dual-subscribe: also route to secondary provider (kite↔vortex) when
+          // the registry has a token for it and the provider is active. This enables
+          // the cross-provider fallback in handleTicks when the primary gives null prices.
+          // Pinned UIRs skip this — explicit provider pin means single-provider only.
+          if (pinned) continue;
+          const secondaryProviders: InternalProviderName[] =
+            prov === 'kite' ? ['vortex'] : prov === 'vortex' ? ['kite'] : [];
+          for (const secondary of secondaryProviders) {
+            if (!this.activeProviderState.has(secondary)) continue;
+            if (!this.instrumentRegistry.getProviderToken(uirId, secondary)) continue;
+            if (!byProvider.has(secondary)) byProvider.set(secondary, new Map());
+            // Only add if not already in the secondary group (primary might be secondary for another UIR)
+            if (!byProvider.get(secondary)!.has(uirId)) {
+              byProvider.get(secondary)!.set(uirId, { mode: sub.mode });
+            }
+          }
         }
+
+        // Track UIR IDs that were actually dispatched to a connected provider.
+        // UIR IDs for providers still connecting (lazy-init) remain in the queue
+        // so they are re-processed once the provider's WS connects.
+        const dispatched = new Set<number>();
 
         for (const [providerName, uirGroup] of byProvider) {
           const state = this.activeProviderState.get(providerName)!;
@@ -574,7 +734,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               const chunk = providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
               state.ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
             }
-            uirIds.forEach((uirId) => state.subscribedUirIds.add(uirId));
+            uirIds.forEach((uirId) => {
+              state.subscribedUirIds.add(uirId);
+              dispatched.add(uirId);
+            });
           }
 
           // Update Kite gauge
@@ -585,7 +748,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           }
         }
 
-        this.subscriptionQueue.clear();
+        // Remove only dispatched UIR IDs — leave pending lazy-init providers in the queue.
+        for (const uirId of dispatched) {
+          this.subscriptionQueue.delete(uirId);
+        }
       }
 
       // ── Unsubscriptions ──────────────────────────────────────────────────────
@@ -832,6 +998,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
   private async stopStreaming() {
     try {
+      this.adminStopped = true;
       if (this.subscriptionBatchInterval) {
         clearInterval(this.subscriptionBatchInterval);
         this.subscriptionBatchInterval = null;
@@ -854,9 +1021,60 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Safe auto-start with mutex: concurrent callers queue behind the first initiator.
+   * Returns true once at least one provider is connected, false on timeout/admin-stop.
+   * Respects adminStopped — won't override an explicit admin stop command.
+   */
+  async autoStartIfNeeded(timeoutMs = 6_000): Promise<boolean> {
+    if (this.isStreaming) return true;
+    if (this.adminStopped) {
+      this.logger.warn('[autoStart] Blocked — streaming was stopped by admin. Resume via admin API.');
+      return false;
+    }
+
+    if (this.isStartingStreaming) {
+      // Another caller is already starting; queue behind it
+      return new Promise<boolean>((resolve) => {
+        const tid = setTimeout(() => resolve(false), timeoutMs);
+        this.streamingStartWaiters.push((ok) => {
+          clearTimeout(tid);
+          resolve(ok);
+        });
+      });
+    }
+
+    this.isStartingStreaming = true;
+    this.logger.log('[autoStart] Streaming not active — attempting auto-start');
+    try {
+      await this.startStreaming();
+      const deadline = Date.now() + timeoutMs;
+      while (!this.isStreaming && Date.now() < deadline) {
+        await new Promise<void>((r) => setTimeout(r, 200));
+      }
+      const ok = this.isStreaming;
+      this.logger[ok ? 'log' : 'warn'](
+        ok
+          ? '[autoStart] Streaming started successfully'
+          : '[autoStart] Timed out — no provider connected within window. Check KITE_ACCESS_TOKEN / VORTEX_API_KEY.',
+      );
+      this.streamingStartWaiters.forEach((cb) => cb(ok));
+      this.streamingStartWaiters.length = 0;
+      return ok;
+    } catch (e) {
+      this.logger.error('[autoStart] startStreaming() threw', e);
+      this.streamingStartWaiters.forEach((cb) => cb(false));
+      this.streamingStartWaiters.length = 0;
+      return false;
+    } finally {
+      this.isStartingStreaming = false;
+    }
+  }
+
   // Method to restart streaming
   async startStreaming() {
     try {
+      this.adminStopped = false;
       await this.initializeStreaming();
       this.logger.log('Market data streaming started');
     } catch (error) {

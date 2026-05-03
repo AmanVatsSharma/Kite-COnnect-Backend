@@ -1,0 +1,10 @@
+---
+description: Manual @-commands for sensitive operations (invoke explicitly)
+alwaysApply: false
+---
+
+type: ApplyManually
+
+- `@migrate-db` — run database migration scripts only after human review.
+- `@audit-duplicates` — run the duplicate-file checker and report results.
+- `@mass-refactor` — run codemods or bulk refactors only after explicit approval.

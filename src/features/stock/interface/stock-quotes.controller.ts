@@ -18,6 +18,7 @@ import {
   Request,
 } from "@nestjs/common";
 import { StockService } from "@features/stock/application/stock.service";
+import { UniversalLtpService } from "@features/stock/application/universal-ltp.service";
 import {
   ApiTags,
   ApiOperation,
@@ -35,7 +36,29 @@ import { InstrumentsRequestDto } from "./dto/instruments.dto";
 @ApiTags("stock")
 @ApiSecurity("apiKey")
 export class StockQuotesController {
-  constructor(private readonly stockService: StockService) {}
+  constructor(
+    private readonly stockService: StockService,
+    private readonly universalLtpService: UniversalLtpService,
+  ) {}
+
+  /**
+   * POST /api/stock/universal/ltp
+   * Provider-agnostic LTP resolution by universal instrument ID.
+   * Prefers vortex; falls back to kite for instruments without a vortex token.
+   * Body: { ids: number[] }
+   */
+  @Post('universal/ltp')
+  @ApiOperation({
+    summary: 'Get LTP by universal instrument IDs (provider auto-resolved)',
+    description:
+      'Accepts an array of universal_instruments.id values. Resolves each to vortex or kite provider internally and returns a map of id → { last_price }.',
+  })
+  @ApiBody({ schema: { properties: { ids: { type: 'array', items: { type: 'number' } } }, required: ['ids'] } })
+  async universalLtp(@Body() body: { ids: number[] }) {
+    return this.universalLtpService.getUniversalLtp(
+      (body?.ids || []).map(Number).filter(Number.isFinite),
+    );
+  }
 
   @Post('quotes')
   @ApiOperation({

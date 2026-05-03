@@ -38,6 +38,34 @@ sequenceDiagram
     Gateway-->>Client: market_data
 ```
 
+## Provider-prefixed subscriptions (`Provider:identifier`)
+
+Both surfaces accept a per-instrument prefix that pins the subscription to a specific provider's data feed and bypasses cross-provider routing.
+
+| Form | Resolves to | Routes via |
+|---|---|---|
+| `Falcon:reliance` / `Kite:reliance` | RELIANCE in Kite mappings (exact underlying or canonical) | Kite ticker only |
+| `Vayu:26000` / `Vortex:NSE_EQ-26000` | Vortex token (numeric or pair-form) | Vortex ticker only |
+| `Atlas:AAPL` / `Massive:AAPL` / `Polygon:AAPL` | Massive symbol | Massive ticker only |
+| `Drift:BTCUSDT` / `Binance:BTCUSDT` | Binance Spot symbol | Binance combined-stream only |
+
+**Resolution rules** (provider-scoped, O(1)):
+1. Numeric / pair-form input → direct `provider:token` key in `InstrumentRegistryService`.
+2. Exact canonical (`NSE:RELIANCE`) — only if the requested provider has a mapping for that UIR.
+3. Underlying name (`RELIANCE`) — case-insensitive; EQ preferred over IDX; NSE preferred for India. FUT/CE/PE never auto-resolve.
+
+The prefix splits on the **first colon**, so `Falcon:NSE:RELIANCE` is `provider=kite, identifier="NSE:RELIANCE"`. Strings whose prefix is not a recognized alias (e.g. `NSE:RELIANCE`, `BSE:TCS`) fall through to existing canonical resolution unchanged.
+
+**Errors:**
+- `forced_provider_unavailable` — emitted per-token when the requested provider has no active upstream connection. No silent fallback.
+- Unresolved / ambiguous identifiers within the requested provider's catalog appear in `subscription_confirmed.unresolvedSymbols` with provider context.
+
+**Confirmation:** `subscription_confirmed.forced` lists each pinned subscription as `{ symbol, uirId, provider, canonical }`.
+
+**Pinning lifecycle:** the pin lives in `MarketDataStreamService.forcedProviderByUir` for the lifetime of any subscriber. `getBestProviderForUirId` and the kite↔vortex dual-subscribe path are skipped for pinned UIRs. The pin clears automatically when the last client unsubscribes from that UIR.
+
+`unsubscribe` accepts the same `Provider:identifier` syntax — useful when the client's own bookkeeping is keyed by the prefixed form.
+
 ## Entitlements (exchange allow-list)
 
 - On **subscribe**, resolved exchanges are compared to the API key allowed exchange set. Pairs outside the set appear in `forbidden` on `subscription_confirmed` and emit `error` with `code: forbidden_exchange`.

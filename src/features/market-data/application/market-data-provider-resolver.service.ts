@@ -1,16 +1,17 @@
 /**
  * @file market-data-provider-resolver.service.ts
  * @module market-data
- * @description Resolves MarketDataProvider for HTTP and WebSocket (kite/vortex/massive; falcon/vayu/polygon aliases).
+ * @description Resolves MarketDataProvider for HTTP and WebSocket (kite/vortex/massive/binance; falcon/vayu/polygon aliases).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-18
+ * @updated 2026-04-26
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { VortexProviderService } from '@features/stock/infra/vortex-provider.service';
 import { MassiveProviderService } from '@features/massive/infra/massive-provider.service';
+import { BinanceProviderService } from '@features/binance/infra/binance-provider.service';
 import { MarketDataProvider } from '@features/market-data/infra/market-data.provider';
 import { RedisService } from '@infra/redis/redis.service';
 import { ApiKey } from '@features/auth/domain/api-key.entity';
@@ -36,6 +37,7 @@ export class MarketDataProviderResolverService {
     private kite: KiteProviderService,
     private vortex: VortexProviderService,
     private massive: MassiveProviderService,
+    private binance: BinanceProviderService,
     @InjectRepository(ApiKey) private apiKeyRepo: Repository<ApiKey>,
   ) {}
 
@@ -158,6 +160,7 @@ export class MarketDataProviderResolverService {
     let instance: MarketDataProvider;
     if (name === 'kite') instance = this.kite;
     else if (name === 'massive') instance = this.massive;
+    else if (name === 'binance') instance = this.binance;
     else instance = this.vortex;
     // fire-and-forget initialize; providers are resilient if not configured
     this.ensureInitialized(instance, name);
@@ -170,6 +173,7 @@ export class MarketDataProviderResolverService {
    * Kite: isClientInitialized() — access token loaded from Redis/DB.
    * Massive: !isDegraded() — MASSIVE_API_KEY is set.
    * Vortex: getDebugStatus()?.httpClientReady — VORTEX_API_KEY set.
+   * Binance: !isDegraded() — public market data needs no creds, so this is true after onModuleInit.
    */
   getEnabledProviders(): InternalProviderName[] {
     const enabled: InternalProviderName[] = [];
@@ -177,6 +181,7 @@ export class MarketDataProviderResolverService {
     if (!this.massive.isDegraded()) enabled.push('massive');
     const vortexStatus = this.vortex.getDebugStatus?.();
     if (vortexStatus?.httpClientReady) enabled.push('vortex');
+    if (!this.binance.isDegraded()) enabled.push('binance');
     return enabled;
   }
 }

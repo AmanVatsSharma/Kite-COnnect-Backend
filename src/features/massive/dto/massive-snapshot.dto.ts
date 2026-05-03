@@ -70,6 +70,7 @@ export interface MassiveReferenceTickersResponse {
     locale: string;
     type?: string;
     active?: boolean;
+    currency_symbol?: string;
     currency_name?: string;
   }>;
   status: string;

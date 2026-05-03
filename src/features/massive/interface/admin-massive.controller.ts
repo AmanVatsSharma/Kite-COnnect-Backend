@@ -113,6 +113,7 @@ export class AdminMassiveController {
       massiveToken: cross.massiveToken ?? null,
       kiteToken: cross.kiteToken ?? null,
       vortexToken: cross.vortexToken ?? null,
+      binanceToken: cross.binanceToken ?? null,
       found: cross.uirId != null,
       instrument: instrument ?? null,
     };

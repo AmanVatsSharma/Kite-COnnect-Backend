@@ -1,0 +1,14 @@
+---
+alwaysApply: true
+---
+
+# Behaviour
+- Confirm plan with user (SonuRam ji) before creating/merging major modules or DB migrations.
+- Enforce: types, docs-sync, dependency-cycle check on every PR.
+
+# Enforcements
+- Every `src/features/<name>/` directory MUST contain `MODULE_DOC.md`.
+- Every file MUST include the top-of-file header from `.cursor/rules/header.template.mdc`.
+- Backend `src/`: use Nest `Logger` (see `logger_setup.mdc`); no `console.log`. Frontend: dev-only debug via a small `lib/` logger wrapper is acceptable (see `uirules.mdc` scope).
+- Add requestId/correlation middleware to all HTTP & WebSocket flows.
+- Update changelog in module doc after every edit.

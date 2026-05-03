@@ -4,7 +4,7 @@
  * @description Prometheus metrics registry and counters/gauges/histograms for HTTP, providers, market stream, Vortex WS, Kite ticker.
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-14
+ * @updated 2026-04-19
  */
 import { Injectable } from '@nestjs/common';
 import {
@@ -51,6 +51,12 @@ export class MetricsService {
   readonly kiteTickerReconnectTotal: Counter;
   /** Current number of instruments subscribed upstream on the Kite WebSocket (max 3000). */
   readonly kiteTickerSubscribedInstruments: Gauge;
+  /** Redis operations total by method name and result (success|failure|skipped). */
+  readonly redisOpsTotal: Counter;
+  /** Redis circuit breaker state: 0=CLOSED, 1=OPEN, 2=HALF_OPEN. */
+  readonly redisCircuitState: Gauge;
+  /** Per named-client connection readiness: 1=ready, 0=not-ready. Labels: client name. */
+  readonly redisConnected: Gauge;
 
   constructor() {
     collectDefaultMetrics({ register });
@@ -211,6 +217,28 @@ export class MetricsService {
       help: 'Number of instruments currently subscribed on the Kite upstream WebSocket (max 3000)',
       registers: [register],
     });
+
+    // Redis metrics
+    this.redisOpsTotal = new Counter({
+      name: 'redis_ops_total',
+      help: 'Redis operations count by method and result',
+      labelNames: ['op', 'result'],
+      registers: [register],
+    });
+    this.redisCircuitState = new Gauge({
+      name: 'redis_circuit_state',
+      help: 'Redis circuit breaker state: 0=CLOSED, 1=OPEN, 2=HALF_OPEN',
+      labelNames: [],
+      registers: [register],
+    });
+    this.redisConnected = new Gauge({
+      name: 'redis_connected',
+      help: 'Redis client connection readiness (1=ready, 0=not)',
+      labelNames: ['client'],
+      registers: [register],
+    });
+    // Initialize circuit state to 0 (CLOSED)
+    this.redisCircuitState.set(0);
   }
 
   getMetricsRegister() {

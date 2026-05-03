@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "Kite_COnnect_Backend",
+  "project_id": "692af652-4ea2-4714-94c9-59f3e765e998"
+}

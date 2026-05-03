@@ -13,6 +13,8 @@ import { RequestAuditLog } from '@features/admin/domain/request-audit-log.entity
 import { ApiKeyAbuseFlag } from '@features/auth/domain/api-key-abuse-flag.entity';
 import { AppConfig } from '@infra/app-config/app-config.entity';
 import { UniversalInstrument } from '@features/market-data/domain/universal-instrument.entity';
+import { MassiveInstrument } from '@features/massive/domain/massive-instrument.entity';
+import { BinanceInstrument } from '@features/binance/domain/binance-instrument.entity';
 
 export const getDatabaseConfig = (
   configService: ConfigService,
@@ -37,9 +39,11 @@ export const getDatabaseConfig = (
     ApiKeyAbuseFlag,
     AppConfig,
     UniversalInstrument,
+    MassiveInstrument,
+    BinanceInstrument,
   ],
-  // In production, prefer running migrations over synchronize
-  // Override with DB_SYNCHRONIZE=true only for development
+  // In production, prefer running migrations over synchronize.
+  // Override with DB_SYNCHRONIZE=true only for development.
   synchronize: configService.get('DB_SYNCHRONIZE', 'false') === 'true',
   logging: configService.get('NODE_ENV') === 'development' || configService.get('DB_LOGGING', 'false') === 'true',
   migrations: ['dist/migrations/*.js'],

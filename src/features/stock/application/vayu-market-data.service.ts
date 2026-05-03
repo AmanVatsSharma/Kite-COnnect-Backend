@@ -105,6 +105,14 @@ export class VayuMarketDataService {
         };
       }
 
+      // Handle explicit exchange-token pairs (used by search-api vortex LTP hydration)
+      if (body.pairs?.length) {
+        const ltpData = await this.vortexProvider.getLTPByPairs(
+          body.pairs.map((p) => ({ exchange: p.exchange, token: String(p.token) })),
+        );
+        return { success: true, data: ltpData };
+      }
+
       // Handle body instruments array (Vayu specific format)
       if (
         !body.instruments ||

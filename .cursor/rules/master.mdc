@@ -1,0 +1,79 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+
+# =============================
+# 1. STRUCTURE & FEATURES
+# =============================
+- Every feature lives in `src/features/<feature-name>/`.
+- Use a **layered** layout (hexagonal-style) inside each feature:
+  - `application/` — use cases, orchestration, cron jobs, application services
+  - `domain/` — entities, enums, domain types (no HTTP imports)
+  - `infra/` — outbound adapters (providers, queues, external APIs)
+  - `interface/` — HTTP controllers, WebSocket gateways, DTOs under `interface/dto/` where applicable
+- Each feature includes `<feature>.module.ts`, optional `index.ts` for public exports, and **`MODULE_DOC.md`** at the feature root.
+- Cross-feature logic is forbidden; reuse via **`src/shared/`** (guards, interceptors, utils) and **`src/infra/`** (redis, observability, cross-cutting infra).
+- Prefer **sub-features or nested folders** under a feature instead of many top-level Nest modules in `app.module.ts`.
+
+# =============================
+# 2. FILE NAMING
+# =============================
+- **Backend (`src/`):** kebab-case filenames: `*.controller.ts`, `*.gateway.ts`, `*.service.ts`, `*.entity.ts`, `*.dto.ts`, `*.module.ts`, `*.spec.ts`.
+- **Frontend (`apps/admin-dashboard/` and other apps):** PascalCase for React pages/components (`OverviewPage.tsx`); kebab-case for non-component modules (`api-client.ts`).
+- Tests: `*.spec.ts` (Nest/Jest) next to source or under `__tests__/` when already used in that feature.
+
+# =============================
+# 3. FILE HEADERS
+# =============================
+- All new or substantially edited `.ts` / `.tsx` files must start with the **canonical** header defined in `.cursor/rules/header.template.mdc` (JSDoc with `@file`, `@module`, `@description`, `@author`, `@created`, optional `@updated` and Notes).
+
+# =============================
+# 4. LOGGING & ERROR HANDLING
+# =============================
+- See `logger_setup.mdc` and `error_handling.mdc` for the **project-standard** approach (aligned with current Nest usage).
+- Never use `console.log` in backend `src/`; use the Nest `Logger` (or injected logger wrapper when introduced).
+- Attach **requestId** / correlation on HTTP and WebSocket flows (interceptors/guards as applicable).
+
+# =============================
+# 5. DTO & VALIDATION
+# =============================
+- All inbound controller/gateway payloads go through **DTOs** with **class-validator** (and `ValidationPipe` where configured).
+- Avoid raw untyped objects in service public APIs; use DTOs or explicit interfaces.
+- Prefer **Zod** (or similar) in tests to assert DTO/runtime shapes where useful.
+
+# =============================
+# 6. DATABASE RULES
+# =============================
+- TypeORM entities live under feature **`domain/`** (or legacy `entities/` only if that feature already uses it — new code uses `domain/`).
+- Relations must define **cascade** rules explicitly when ORM-managed deletes matter.
+- **Always add migrations** for schema changes under `src/migrations/`.
+- Prefer **UUID v4** primary keys (`@PrimaryGeneratedColumn('uuid')`) for new entities unless a strong reason exists.
+
+# =============================
+# 7. SECURITY & RELIABILITY (summary)
+# =============================
+- No secrets or production `.env` in git; use env templates and secure stores in deployment.
+- Public and admin endpoints: **auth**, **rate limits**, and validation as documented in `api_rules.mdc`.
+- Outbound HTTP/WebSocket to brokers: timeouts, retries, and structured errors where applicable.
+
+# =============================
+# 8. OBSERVABILITY
+# =============================
+- Use **`src/infra/observability/`** (metrics, Sentry, etc.) for cross-cutting telemetry; log with **correlation/requestId** when available.
+
+# =============================
+# 9. CURSOR AI USAGE
+# =============================
+- Respect the `src/features/<name>/` layout and layer boundaries.
+- After every meaningful edit, update the feature **`MODULE_DOC.md`** changelog section.
+- Use **Nest CLI** to generate boilerplate when it fits the layered structure (`nest g module`, `service`, `controller`), then move files into `application/`, `interface/`, etc. if needed.
+- After every edit, log changes in the relevant **MODULE_DOC.md** changelog (and root/docs changelog if the project maintains one).
+
+# =============================
+# 10. DOCUMENTATION
+# =============================
+- Keep each feature’s **MODULE_DOC.md** in sync with behavior and env vars.
+- Root **README.md** may point to deeper docs; use **TypeDoc** or module docs for API surfaces where applicable.

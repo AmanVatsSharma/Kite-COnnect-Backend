@@ -125,9 +125,11 @@ export class MassiveRestClient {
   ): Promise<MassiveReferenceTickersResponse | null> {
     if (!this.http) return null;
     try {
+      // Massive API uses 'fx' for forex (not 'forex')
+      const apiMarket = market === 'forex' ? 'fx' : market;
       const params: Record<string, any> = {
         apiKey: this.apiKey,
-        market,
+        market: apiMarket,
         active: true,
         limit,
       };

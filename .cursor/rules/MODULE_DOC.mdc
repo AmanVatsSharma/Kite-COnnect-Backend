@@ -1,0 +1,50 @@
+---
+description: Template for feature MODULE_DOC.md under src/features
+alwaysApply: false
+---
+
+# Module: <feature-name>
+
+
+**Short:** One-line summary.
+
+
+**Purpose:** Business intent (e.g. "Stream and persist market data subscriptions for instruments").
+
+
+**Layout (this repo):**
+
+| Path | Role |
+|------|------|
+| `<feature>.module.ts` | Nest module definition & imports |
+| `application/` | Application services, orchestration, scheduled jobs |
+| `domain/` | Entities, domain types |
+| `infra/` | Outbound adapters (providers, queues, external APIs) |
+| `interface/` | Controllers, gateways, `dto/` |
+| `MODULE_DOC.md` | This document |
+| `*.spec.ts` / `__tests__/` | Unit and integration tests |
+| `*.md` (optional) | Flow docs, architecture notes |
+
+
+**Flow diagram:** `flowcharts/<feature>-flow.svg` or Mermaid in this file
+
+
+**Dependencies:** Other `src/features/*`, `src/shared/*`, `src/infra/*`, external APIs
+
+
+**APIs:**
+
+- REST: method, path, brief purpose
+- WebSocket: event names, payload summary (if any)
+
+
+**Env vars:**
+
+- `<FEATURE>_ENABLED=true`
+- `<FEATURE>_SETTING=...`
+
+
+**Tests:** Coverage expectations; when to run integration / Testcontainers
+
+
+**Change-log:** (update on each meaningful change — date + summary)

@@ -7,10 +7,10 @@
  *   Translates Massive WS events → canonical tick objects keyed by symbol string.
  * @author BharatERP
  * @created 2026-04-18
- * @updated 2026-04-18
+ * @updated 2026-04-27
  */
 import { Injectable, Logger } from '@nestjs/common';
-import WebSocket from 'ws';
+import * as WebSocket from 'ws';
 import {
   MASSIVE_WS_REALTIME_BASE,
   MASSIVE_WS_DELAYED_BASE,
@@ -23,6 +23,9 @@ import type {
   MassiveMinuteAggEvent,
   MassiveCryptoTradeEvent,
   MassiveCryptoAggEvent,
+  MassiveCryptoQuoteEvent,
+  MassiveForexQuoteEvent,
+  MassiveForexAggEvent,
   MassiveWsEvent,
 } from '../dto/massive-ws-event.dto';
 
@@ -57,6 +60,7 @@ export class MassiveWebSocketClient {
   private readonly maxReconnectAttempts = 10;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private shouldReconnect = false;
+  private authFailed = false;
 
   /** Active symbol subscriptions kept for re-subscribe after reconnect. */
   private subscribedSymbols: Set<string> = new Set();
@@ -67,6 +71,7 @@ export class MassiveWebSocketClient {
     this.apiKey = apiKey;
     this.wsBase = realtime ? MASSIVE_WS_REALTIME_BASE : MASSIVE_WS_DELAYED_BASE;
     this.assetClass = assetClass;
+    this.authFailed = false;
     this.logger.log(`[Massive WS] Configured for ${assetClass} (${realtime ? 'realtime' : 'delayed'})`);
   }
 
@@ -148,11 +153,17 @@ export class MassiveWebSocketClient {
   }
 
   private openConnection(): void {
-    const url = `${this.wsBase}/${this.assetClass}`;
-    this.logger.log(`[Massive WS] Connecting to ${url}`);
+    // Massive requires the API key as a query parameter on the upgrade request — 403 without it.
+    const url = `${this.wsBase}/${this.assetClass}?apiKey=${this.apiKey}`;
+    this.logger.log(`[Massive WS] Connecting to ${this.wsBase}/${this.assetClass}`);
+
+    // MASSIVE_WS_REJECT_UNAUTHORIZED=false disables TLS verification for self-signed / proxy certs.
+    // Default is secure (true). Only set false in dev environments.
+    const rejectUnauthorized = process.env.MASSIVE_WS_REJECT_UNAUTHORIZED !== 'false';
+    const wsOptions: WebSocket.ClientOptions = rejectUnauthorized ? {} : { rejectUnauthorized: false };
 
     try {
-      this.ws = new WebSocket(url);
+      this.ws = new WebSocket(url, wsOptions);
     } catch (err) {
       this.logger.error('[Massive WS] Failed to create WebSocket', err as any);
       this.scheduleReconnect();
@@ -227,6 +238,7 @@ export class MassiveWebSocketClient {
 
     if (event.status === 'auth_failed') {
       this.logger.error('[Massive WS] Auth failed — disabling reconnect');
+      this.authFailed = true;
       this.shouldReconnect = false;
       this.emit('error', new Error('Massive WS auth failed'));
     }
@@ -234,8 +246,18 @@ export class MassiveWebSocketClient {
 
   private sendSubscribe(symbols: string[]): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    // Subscribe to trades and minute aggregates
-    const params = symbols.map((s) => `T.${s},AM.${s}`).join(',');
+    // Polygon channel prefixes differ by asset class:
+    //   stocks:  T.AAPL (trades) + AM.AAPL (minute aggs)
+    //   forex:   C.EURUSD (forex quotes — strip any "C:" prefix from the symbol first)
+    //   crypto:  XT.BTCUSD (trades) + XA.BTCUSD (minute aggs)
+    let params: string;
+    if (this.assetClass === 'forex') {
+      params = symbols.map((s) => `C.${s.replace(/^C:/i, '')}`).join(',');
+    } else if (this.assetClass === 'crypto') {
+      params = symbols.map((s) => { const c = s.replace(/^X:/i, ''); return `XT.${c},XA.${c}`; }).join(',');
+    } else {
+      params = symbols.map((s) => `T.${s},AM.${s}`).join(',');
+    }
     this.ws.send(JSON.stringify({ action: 'subscribe', params }));
     this.logger.log(`[Massive WS] Subscribed: ${symbols.slice(0, 5).join(',')}${symbols.length > 5 ? `…+${symbols.length - 5}` : ''}`);
   }
@@ -296,6 +318,37 @@ export class MassiveWebSocketClient {
             ohlc: { open: ca.o, high: ca.h, low: ca.l, close: ca.c },
           };
         }
+        case MASSIVE_WS_EVENTS.CRYPTO_QUOTE: {
+          const cq = event as MassiveCryptoQuoteEvent;
+          return {
+            instrument_token: cq.pair,
+            last_price: (cq.bp + cq.ap) / 2,
+            exchange: 'crypto',
+            last_trade_time: cq.t,
+          };
+        }
+        case MASSIVE_WS_EVENTS.FOREX_QUOTE: {
+          const f = event as MassiveForexQuoteEvent;
+          // Polygon sends pair as "EUR/USD" (slash); strip to match clean provider_token "EURUSD" in registry
+          const sym = f.p.replace('/', '');
+          return {
+            instrument_token: sym,
+            last_price: (f.a + f.b) / 2,
+            exchange: 'forex',
+            last_trade_time: f.t,
+          };
+        }
+        case MASSIVE_WS_EVENTS.FOREX_AGG: {
+          const fa = event as MassiveForexAggEvent;
+          const fsym = fa.p.replace('/', '');
+          return {
+            instrument_token: fsym,
+            last_price: fa.c,
+            exchange: 'forex',
+            last_trade_time: fa.s,
+            ohlc: { open: fa.o, high: fa.h, low: fa.l, close: fa.c },
+          };
+        }
         default:
           return null;
       }
@@ -322,6 +375,16 @@ export class MassiveWebSocketClient {
   /** Active symbol count for health/debug endpoints. */
   getSubscribedCount(): number {
     return this.subscribedSymbols.size;
+  }
+
+  /** All currently subscribed symbols — used by the REST polling fallback. */
+  getSubscribedTokens(): string[] {
+    return Array.from(this.subscribedSymbols);
+  }
+
+  /** True after a plan-level auth_failed — signals the composite to start REST polling. */
+  isAuthFailed(): boolean {
+    return this.authFailed;
   }
 
   isWsConnected(): boolean {

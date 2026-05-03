@@ -4,7 +4,7 @@
  * @description CSV sync, instrument_mapping upserts, and daily cron for Vortex instruments.
  * @author BharatERP
  * @created 2026-03-28
- * @updated 2026-04-17
+ * @updated 2026-04-22
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -180,12 +180,13 @@ export class VortexInstrumentSyncService {
         `[VortexInstrumentSyncService] Sync completed. Synced: ${synced}, Updated: ${updated}`,
       );
 
-      // Refresh the universal instrument registry after sync
+      // Cross-link kite↔vortex mappings by instrument_token, then refresh registry
       try {
+        await this.crossLinkProviderMappings();
         await this.instrumentRegistry.refresh();
-        this.logger.log('[VortexInstrumentSyncService] InstrumentRegistry refreshed after sync');
+        this.logger.log('[VortexInstrumentSyncService] Cross-link complete, InstrumentRegistry refreshed');
       } catch (refreshErr) {
-        this.logger.warn('[VortexInstrumentSyncService] Failed to refresh InstrumentRegistry', refreshErr);
+        this.logger.warn('[VortexInstrumentSyncService] Cross-link/refresh failed (non-fatal)', refreshErr);
       }
 
       onProgress?.({
@@ -210,6 +211,35 @@ export class VortexInstrumentSyncService {
         lastMessage: `Error: ${(error as Error)?.message || 'unknown'}`,
       });
       throw error;
+    }
+  }
+
+  private async crossLinkProviderMappings(): Promise<void> {
+    try {
+      await Promise.all([
+        this.mappingRepo.query(`
+          UPDATE instrument_mappings AS vx
+          SET uir_id = kx.uir_id
+          FROM instrument_mappings AS kx
+          WHERE kx.provider = 'kite'
+            AND vx.provider = 'vortex'
+            AND kx.instrument_token = vx.instrument_token
+            AND kx.uir_id IS NOT NULL
+            AND (vx.uir_id IS NULL OR vx.uir_id != kx.uir_id)
+        `),
+        this.mappingRepo.query(`
+          UPDATE instrument_mappings AS kx
+          SET uir_id = vx.uir_id
+          FROM instrument_mappings AS vx
+          WHERE vx.provider = 'vortex'
+            AND kx.provider = 'kite'
+            AND vx.instrument_token = kx.instrument_token
+            AND vx.uir_id IS NOT NULL
+            AND (kx.uir_id IS NULL OR kx.uir_id != vx.uir_id)
+        `),
+      ]);
+    } catch (e) {
+      this.logger.warn('[VortexInstrumentSyncService] Cross-link pass failed (non-fatal)', e as Error);
     }
   }
 

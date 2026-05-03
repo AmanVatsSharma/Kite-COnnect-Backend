@@ -4,8 +4,9 @@
  * @description Native WebSocket /ws endpoint: API key auth, subscriptions, tick broadcast with mode shaping.
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-04-18
- * Changelog: added symbols[] canonical subscription support in handleSubscribe
+ * @updated 2026-04-28
+ * Changelog: added Provider:identifier prefix syntax (Falcon:reliance, Vayu:26000, Massive:AAPL, Binance:BTCUSDT)
+ *            for explicit per-instrument provider pinning in handleSubscribe / handleUnsubscribe.
  */
 import {
   Injectable,
@@ -27,6 +28,11 @@ import {
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
 import { validateSetModePayload } from '@shared/utils/ws-validation';
 import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
+import { parseProviderPrefix } from '@shared/utils/ws-provider-prefix.util';
+import {
+  internalToClientProviderName,
+  InternalProviderName,
+} from '@shared/utils/provider-label.util';
 
 interface ClientSubscription {
   clientId: string;
@@ -315,32 +321,110 @@ export class NativeWsService implements OnModuleDestroy {
 
     const { instruments: rawInstruments = [], symbols = [], mode = 'ltp' } = data || {};
 
-    // Resolve canonical symbols (e.g. "NSE:RELIANCE") to numeric provider tokens
-    const resolvedSymbolTokens: number[] = [];
+    // ── Provider-prefix syntax (Falcon:reliance, Vayu:26000, Massive:AAPL, Binance:BTCUSDT) ──
+    // Pinned UIRs are routed to their specified provider, bypassing best-provider routing
+    // and kite↔vortex dual-subscribe.
+    const forcedByProvider = new Map<InternalProviderName, number[]>();
+    const forcedConfirm: Array<{
+      symbol: string;
+      uirId: number;
+      provider: string;
+      canonical: string;
+    }> = [];
     const unresolvedSymbols: string[] = [];
-    if (Array.isArray(symbols) && symbols.length > 0) {
-      const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
-      for (const sym of symbols as string[]) {
-        const uirId = this.instrumentRegistry.resolveCanonicalSymbol(sym);
-        if (uirId == null) { unresolvedSymbols.push(sym); continue; }
-        const pt = this.instrumentRegistry.getProviderToken(uirId, providerName);
-        if (pt != null) resolvedSymbolTokens.push(Number(pt));
-        else unresolvedSymbols.push(sym);
+    const enabledProviders = new Set(this.providerResolver.getEnabledProviders());
+
+    const consumePrefixed = (items: unknown[]): unknown[] => {
+      const remaining: unknown[] = [];
+      for (const item of items) {
+        const prefixed = parseProviderPrefix(item);
+        if (!prefixed) {
+          remaining.push(item);
+          continue;
+        }
+        if (!enabledProviders.has(prefixed.provider)) {
+          this.sendError(
+            client,
+            'WS_FORCED_PROVIDER_UNAVAILABLE',
+            `Requested provider ${internalToClientProviderName(prefixed.provider)} (${prefixed.raw}) has no active upstream connection`,
+          );
+          continue;
+        }
+        const result = this.instrumentRegistry.resolveProviderScopedSymbol(
+          prefixed.provider,
+          prefixed.identifier,
+        );
+        if (result.status === 'not_found') {
+          unresolvedSymbols.push(`${prefixed.raw} (not found in ${internalToClientProviderName(prefixed.provider)} catalog)`);
+          continue;
+        }
+        if (result.status === 'ambiguous') {
+          unresolvedSymbols.push(
+            `${prefixed.raw} (ambiguous in ${internalToClientProviderName(prefixed.provider)} — try: ${result.candidates.join(', ')})`,
+          );
+          continue;
+        }
+        if (!forcedByProvider.has(prefixed.provider)) forcedByProvider.set(prefixed.provider, []);
+        forcedByProvider.get(prefixed.provider)!.push(result.uirId);
+        forcedConfirm.push({
+          symbol: prefixed.raw,
+          uirId: result.uirId,
+          provider: internalToClientProviderName(prefixed.provider),
+          canonical: result.canonical,
+        });
+      }
+      return remaining;
+    };
+
+    const cleanedRawInstruments = Array.isArray(rawInstruments)
+      ? consumePrefixed(rawInstruments)
+      : [];
+    const cleanedSymbols = Array.isArray(symbols) ? consumePrefixed(symbols) : [];
+
+    // Parse instruments: accept both numeric tokens and Vortex EXCHANGE-TOKEN strings (e.g. "NSE_EQ-213123").
+    const vortexPairs: Array<{ token: number; exchange: string }> = [];
+    const numericInstruments: number[] = [];
+    for (const item of cleanedRawInstruments as any[]) {
+      if (typeof item === 'string') {
+        const m = String(item).trim().toUpperCase().match(/^([A-Z_]+)-(\d+)$/);
+        if (m && ['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'].includes(m[1])) {
+          const tok = Number(m[2]);
+          if (Number.isFinite(tok)) { vortexPairs.push({ token: tok, exchange: m[1] }); continue; }
+        }
+      }
+      const n = Number(item);
+      if (Number.isFinite(n)) numericInstruments.push(n);
+    }
+
+    // Resolve symbols directly to UIR IDs — works for ALL providers in parallel
+    // (NSE:RELIANCE → kite/vortex, BINANCE:BTCUSDT → binance, US:AAPL → massive, …).
+    // The batch processor routes each UIR per-instrument via getBestProviderForUirId.
+    const resolvedSymbolUirIds: number[] = [];
+    if (Array.isArray(cleanedSymbols) && cleanedSymbols.length > 0) {
+      for (const sym of cleanedSymbols as string[]) {
+        const flexResult = this.instrumentRegistry.resolveFlexSymbol(sym);
+        if (flexResult.status === 'not_found') { unresolvedSymbols.push(sym); continue; }
+        if (flexResult.status === 'ambiguous') {
+          unresolvedSymbols.push(`${sym} (ambiguous — try: ${flexResult.candidates.join(', ')})`);
+          continue;
+        }
+        resolvedSymbolUirIds.push(flexResult.uirId);
       }
     }
 
-    const instruments: number[] = [...(rawInstruments as number[]), ...resolvedSymbolTokens];
+    const totalInputCount = vortexPairs.length + numericInstruments.length;
+    const forcedTotal = Array.from(forcedByProvider.values()).reduce((n, ids) => n + ids.length, 0);
 
-    if (instruments.length === 0 && symbols.length === 0) {
+    if (totalInputCount === 0 && (!Array.isArray(symbols) || symbols.length === 0) && forcedTotal === 0) {
       this.sendError(
         client,
         'WS_INVALID_INSTRUMENTS',
-        'Provide instruments (numeric tokens) or symbols (canonical strings)',
+        'Provide instruments (numeric tokens, Vortex EXCHANGE-TOKEN strings, canonical symbols, or Provider:identifier prefix)',
       );
       return;
     }
 
-    if (instruments.length === 0) {
+    if (totalInputCount === 0 && resolvedSymbolUirIds.length === 0 && forcedTotal === 0) {
       this.sendError(
         client,
         'WS_INVALID_INSTRUMENTS',
@@ -358,47 +442,83 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
-    try {
-      // Check streaming status
-      const status = await this.streamService.getStreamingStatus();
-      if (!status?.isStreaming) {
-        this.sendError(
-          client,
-          'WS_STREAM_INACTIVE',
-          'Streaming is not active. Ask admin to start stream.',
-        );
-        return;
+    // Pure forced-only subscriptions skip auto-start — the batch processor lazy-inits
+    // the requested provider's ticker on first subscription.
+    const isPureForced = totalInputCount === 0 && resolvedSymbolUirIds.length === 0 && forcedTotal > 0;
+    if (!isPureForced) {
+      try {
+        // Ensure streaming is active; auto-start on first subscriber if needed
+        const status = await this.streamService.getStreamingStatus();
+        if (!status?.isStreaming) {
+          this.sendToClient(client, 'stream_starting', { message: 'Streaming not active — auto-starting provider ticker…', ts: Date.now() });
+          const started = await this.streamService.autoStartIfNeeded();
+          if (!started) {
+            this.sendError(
+              client,
+              'WS_STREAM_UNAVAILABLE',
+              'Could not auto-start streaming. Ensure provider credentials are configured (KITE_ACCESS_TOKEN / VORTEX_API_KEY).',
+            );
+            return;
+          }
+        }
+      } catch (e) {
+        this.logger.warn('Failed to read/auto-start streaming status', e as any);
       }
-    } catch (e) {
-      this.logger.warn('Failed to read streaming status', e as any);
     }
 
-    // Phase 3: resolve provider tokens to UIR IDs for internal tracking
-    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    // Phase 3: resolve all inputs to UIR IDs. Provider-agnostic — every input form
+    // (numeric token, Vortex EXCHANGE-TOKEN, canonical symbol) collapses to a UIR id,
+    // and the batch processor in MarketDataStreamService routes per-instrument via
+    // getBestProviderForUirId. No "active provider" assumption anywhere on this path.
+    const totalInputs =
+      numericInstruments.length + vortexPairs.length + resolvedSymbolUirIds.length;
     const uirIds: number[] = [];
-    for (const token of instruments as number[]) {
-      const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
+
+    // Vortex EXCHANGE-TOKEN pairs: try the full Vortex key first (e.g. "vortex:NSE_EQ-213123"),
+    // then the numeric secondary index ("vortex:213123") added in warmMaps for raw token inputs.
+    for (const p of vortexPairs) {
+      const fullKey = `${p.exchange}-${p.token}`;
+      const uirId =
+        this.instrumentRegistry.resolveProviderToken('vortex', fullKey) ??
+        this.instrumentRegistry.resolveProviderToken('vortex', p.token);
+      uirIds.push(uirId != null ? uirId : p.token);
+    }
+    // Numeric tokens with no provider hint — try every provider in parallel; first match wins.
+    // Falls back to treating the input as a raw UIR id when no mapping exists.
+    for (const token of numericInstruments) {
+      const uirId = this.instrumentRegistry.resolveTokenAcrossProviders(token);
       uirIds.push(uirId != null ? uirId : token);
     }
+    // Symbol inputs already resolved to UIR ids during the symbols loop.
+    uirIds.push(...resolvedSymbolUirIds);
+
+    // Forced provider-prefixed UIR IDs go to the same in-memory subscription view but
+    // dispatch separately to pin routing in the stream service.
+    const forcedUirIdsAll: number[] = Array.from(forcedByProvider.values()).flat();
 
     const prior = new Set(subscription.instruments);
-    // Update subscription with UIR IDs
+    // Update subscription with UIR IDs (including forced)
     subscription.instruments = [
-      ...new Set([...subscription.instruments, ...uirIds]),
+      ...new Set([...subscription.instruments, ...uirIds, ...forcedUirIdsAll]),
     ];
-    uirIds.forEach((id: number) => {
+    [...uirIds, ...forcedUirIdsAll].forEach((id: number) => {
       subscription.modeByInstrument.set(id, mode);
     });
-    for (const id of uirIds) {
+    for (const id of [...uirIds, ...forcedUirIdsAll]) {
       if (!prior.has(id)) {
         this.wsInterest.addInterest(id);
       }
     }
 
     this.logger.debug(
-      `[NativeWsService] Subscribing client ${clientId} count=${instruments.length} uirIds=${uirIds.length} mode=${mode}`,
+      `[NativeWsService] Subscribing client ${clientId} count=${totalInputs} uirIds=${uirIds.length} forced=${forcedUirIdsAll.length} mode=${mode}`,
     );
-    await this.subscribeToInstruments(instruments, mode, clientId);
+    if (uirIds.length > 0) {
+      await this.subscribeToInstruments(uirIds, mode, clientId);
+    }
+    for (const [provider, ids] of forcedByProvider) {
+      await this.subscribeToInstrumentsForcedProvider(ids, mode, clientId, provider);
+    }
 
     let limits: Record<string, unknown> = {
       maxUpstreamInstruments: 1000,
@@ -425,12 +545,13 @@ export class NativeWsService implements OnModuleDestroy {
       instruments: subscription.instruments,
       mode,
       limits,
+      ...(forcedConfirm.length > 0 ? { forced: forcedConfirm } : {}),
       ...(unresolvedSymbols.length > 0 ? { unresolvedSymbols } : {}),
       timestamp: new Date().toISOString(),
     });
 
     this.logger.log(
-      `Client ${clientId} subscribed to ${instruments.length} instruments with mode=${mode}; confirmation sent`,
+      `Client ${clientId} subscribed to ${totalInputs} instruments with mode=${mode}; confirmation sent`,
     );
   }
 
@@ -453,12 +574,26 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
-    // Phase 3: resolve incoming provider tokens to UIR IDs
-    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    // Resolve incoming inputs to UIR IDs. Accepts numeric tokens (resolved against the
+    // active provider), Vortex EXCHANGE-TOKEN strings, and Provider:identifier prefix
+    // strings (Falcon:reliance, Vayu:26000, Massive:AAPL, Binance:BTCUSDT).
+    const providerName = this.streamService.activeProviderName;
     const requestedUirIds: number[] = [];
-    for (const token of instruments as number[]) {
-      const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
-      requestedUirIds.push(uirId != null ? uirId : token);
+    for (const item of instruments as Array<unknown>) {
+      const prefixed = parseProviderPrefix(item);
+      if (prefixed) {
+        const result = this.instrumentRegistry.resolveProviderScopedSymbol(
+          prefixed.provider,
+          prefixed.identifier,
+        );
+        if (result.status === 'resolved') requestedUirIds.push(result.uirId);
+        continue;
+      }
+      const n = Number(item);
+      if (Number.isFinite(n)) {
+        const uirId = this.instrumentRegistry.resolveProviderToken(providerName, n);
+        requestedUirIds.push(uirId != null ? uirId : n);
+      }
     }
 
     const before = new Set(subscription.instruments);
@@ -522,7 +657,7 @@ export class NativeWsService implements OnModuleDestroy {
       }
     }
     // Phase 3: resolve provider tokens to UIR IDs
-    const providerName = (this.streamService as any).streamMetricsProvider || 'kite';
+    const providerName = this.streamService.activeProviderName;
     const uirIds: number[] = [];
     for (const token of tokens) {
       const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
@@ -648,6 +783,30 @@ export class NativeWsService implements OnModuleDestroy {
       );
     } catch (error) {
       this.logger.error('Error queuing instrument subscriptions', error as any);
+    }
+  }
+
+  /**
+   * Forced-provider variant of `subscribeToInstruments`. Pins the listed UIRs to a specific
+   * provider's ticker, bypassing best-provider routing and kite↔vortex dual-subscribe.
+   * Used by the `Provider:identifier` WS prefix syntax.
+   *
+   * Skips the streaming-active check — the batch processor lazy-inits the requested provider
+   * on first subscription, so a fresh connection with only forced subscriptions still works.
+   */
+  private async subscribeToInstrumentsForcedProvider(
+    instruments: number[],
+    mode: 'ltp' | 'ohlcv' | 'full',
+    clientId: string,
+    provider: InternalProviderName,
+  ) {
+    try {
+      await this.streamService.subscribeToInstruments(instruments, mode, clientId, provider);
+      this.logger.log(
+        `[NativeWS] Queued forced subscription provider=${provider} count=${instruments.length} mode=${mode} client=${clientId}`,
+      );
+    } catch (error) {
+      this.logger.error('Error queuing forced-provider subscription', error as any);
     }
   }
 

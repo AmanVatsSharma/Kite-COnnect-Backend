@@ -1,0 +1,14 @@
+---
+description: rules for api
+alwaysApply: false
+---
+type: ApplyIntelligently
+# Decision matrix
+- If endpoint is high-frequency (orders, modify, cancel, fills) -> prefer REST for minimal overhead and deterministic latency.
+- If endpoint needs flexible cross-entity reads (admin dashboards, analytics) -> recommend GraphQL admin schema.
+- If both needed -> create separate REST gateway (/api/rest) and GraphQL admin gateway (/api/graphql) sharing the same services layer.
+
+# Recommendations
+- Rate-limit & auth on every public endpoint.
+- Use validation pipes, DTOs, and strict runtime checks for inbound payloads.
+- For streaming market-data use WebSocket gateway with small, typed frames.

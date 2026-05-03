@@ -1,0 +1,36 @@
+---
+description: Nest feature scaffold under src/features (layered architecture)
+globs: src/features/**/*
+alwaysApply: false
+---
+
+# Feature scaffold: `src/features/<feature>/`
+
+Use this layout for new Nest features in this repository.
+
+```
+src/features/<feature>/
+  <feature>.module.ts          # Nest module wiring
+  application/                 # Use cases, jobs, application services
+    <feature>.service.ts
+    *.cron.ts                  # optional scheduled tasks
+  domain/                      # Entities & domain types
+    <feature>.entity.ts
+  infra/                       # External systems, provider adapters
+    <feature>-provider.service.ts
+  interface/                   # HTTP / WebSocket surface
+    <feature>.controller.ts
+    <feature>.gateway.ts       # if WebSocket
+    dto/
+      *.dto.ts
+  MODULE_DOC.md
+  *.md                         # optional deep-dives (flows, architecture)
+```
+
+# Rules
+
+- Register the feature in `app.module.ts` (or a parent module) via `<feature>.module.ts`.
+- Add the **canonical file header** (see `.cursor/rules/header.template.mdc`) to each new file.
+- Use **`Logger` from `@nestjs/common`** (or project logger wrapper) in services; log important failures with context; avoid `console.log` in `src/`.
+- Prefer **unit tests** (`*.spec.ts`) beside services/controllers; add **integration tests** with Testcontainers/Postgres when the feature touches the DB in non-trivial ways.
+- Update **MODULE_DOC.md** (purpose, APIs, env vars, changelog) when behavior changes.

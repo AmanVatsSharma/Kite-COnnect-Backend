@@ -1,0 +1,12 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# PR Checklist
+- [ ] Plan confirmed with SonuRam ji
+- [ ] Module docs updated (MODULE_DOC.md)
+- [ ] Top-of-file headers present
+- [ ] Madge cycle check passed
+- [ ] Duplicate-file check passed
+- [ ] Changelog entry included

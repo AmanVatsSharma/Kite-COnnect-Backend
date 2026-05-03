@@ -1,17 +1,23 @@
+/**
+ * @file auth.controller.ts
+ * @module auth
+ * @description OAuth callback controllers for Kite (Falcon) and Rupeezy Vayu providers; handles login URL generation, state CSRF validation, token exchange, and provider activation.
+ * @author BharatERP
+ * @created 2025-01-01
+ * @updated 2026-04-21
+ */
 import {
   Controller,
   Get,
   Post,
   Body,
   Query,
-  Res,
   BadRequestException,
   Logger,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AdminGuard } from '@features/admin/guards/admin.guard';
-import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { KiteConnect } from 'kiteconnect';
 import { Repository } from 'typeorm';
@@ -36,8 +42,9 @@ import { MarketDataStreamService } from '@features/market-data/application/marke
 import { VortexSession } from '@features/stock/domain/vortex-session.entity';
 import { MarketDataProviderResolverService } from '@features/market-data/application/market-data-provider-resolver.service';
 
-// Fallback in-memory store for OAuth state when Redis is unavailable
-const kiteStateMemory = new Map<string, number>(); // state -> createdAt (ms)
+// OAuth state DB key prefix — stored via AppConfigService so states survive
+// process restarts and NestJS --watch hot-reloads (in-memory maps don't).
+const OAUTH_STATE_KEY = (state: string) => `kite:oauth_state:${state}`;
 
 @Controller('auth/falcon')
 @ApiTags('auth')
@@ -68,7 +75,7 @@ export class AuthController {
       },
     },
   })
-  async login(@Res() res: Response) {
+  async login() {
     const dbApiKey = await this.appConfig.get('config:kite:api_key').catch(() => null);
     const dbApiSecret = await this.appConfig.get('config:kite:api_secret').catch(() => null);
     const apiKey = dbApiKey || this.configService.get<string>('KITE_API_KEY');
@@ -78,22 +85,19 @@ export class AuthController {
 
     const kite = new KiteConnect({ api_key: apiKey });
     const state = Math.random().toString(36).slice(2);
+    // Persist state in DB (survives process restarts and hot-reloads).
+    // Redis is used as fast path when available; DB is the durable fallback.
     if (this.redisService.isRedisAvailable()) {
-      await this.redisService.set(
-        `kite_oauth_state:${state}`,
-        { createdAt: Date.now() },
-        300,
-      );
-    } else {
-      // Memory fallback with 5 min TTL
-      kiteStateMemory.set(state, Date.now());
+      await this.redisService.set(`kite_oauth_state:${state}`, { createdAt: Date.now() }, 300);
     }
-    // Ensure compatibility: append state param if SDK doesn't accept object arg
+    await this.appConfig.set(OAUTH_STATE_KEY(state), String(Date.now()));
+
+    // Kite only echoes back params placed inside redirect_params (URL-encoded).
     const baseUrl = (kite as any).getLoginURL?.() || '';
     const url = baseUrl
-      ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}state=${state}`
+      ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}redirect_params=${encodeURIComponent(`state=${state}`)}`
       : baseUrl;
-    return res.json({ url, state });
+    return { url, state };
   }
 
   @Get('callback')
@@ -116,16 +120,22 @@ export class AuthController {
     if (!apiKey || !apiSecret)
       throw new BadRequestException('Falcon API creds not configured');
 
+    // Validate state: Redis fast-path, then DB fallback (survives hot-reloads).
     let stateValid = false;
     if (this.redisService.isRedisAvailable()) {
       const expected = await this.redisService.get(`kite_oauth_state:${state}`);
       stateValid = !!expected;
-    } else {
-      const createdAt = kiteStateMemory.get(state);
-      if (createdAt && Date.now() - createdAt < 5 * 60 * 1000)
-        stateValid = true;
+    }
+    if (!stateValid) {
+      const createdAtStr = await this.appConfig.get(OAUTH_STATE_KEY(state)).catch(() => null);
+      if (createdAtStr) {
+        const age = Date.now() - Number(createdAtStr);
+        stateValid = age < 10 * 60 * 1000; // 10-min window for slower OAuth flows
+      }
     }
     if (!stateValid) throw new BadRequestException('Invalid or expired state');
+    // Clean up used state so it can't be replayed
+    await this.appConfig.set(OAUTH_STATE_KEY(state), 'used');
 
     const kite = new KiteConnect({ api_key: apiKey });
     let session: any;
@@ -185,7 +195,6 @@ export class AuthController {
     try {
       if (this.redisService.isRedisAvailable())
         await this.redisService.del(`kite_oauth_state:${state}`);
-      kiteStateMemory.delete(state);
     } catch {}
 
     return { success: true };
@@ -304,7 +313,7 @@ export class VortexAuthController {
       },
     },
   })
-  async login(@Res() res: Response) {
+  async login() {
     const dbAppId = await this.appConfig.get('config:vortex:app_id').catch(() => null);
     const appId = dbAppId || this.configService.get<string>('VORTEX_APP_ID');
     if (!appId)
@@ -312,7 +321,7 @@ export class VortexAuthController {
         'Vayu applicationId (VORTEX_APP_ID) not configured',
       );
     const url = `https://flow.rupeezy.in?applicationId=${encodeURIComponent(appId)}`;
-    return res.json({ url });
+    return { url };
   }
 
   @Get('callback')

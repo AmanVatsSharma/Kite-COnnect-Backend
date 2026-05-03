@@ -4,7 +4,7 @@
  * @description Health endpoints; streaming summary uses client-visible provider labels (Falcon|Vayu).
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-03-28
+ * @updated 2026-04-19
  */
 import { Controller, Get, Res, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
@@ -12,6 +12,7 @@ import { StockService } from '@features/stock/application/stock.service';
 import { MarketDataProviderResolverService } from '@features/market-data/application/market-data-provider-resolver.service';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { RedisService } from '@infra/redis/redis.service';
+import { RedisHealthIndicator } from '@infra/redis/redis-health.indicator';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { VortexProviderService } from '@features/stock/infra/vortex-provider.service';
@@ -27,6 +28,7 @@ export class HealthController {
     private resolver: MarketDataProviderResolverService,
     private kiteProvider: KiteProviderService,
     private redisService: RedisService,
+    private redisHealth: RedisHealthIndicator,
     private marketDataStreamService: MarketDataStreamService,
     private metricsService: MetricsService,
     private vortexProvider: VortexProviderService,
@@ -36,10 +38,11 @@ export class HealthController {
   @ApiOperation({ summary: 'Basic health' })
   async getHealth() {
     try {
-      const [systemStats, streamingStatus, vortexPing] = await Promise.all([
+      const [systemStats, streamingStatus, vortexPing, redisCheck] = await Promise.all([
         this.stockService.getSystemStats(),
         this.marketDataStreamService.getStreamingStatus(),
         this.vortexProvider.ping?.(),
+        this.redisHealth.check(),
       ]);
 
       const resolved =
@@ -49,7 +52,7 @@ export class HealthController {
         timestamp: new Date().toISOString(),
         services: {
           database: 'connected',
-          redis: 'connected',
+          redis: redisCheck.healthy ? 'connected' : redisCheck.status,
           provider: internalToClientProviderName(resolved),
           streaming: streamingStatus.isStreaming ? 'active' : 'inactive',
           vortexHttp: vortexPing?.httpOk ? 'reachable' : 'unreachable',
@@ -112,16 +115,10 @@ export class HealthController {
         this.vortexProvider.ping?.(),
       ]);
 
-      // Test Redis connection
-      let redisStatus = 'disconnected';
-      try {
-        await this.redisService.set('health_check', 'ok', 10);
-        const testValue = await this.redisService.get('health_check');
-        redisStatus = testValue === 'ok' ? 'connected' : 'error';
-        await this.redisService.del('health_check');
-      } catch (error) {
-        redisStatus = 'error';
-      }
+      const redisCheck = await this.redisHealth.check();
+      const redisStatus = redisCheck.healthy
+        ? 'connected'
+        : `${redisCheck.status}(${redisCheck.latencyMs}ms)`;
 
       const resolvedDetailed =
         await this.resolver.getResolvedInternalProviderNameForWebsocket();
