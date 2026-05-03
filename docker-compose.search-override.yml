@@ -25,10 +25,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      # trading-app runs via PM2 on the host, not in Docker
+      # trading-app runs via PM2 on the host — override the default docker service URL
       - HYDRATION_BASE_URL=http://host.docker.internal:3000
-      # Redis runs as a system service on the host, not in Docker
-      - REDIS_HOST=host.docker.internal
+      # Redis runs as a system service on the host — use SEARCH_REDIS_HOST env var
+      - SEARCH_REDIS_HOST=host.docker.internal
 
   search-indexer:
     extra_hosts:
