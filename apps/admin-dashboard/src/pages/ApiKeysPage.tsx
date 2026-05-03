@@ -4,7 +4,7 @@
  * @description API key management: dense table with live usage bars + compact action forms.
  * @author BharatERP
  * @created 2026-03-28
- * @updated 2026-04-14
+ * @updated 2026-05-03
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -41,7 +41,7 @@ export function ApiKeysPage() {
   const [limitKey, setLimitKey] = useState('');
   const [limitBody, setLimitBody] = useState('{"rate_limit_per_minute":600}');
   const [provKey, setProvKey] = useState('');
-  const [prov, setProv] = useState<'kite' | 'vortex' | 'inherit'>('inherit');
+  const [prov, setProv] = useState<'kite' | 'vortex' | 'massive' | 'binance' | 'inherit'>('inherit');
   const [detailKey, setDetailKey] = useState('');
   const [copied, setCopied] = useState('');
 
@@ -330,6 +330,8 @@ export function ApiKeysPage() {
                 <option value="inherit">inherit (null)</option>
                 <option value="kite">kite (Falcon)</option>
                 <option value="vortex">vortex (Vayu)</option>
+                <option value="massive">massive (Atlas)</option>
+                <option value="binance">binance (Drift)</option>
               </select>
             </div>
           </div>

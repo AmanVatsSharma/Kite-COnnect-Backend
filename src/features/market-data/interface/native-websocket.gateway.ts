@@ -32,6 +32,8 @@ import {
   MarketTickEmitOptions,
 } from '@features/market-data/application/tick-shape.util';
 import { validateSetModePayload } from '@shared/utils/ws-validation';
+import { normalizeProviderAlias, InternalProviderName } from '@shared/utils/provider-label.util';
+import { ApiKey } from '@features/auth/domain/api-key.entity';
 
 interface ClientSubscription {
   clientId: string;
@@ -44,6 +46,7 @@ interface ClientSubscription {
 interface WebSocketWithData extends WebSocket {
   apiKey?: string;
   clientId?: string;
+  apiKeyRecord?: ApiKey;
 }
 
 @WebSocketGateway({
@@ -109,6 +112,7 @@ export class NativeWebSocketGateway
         record.connection_limit,
       );
       client.apiKey = apiKey;
+      client.apiKeyRecord = record ?? undefined;
 
       // Initialize subscription
       this.clientSubscriptions.set(clientId, {
@@ -271,7 +275,8 @@ export class NativeWebSocketGateway
     this.logger.debug(
       `[NativeWebSocketGateway] Subscribing client ${clientId} count=${instruments.length} mode=${mode}`,
     );
-    await this.subscribeToInstruments(instruments, mode, clientId);
+    const lockedProvider = normalizeProviderAlias(client.apiKeyRecord?.provider ?? null) ?? undefined;
+    await this.subscribeToInstruments(instruments, mode, clientId, lockedProvider);
 
     let limits: Record<string, unknown> = {
       maxUpstreamInstruments: 1000,
@@ -486,6 +491,7 @@ export class NativeWebSocketGateway
     instruments: number[],
     mode: 'ltp' | 'ohlcv' | 'full' = 'ltp',
     clientId?: string,
+    providerName?: InternalProviderName,
   ) {
     try {
       const status = await this.streamService.getStreamingStatus();
@@ -499,6 +505,7 @@ export class NativeWebSocketGateway
         instruments,
         mode,
         clientId,
+        providerName,
       );
       this.logger.log(
         `[NativeWS Gateway] Queued subscription for ${instruments.length} instruments with mode=${mode} for client=${clientId}`,

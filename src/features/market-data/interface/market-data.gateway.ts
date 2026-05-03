@@ -13,7 +13,7 @@
  * Endpoint: /market-data
  * Protocol: Socket.IO over WebSocket Secure (WSS)
  * Authentication: Query parameter (?api_key=...) or header (x-api-key)
- * @updated 2026-04-28 — Provider-prefixed subscriptions (Falcon:|Vayu:|Massive:|Binance: pin to specific provider).
+ * @updated 2026-05-03 — Per-key provider locking: lockedProvider extracted from apiKeyRecord, gates cross-provider prefixes, pins tick routing via streamService 4th arg.
  *
  * @class MarketDataGateway
  * @implements OnGatewayConnection, OnGatewayDisconnect
@@ -52,6 +52,7 @@ import { MarketDataWsInterestService } from '@features/market-data/application/m
 import {
   internalToClientProviderName,
   InternalProviderName,
+  normalizeProviderAlias,
 } from '@shared/utils/provider-label.util';
 import {
   MarketDataGatewaySubscriptionRegistry,
@@ -409,7 +410,8 @@ export class MarketDataGateway
           'MCX_FO',
         ];
       const usage = await this.apiKeyService.getUsageReport(apiKey);
-      const internal =
+      const lockedKeyProv = normalizeProviderAlias((record as any)?.provider ?? null);
+      const internal = lockedKeyProv ??
         await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
       const clientProvider = internalToClientProviderName(internal);
       const instructions = {
@@ -582,6 +584,9 @@ export class MarketDataGateway
         canonical: string;
       }> = [];
       const enabledProviders = new Set(this.providerResolver.getEnabledProviders());
+      const lockedProvider: InternalProviderName | null = normalizeProviderAlias(
+        ((client.data as any).apiKeyRecord)?.provider ?? null,
+      );
 
       const consumePrefixed = (items: Array<unknown>): unknown[] => {
         const remaining: unknown[] = [];
@@ -589,6 +594,16 @@ export class MarketDataGateway
           const prefixed = parseProviderPrefix(item);
           if (!prefixed) {
             remaining.push(item);
+            continue;
+          }
+          if (lockedProvider && prefixed.provider !== lockedProvider) {
+            client.emit('error', {
+              code: 'provider_locked',
+              symbol: prefixed.raw,
+              provider: internalToClientProviderName(prefixed.provider),
+              lockedProvider: internalToClientProviderName(lockedProvider),
+              message: `${internalToClientProviderName(prefixed.provider)} provider is blocked for this key; your key is locked to ${internalToClientProviderName(lockedProvider)}`,
+            });
             continue;
           }
           if (!enabledProviders.has(prefixed.provider)) {
@@ -638,7 +653,7 @@ export class MarketDataGateway
       }
 
       if (Array.isArray(symbols) && symbols.length > 0) {
-        const providerName = this.streamService.activeProviderName;
+        const providerName = lockedProvider ?? this.streamService.activeProviderName;
         for (const sym of symbols) {
           const flexResult = this.instrumentRegistry.resolveFlexSymbol(sym);
           if (flexResult.status === 'not_found') {
@@ -867,7 +882,7 @@ export class MarketDataGateway
       }
 
       // Phase 3: resolve tokens to UIR IDs for internal tracking
-      const providerNameForResolve = this.streamService.activeProviderName;
+      const providerNameForResolve = lockedProvider ?? this.streamService.activeProviderName;
 
       // Enforce per-connection instrument subscription cap (using UIR IDs)
       const maxInstruments =
@@ -945,7 +960,7 @@ export class MarketDataGateway
         this.logger.debug(
           `[MarketDataGateway] Subscribing client ${client.id} uirIds=${nonForcedUirIds.length} mode=${mode}`,
         );
-        await this.streamService.subscribeToInstruments(nonForcedUirIds, mode, client.id);
+        await this.streamService.subscribeToInstruments(nonForcedUirIds, mode, client.id, lockedProvider ?? undefined);
       }
       // Dispatch forced subscriptions per-provider so the stream service can pin routing.
       for (const [providerName, entries] of forcedByProvider) {
@@ -957,7 +972,7 @@ export class MarketDataGateway
       }
 
       // Phase 3: join UIR-keyed rooms only
-      const providerName = this.streamService.activeProviderName;
+      const providerName = lockedProvider ?? this.streamService.activeProviderName;
       includedTokens.forEach((token) => {
         const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
         if (uirId != null) {
@@ -1458,7 +1473,10 @@ export class MarketDataGateway
       const modes: Record<number, string> = {};
       sub?.modeByInstrument?.forEach((m, t) => (modes[t] = m));
 
-      const internalWho =
+      const lockedKeyProv = normalizeProviderAlias(
+        ((client.data as any).apiKeyRecord as any)?.provider ?? null,
+      );
+      const internalWho = lockedKeyProv ??
         await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
       const clientProviderWho = internalToClientProviderName(internalWho);
 
