@@ -546,7 +546,7 @@ export class AdminController {
   })
   async streamStatus() {
     const status = await this.stream.getStreamingStatus();
-    const kiteSubscribedInstruments = status.providers?.['kite']?.subscribedCount ?? null;
+    const kiteSubscribedInstruments = status.providers?.['falcon']?.subscribedCount ?? null;
     const registryStats = this.instrumentRegistry.getStats();
     return {
       ...status,

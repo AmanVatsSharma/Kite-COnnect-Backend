@@ -23,7 +23,7 @@ import { RedisService } from '@infra/redis/redis.service';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
-import { internalToClientProviderName, InternalProviderName } from '@shared/utils/provider-label.util';
+import { internalToClientProviderName, internalToPublicProviderName, InternalProviderName } from '@shared/utils/provider-label.util';
 import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { denormalizeExchange } from '@shared/utils/exchange-normalizer';
 
@@ -251,7 +251,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               this.redisService.publish('stream:status', {
                 event: 'connected',
                 provider: clientLabel,
-                providerName,
                 ts: Date.now(),
               });
             } catch {}
@@ -282,7 +281,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               this.redisService.publish('stream:status', {
                 event: 'disconnected',
                 provider: clientLabel,
-                providerName,
                 ts: Date.now(),
               });
             } catch {}
@@ -315,7 +313,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               this.redisService.publish('stream:status', {
                 event: 'error',
                 provider: clientLabel,
-                providerName,
                 error: error?.message || 'unknown',
                 ts: Date.now(),
               });
@@ -936,7 +933,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   async getMarketDataHealthSnapshot() {
     const providers: Record<string, { isConnected: boolean; subscribedCount: number }> = {};
     for (const [name, state] of this.activeProviderState) {
-      providers[name] = { isConnected: state.isConnected, subscribedCount: state.subscribedUirIds.size };
+      providers[internalToPublicProviderName(name)] = { isConnected: state.isConnected, subscribedCount: state.subscribedUirIds.size };
     }
     const anyConnected = Object.values(providers).some((p) => p.isConnected);
     // Legacy fields derived from the first active provider for backward compat
@@ -969,7 +966,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       marketDataDegraded: snapshot.marketDataDegraded,
       queues: snapshot.queues,
       providers: snapshot.providers,
-      enabledProviders: Array.from(this.activeProviderState.keys()),
+      enabledProviders: Array.from(this.activeProviderState.keys()).map(internalToPublicProviderName),
     };
   }
 
