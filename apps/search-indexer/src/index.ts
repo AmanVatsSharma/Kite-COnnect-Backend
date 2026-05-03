@@ -72,6 +72,9 @@ type MeiliDoc = {
    */
   streamProvider?: StreamProviderName;
   searchKeywords: string[];
+  /** Full human name of the coin (e.g. "Bitcoin" for BTCUSDT). Only set for crypto instruments.
+   *  Placed first in searchableAttributes so crypto name searches rank above US equity funds. */
+  coinFullName?: string;
 };
 
 /**
@@ -257,21 +260,17 @@ function toDoc(r: UniversalRow): MeiliDoc {
     massiveToken,
     binanceToken,
     streamProvider,
-    searchKeywords: (() => {
+    ...(() => {
+      const isCrypto = r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto';
+      if (!isCrypto) return { searchKeywords: [symbol, r.name].filter(Boolean) as string[] };
+      const base = extractCoinBase(symbol);
+      const fullName = CRYPTO_BASE_NAMES[base];
       const kw: string[] = [symbol, r.name].filter(Boolean) as string[];
-      // For crypto instruments inject the coin's full human name so broker-style
-      // queries like "bitcoin" resolve to BTCUSDT without relying on synonyms.
-      if (r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto') {
-        const base = extractCoinBase(symbol);
-        const fullName = CRYPTO_BASE_NAMES[base];
-        if (fullName) kw.push(fullName);
-        // Also push quote pairs like "BTC/USDT" for slash-style queries
-        if (symbol.length > 4 && (symbol.endsWith('USDT') || symbol.endsWith('USDC') || symbol.endsWith('BTC'))) {
-          const q = symbol.slice(-4);
-          kw.push(`${base}/${q}`);
-        }
+      if (fullName) kw.push(fullName);
+      if (symbol.length > 4 && (symbol.endsWith('USDT') || symbol.endsWith('USDC') || symbol.endsWith('BTC'))) {
+        kw.push(`${base}/${symbol.slice(-4)}`);
       }
-      return kw;
+      return { searchKeywords: kw, coinFullName: fullName ?? undefined };
     })(),
   };
 }
@@ -284,11 +283,13 @@ async function applySettings(meiliBase: string, apiKey: string, index: string): 
     `${meiliBase}/indexes/${index}/settings`,
     {
       searchableAttributes: [
-        'symbol',            // highest priority — direct ticker (RELIANCE, NIFTY)
-        'canonicalSymbol',   // "NSE:RELIANCE"
-        'name',              // company name
-        'underlyingSymbol',  // for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
-        'searchKeywords',    // combined fallback bag
+        'coinFullName',      // P0: crypto full name (Bitcoin/Ethereum/Solana) — only Binance docs have this;
+                             // ranks crypto tickers above US equity funds that happen to mention the coin
+        'symbol',            // P1: direct ticker (RELIANCE, NIFTY, BTCUSDT)
+        'canonicalSymbol',   // P2: "NSE:RELIANCE"
+        'name',              // P3: company/pair name
+        'underlyingSymbol',  // P4: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
+        'searchKeywords',    // P5: combined fallback bag
       ],
       filterableAttributes: [
         'exchange',
