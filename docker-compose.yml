@@ -148,11 +148,13 @@ services:
       - MEILI_HOST_PRIMARY=http://meilisearch:7700
       - MEILI_HOST_SECONDARY=${MEILI_HOST_SECONDARY:-}
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
-      - HYDRATION_BASE_URL=${HYDRATION_BASE_URL:-http://trading-app:3000}
+      - HYDRATION_BASE_URL=${HYDRATION_BASE_URL:-http://host.docker.internal:3000}
       - HYDRATION_API_KEY=${HYDRATION_API_KEY}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
-      - REDIS_HOST=${SEARCH_REDIS_HOST:-redis}
+      - REDIS_HOST=${SEARCH_REDIS_HOST:-host.docker.internal}
       - REDIS_PORT=6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "3002:3000"
     depends_on:
