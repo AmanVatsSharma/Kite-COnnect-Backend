@@ -36,7 +36,7 @@
  *     streamProvider) are always returned regardless of ?fields=
  *
  * Author:      BharatERP
- * Last-updated: 2026-05-03
+ * Last-updated: 2026-05-04
  */
 
 import {
@@ -251,6 +251,7 @@ export class SearchController {
     @Query('strike_min') strike_min?: string,
     @Query('strike_max') strike_max?: string,
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+    @Query('live') liveRaw?: string | boolean,
     @Query('fields') fieldsRaw?: string,
     @Query('include') includeRaw?: string,
     @Headers('x-admin-token') adminTokenHeader?: string,
@@ -260,7 +261,9 @@ export class SearchController {
     }
 
     const limit = Math.min(Number(limitRaw || 10), 50);
-    const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+    const ltpOnly =
+      String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true ||
+      String(liveRaw || '').toLowerCase() === 'true' || liveRaw === true;
     const modeVe = mode ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()] : undefined;
 
     const includeInternal = isInternalIncludeAuthorized(includeRaw, adminTokenHeader);
@@ -326,6 +329,7 @@ export class SearchController {
     @Query('strike_min') strike_min?: string,
     @Query('strike_max') strike_max?: string,
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+    @Query('live') liveRaw?: string | boolean,
     @Query('fields') fieldsRaw?: string,
     @Query('include') includeRaw?: string,
     @Headers('x-admin-token') adminTokenHeader?: string,
@@ -335,7 +339,9 @@ export class SearchController {
       return { success: true, data: [], timestamp: new Date().toISOString() };
     }
 
-    const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+    const ltpOnly =
+      String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true ||
+      String(liveRaw || '').toLowerCase() === 'true' || liveRaw === true;
     const modeVe = mode ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()] : undefined;
 
     const includeInternal = isInternalIncludeAuthorized(includeRaw, adminTokenHeader);
@@ -443,6 +449,7 @@ export class SearchController {
           strike_min:     { type: 'number',  note: 'Filter options by strike >= value' },
           strike_max:     { type: 'number',  note: 'Filter options by strike <= value' },
           ltp_only:       { type: 'boolean', default: false, note: 'When true, returns only instruments with a live price right now' },
+          live:           { type: 'boolean', default: false, note: 'Alias for ltp_only — ?live=true returns only instruments with a live price' },
           fields:         { type: 'string',  note: 'Comma-separated projection. Always includes: id, canonicalSymbol, wsSubscribeUirId, last_price, priceStatus, streamProvider. Allowed extras: symbol,name,exchange,segment,instrumentType,assetClass,optionType,expiry,strike,lotSize,tickSize,isDerivative,underlyingSymbol' },
         },
         responseFields: {
