@@ -75,6 +75,13 @@ type MeiliDoc = {
   /** Full human name of the coin (e.g. "Bitcoin" for BTCUSDT). Only set for crypto instruments.
    *  Placed first in searchableAttributes so crypto name searches rank above US equity funds. */
   coinFullName?: string;
+  /**
+   * Broker-style sort order within a relevance tier:
+   *   0 = equity / spot / ETF / index (non-derivative)
+   *   1 = futures
+   *   2 = options (CE + PE, sorted further by expiry → strike → optionType)
+   */
+  rankOrder: number;
 };
 
 /**
@@ -209,6 +216,7 @@ function toDoc(r: UniversalRow): MeiliDoc {
   const symbol = (r.underlying || '').toUpperCase();
   const it = (r.instrument_type || '').toUpperCase();
   const isDerivative = it === 'FUT' || it === 'CE' || it === 'PE';
+  const rankOrder = !isDerivative ? 0 : it === 'FUT' ? 1 : 2; // 0=equity 1=futures 2=options
   const underlyingSymbol = isDerivative ? (symbol.match(/^[A-Z]+/)?.[0] ?? undefined) : undefined;
   const vortexExchange = toVortexExchange(r.exchange, r.segment, r.instrument_type);
 
@@ -253,6 +261,7 @@ function toDoc(r: UniversalRow): MeiliDoc {
     tickSize: Number(r.tick_size) || 0.05,
     isActive: r.is_active,
     isDerivative,
+    rankOrder,
     vortexExchange,
     underlyingSymbol,
     kiteToken,
@@ -309,14 +318,14 @@ async function applySettings(meiliBase: string, apiKey: string, index: string): 
         // New routing/coverage facets — let clients filter "all binance pairs", "all massive crypto", etc.
         'streamProvider',
       ],
-      sortableAttributes: ['symbol', 'name', 'expiry', 'strike'],
+      sortableAttributes: ['symbol', 'name', 'rankOrder', 'expiry', 'strike', 'optionType'],
       rankingRules: [
         'words',
         'typo',
         'proximity',
         'attribute',   // respects searchableAttributes priority order
+        'sort',        // broker sort: rankOrder(equity→fut→options) → expiry → strike → CE/PE
         'exactness',
-        'sort',
       ],
       typoTolerance: {
         enabled: true,

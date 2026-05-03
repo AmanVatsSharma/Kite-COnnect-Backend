@@ -36,7 +36,7 @@
  *   3. SearchService    — main service: searchInstruments, hydrateQuotes, telemetry
  *
  * Author:      BharatERP
- * Last-updated: 2026-05-01
+ * Last-updated: 2026-05-04
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -274,6 +274,9 @@ export class SearchService {
       : Array.from(SearchService.DEFAULT_ATTRS_TO_RETRIEVE);
     const filterExpr = this.buildFilter(filters);
 
+    // Broker-style sort: equity first, then futures, then options by expiry→strike→CE/PE
+    const brokerSort = ['rankOrder:asc', 'expiry:asc', 'strike:asc', 'optionType:asc'];
+
     // Primary: all-words matching (precise, higher quality)
     const precise = await this.meili.search(index, {
       q,
@@ -281,6 +284,7 @@ export class SearchService {
       attributesToRetrieve: attrs,
       filter: filterExpr,
       matchingStrategy: 'all',
+      sort: brokerSort,
     });
 
     const primary: SearchResultItem[] = precise.hits || [];
@@ -293,6 +297,7 @@ export class SearchService {
       attributesToRetrieve: attrs,
       filter: filterExpr,
       matchingStrategy: 'last',
+      sort: brokerSort,
     });
 
     return this.dedupeById([...primary, ...(broad.hits || [])]).slice(0, limit);
