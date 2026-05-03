@@ -64,6 +64,7 @@ import {
 import {
   normalizeProviderAlias,
   internalToPublicProvider,
+  type InternalProviderName,
 } from './provider-aliases';
 
 /**
@@ -381,6 +382,8 @@ export class SearchController {
   /**
    * GET /api/search/filters
    * Returns facet distributions for building filter UIs (exchange, segment, type, etc.)
+   * The `streamProvider` facet values are remapped to public brand names so callers
+   * can use the same values directly as `?streamProvider=` filter params.
    */
   @Get('filters')
   async filters(
@@ -389,8 +392,17 @@ export class SearchController {
     @Query('instrumentType') instrumentType?: string,
     @Query('assetClass') assetClass?: string,
   ) {
-    const data = await this.searchService.facetCounts({ exchange, segment, instrumentType, assetClass });
-    return { success: true, data, timestamp: new Date().toISOString() };
+    const raw = await this.searchService.facetCounts({ exchange, segment, instrumentType, assetClass });
+    // Remap internal streamProvider names → public brand names so the filter UI
+    // can pass these values directly as ?streamProvider= without translation.
+    if (raw.streamProvider) {
+      const mapped: Record<string, number> = {};
+      for (const [k, v] of Object.entries(raw.streamProvider)) {
+        mapped[internalToPublicProvider(k as InternalProviderName)] = v as number;
+      }
+      raw.streamProvider = mapped;
+    }
+    return { success: true, data: raw, timestamp: new Date().toISOString() };
   }
 
   /**
