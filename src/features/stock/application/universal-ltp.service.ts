@@ -25,11 +25,12 @@
  *   - Split on last '-' to recover exchange and token
  *   - Massive provider_token is the ticker symbol string e.g. "AAPL"
  *   - Binance provider_token is the uppercase symbol string e.g. "BTCUSDT"
- *   - Routing: vortex wins if token present; else kite; else massive; else binance
+ *   - Routing: vortex wins if token present AND vortex isConfigured; else kite; else massive; else binance
+ *   - If Vortex has no credentials (only Kite set up), instruments with both tokens fall through to Kite
  *   - Result is always { success: true, data: {...} } — never throws (errors degrade to empty data)
  *
  * Author:      BharatERP
- * Last-updated: 2026-04-26
+ * Last-updated: 2026-05-03
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -81,7 +82,10 @@ export class UniversalLtpService {
       const massiveToken = providerMap.get('massive'); // "AAPL"
       const binanceToken = providerMap.get('binance'); // "BTCUSDT"
 
-      if (vortexToken) {
+      // Route to Vortex only when it is configured; otherwise fall through to Kite.
+      // Instruments often have both tokens — Vortex returning empty (no credentials)
+      // used to silently drop NSE prices even though Kite was valid.
+      if (vortexToken && this.vortexProvider.isConfigured) {
         // Split on last '-' to separate "NSE_EQ" from "22"
         const lastDash = vortexToken.lastIndexOf('-');
         if (lastDash > 0) {

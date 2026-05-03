@@ -62,6 +62,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   private ticker: TickerLike;
   private initialized = false;
   private http: AxiosInstance | null = null;
+  get isConfigured(): boolean { return this.http !== null; }
   private accessToken: string | null = null;
   private wsConnected = false;
   private reconnectAttempts = 0;
