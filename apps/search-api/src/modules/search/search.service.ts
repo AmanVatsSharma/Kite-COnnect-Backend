@@ -305,7 +305,7 @@ export class SearchService {
       q: '',
       limit: 0,
       filter: filterExpr,
-      facets: ['exchange', 'segment', 'instrumentType', 'optionType', 'assetClass'],
+      facets: ['exchange', 'segment', 'instrumentType', 'optionType', 'assetClass', 'streamProvider'],
     });
     return (resp as any)?.facetDistribution || {};
   }

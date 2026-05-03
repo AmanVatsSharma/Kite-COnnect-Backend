@@ -11,7 +11,8 @@
  * Endpoints:
  *   GET  /api/search               — full search with optional LTP hydration
  *   GET  /api/search/suggest       — lightweight autocomplete (smaller limit)
- *   GET  /api/search/filters       — facet distribution (exchange, segment, type)
+ *   GET  /api/search/filters       — live facet counts (exchange, segment, type, assetClass, streamProvider)
+ *   GET  /api/search/schema        — machine-readable filter param docs (no auth needed)
  *   GET  /api/search/popular       — placeholder for trending tickers
  *   POST /api/search/telemetry/selection — synonym learning signal
  *   GET  /api/search/stream        — SSE stream of LTP ticks for given UIR ids
@@ -35,7 +36,7 @@
  *     streamProvider) are always returned regardless of ?fields=
  *
  * Author:      BharatERP
- * Last-updated: 2026-05-01
+ * Last-updated: 2026-05-03
  */
 
 import {
@@ -390,6 +391,64 @@ export class SearchController {
   ) {
     const data = await this.searchService.facetCounts({ exchange, segment, instrumentType, assetClass });
     return { success: true, data, timestamp: new Date().toISOString() };
+  }
+
+  /**
+   * GET /api/search/schema
+   * Machine-readable description of all available query parameters and their valid values.
+   * Intended for frontend filter-UI builders and API integrators so they don't need to
+   * read source code to know what filters exist.
+   *
+   * The `enums` section lists all known discrete values per filterable field.
+   * The `facets` hint points to GET /api/search/filters for live per-value counts.
+   */
+  @Get('schema')
+  schema() {
+    return {
+      success: true,
+      data: {
+        endpoints: {
+          search:   'GET /api/search',
+          suggest:  'GET /api/search/suggest',
+          filters:  'GET /api/search/filters  — live facet counts per field value',
+          schema:   'GET /api/search/schema   — this endpoint',
+          stream:   'GET /api/search/stream   — SSE live-price ticker',
+        },
+        params: {
+          q:              { type: 'string',  required: true,  note: 'Ticker symbol, company name, or synonym (e.g. SBI, NIFTY50, Bitcoin)' },
+          limit:          { type: 'integer', default: 10, max: 50 },
+          exchange:       { type: 'string',  filterable: true,  enums: ['NSE','BSE','NFO','BFO','MCX','CDS','BCD','BINANCE','CRYPTO','US','FX','IDX','GLOBAL','NCO','NSEIX'] },
+          segment:        { type: 'string',  filterable: true,  enums: ['NSE','BSE','NFO-FUT','NFO-OPT','BFO-FUT','BFO-OPT','MCX-FUT','MCX-OPT','CDS-FUT','CDS-OPT','NCO','NCO-FUT','NCO-OPT','spot','stocks','crypto','INDICES'] },
+          instrumentType: { type: 'string',  filterable: true,  enums: ['EQ','FUT','CE','PE','ETF','IDX','CS','ADRC','ETN','ETS','ETV','FUND','SP','PFD','WARRANT','UNIT','RIGHT'] },
+          assetClass:     { type: 'string',  filterable: true,  enums: ['equity','crypto','currency','commodity'], note: 'Top-level asset category; use this for broad filtering (e.g. all crypto)' },
+          streamProvider: { type: 'string',  filterable: true,  enums: ['falcon','vayu','atlas','drift'],
+                            note: 'Public brand name of the live-data provider. falcon=Indian equity (NSE/BSE), vayu=F&O/currency/commodities, atlas=US stocks/forex, drift=Global crypto Spot' },
+          optionType:     { type: 'string',  filterable: true,  enums: ['CE','PE'], note: 'Only relevant for options instruments' },
+          isDerivative:   { type: 'boolean', filterable: true,  note: 'true = futures/options; false = equity/spot' },
+          mode:           { type: 'string',  note: 'Shorthand for vortexExchange filter. eq=NSE_EQ, fno=NSE_FO, curr=NSE_CUR, commodities=MCX_FO' },
+          expiry_from:    { type: 'date',    format: 'YYYY-MM-DD', note: 'Filter derivatives by expiry >= date' },
+          expiry_to:      { type: 'date',    format: 'YYYY-MM-DD', note: 'Filter derivatives by expiry <= date' },
+          strike_min:     { type: 'number',  note: 'Filter options by strike >= value' },
+          strike_max:     { type: 'number',  note: 'Filter options by strike <= value' },
+          ltp_only:       { type: 'boolean', default: false, note: 'When true, returns only instruments with a live price right now' },
+          fields:         { type: 'string',  note: 'Comma-separated projection. Always includes: id, canonicalSymbol, wsSubscribeUirId, last_price, priceStatus, streamProvider. Allowed extras: symbol,name,exchange,segment,instrumentType,assetClass,optionType,expiry,strike,lotSize,tickSize,isDerivative,underlyingSymbol' },
+        },
+        responseFields: {
+          id:               'Universal instrument ID — use this to subscribe to live prices via WebSocket',
+          wsSubscribeUirId: 'Same as id — convenience alias for WebSocket subscribe payloads',
+          canonicalSymbol:  'Human-readable unique key, e.g. NSE:RELIANCE or BINANCE:BTCUSDT',
+          last_price:       'Latest known price (null if no live price available)',
+          priceStatus:      '"live" = price arrived within cache TTL; "stale" = no recent tick',
+          streamProvider:   'Public brand name of the provider streaming this instrument (falcon/vayu/atlas/drift)',
+        },
+        wsSubscribe: {
+          note: 'Subscribe to live prices by passing the instrument id as wsSubscribeUirId',
+          example: { event: 'subscribe', data: { instruments: [355010], mode: 'ltp' } },
+        },
+        filterTip: 'Call GET /api/search/filters to get live counts per value for each filterable field.',
+      },
+      timestamp: new Date().toISOString(),
+    };
   }
 
   /**
