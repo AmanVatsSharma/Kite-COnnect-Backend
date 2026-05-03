@@ -270,7 +270,10 @@ function toDoc(r: UniversalRow): MeiliDoc {
       if (symbol.length > 4 && (symbol.endsWith('USDT') || symbol.endsWith('USDC') || symbol.endsWith('BTC'))) {
         kw.push(`${base}/${symbol.slice(-4)}`);
       }
-      return { searchKeywords: kw, coinFullName: fullName ?? undefined };
+      // Only USDT-quoted pairs get coinFullName so "ethereum" → ETHUSDT, not ETHBTC.
+      // Both are equally relevant on coinFullName otherwise; USDT is the canonical USD price.
+      const isUsdtQuoted = symbol.endsWith('USDT') || symbol.endsWith('USDC');
+      return { searchKeywords: kw, coinFullName: (fullName && isUsdtQuoted) ? fullName : undefined };
     })(),
   };
 }
