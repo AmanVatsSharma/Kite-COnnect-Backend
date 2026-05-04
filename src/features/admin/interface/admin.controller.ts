@@ -169,6 +169,14 @@ export class AdminController {
     return this.apiKeyRepo.find({ order: { created_at: 'DESC' } });
   }
 
+  @Post('apikeys/activate')
+  @ApiOperation({ summary: 'Activate API key' })
+  async activate(@Body() body: { key: string }) {
+    await this.apiKeyRepo.update({ key: body.key }, { is_active: true });
+    await this.redis.publish('api_key_updates', JSON.stringify({ key: body.key }));
+    return { success: true };
+  }
+
   @Post('apikeys/deactivate')
   @ApiOperation({ summary: 'Deactivate API key' })
   async deactivate(@Body() body: { key: string }) {
