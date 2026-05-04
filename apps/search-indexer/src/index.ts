@@ -7,7 +7,7 @@
  *              Supports modes: backfill | incremental | backfill-and-watch | synonyms-apply | settings-apply.
  * @author BharatERP
  * @created 2025-12-01
- * @updated 2026-05-03
+ * @updated 2026-05-04
  */
 
 import axios from 'axios';
@@ -82,6 +82,15 @@ type MeiliDoc = {
    *   2 = options (CE + PE, sorted further by expiry → strike → optionType)
    */
   rankOrder: number;
+  /**
+   * Exchange preference within a relevance + rankOrder tier:
+   *   0 = NSE (primary Indian equity exchange)
+   *   1 = BSE
+   *   2 = NFO / BFO / MCX / CDS / BCD (derivative segments)
+   *   9 = everything else (US, CRYPTO, BINANCE, etc.)
+   * Ensures NSE:RELIANCE sorts before BSE:RELIANCE when relevance is equal.
+   */
+  exchangeRank: number;
 };
 
 /**
@@ -217,6 +226,9 @@ function toDoc(r: UniversalRow): MeiliDoc {
   const it = (r.instrument_type || '').toUpperCase();
   const isDerivative = it === 'FUT' || it === 'CE' || it === 'PE';
   const rankOrder = !isDerivative ? 0 : it === 'FUT' ? 1 : 2; // 0=equity 1=futures 2=options
+  const ex = (r.exchange || '').toUpperCase();
+  const exchangeRank = ex === 'NSE' ? 0 : ex === 'BSE' ? 1
+    : (ex === 'NFO' || ex === 'BFO' || ex === 'MCX' || ex === 'CDS' || ex === 'BCD') ? 2 : 9;
   const underlyingSymbol = isDerivative ? (symbol.match(/^[A-Z]+/)?.[0] ?? undefined) : undefined;
   const vortexExchange = toVortexExchange(r.exchange, r.segment, r.instrument_type);
 
@@ -262,6 +274,7 @@ function toDoc(r: UniversalRow): MeiliDoc {
     isActive: r.is_active,
     isDerivative,
     rankOrder,
+    exchangeRank,
     vortexExchange,
     underlyingSymbol,
     kiteToken,
@@ -318,14 +331,14 @@ async function applySettings(meiliBase: string, apiKey: string, index: string): 
         // New routing/coverage facets — let clients filter "all binance pairs", "all massive crypto", etc.
         'streamProvider',
       ],
-      sortableAttributes: ['symbol', 'name', 'rankOrder', 'expiry', 'strike', 'optionType'],
+      sortableAttributes: ['symbol', 'name', 'rankOrder', 'exchangeRank', 'expiry', 'strike', 'optionType'],
       rankingRules: [
         'words',
         'typo',
         'proximity',
         'attribute',   // respects searchableAttributes priority order
-        'sort',        // broker sort: rankOrder(equity→fut→options) → expiry → strike → CE/PE
-        'exactness',
+        'exactness',   // exact symbol match must beat partial name matches (e.g. "RELIANCE" beats "RELIANCE COMMS")
+        'sort',        // broker sort: rankOrder(equity→fut→options) → exchangeRank(NSE→BSE) → expiry → strike → CE/PE
       ],
       typoTolerance: {
         enabled: true,

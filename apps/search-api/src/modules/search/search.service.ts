@@ -274,8 +274,8 @@ export class SearchService {
       : Array.from(SearchService.DEFAULT_ATTRS_TO_RETRIEVE);
     const filterExpr = this.buildFilter(filters);
 
-    // Broker-style sort: equity first, then futures, then options by expiry→strike→CE/PE
-    const brokerSort = ['rankOrder:asc', 'expiry:asc', 'strike:asc', 'optionType:asc'];
+    // Broker-style sort: equity first → futures → options; NSE before BSE; then expiry → strike → CE/PE
+    const brokerSort = ['rankOrder:asc', 'exchangeRank:asc', 'expiry:asc', 'strike:asc', 'optionType:asc'];
 
     // Primary: all-words matching (precise, higher quality)
     const precise = await this.meili.search(index, {
