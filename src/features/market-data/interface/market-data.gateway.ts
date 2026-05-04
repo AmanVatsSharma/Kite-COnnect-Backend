@@ -13,7 +13,7 @@
  * Endpoint: /market-data
  * Protocol: Socket.IO over WebSocket Secure (WSS)
  * Authentication: Query parameter (?api_key=...) or header (x-api-key)
- * @updated 2026-05-03 — Per-key provider locking: lockedProvider extracted from apiKeyRecord, gates cross-provider prefixes, pins tick routing via streamService 4th arg.
+ * @updated 2026-05-04 — Per-key provider locking: lockedProvider gates cross-provider prefixes only; removed stream-level forcedProvider pin so kite dual-subscribe (fallback) remains active.
  *
  * @class MarketDataGateway
  * @implements OnGatewayConnection, OnGatewayDisconnect
@@ -960,7 +960,10 @@ export class MarketDataGateway
         this.logger.debug(
           `[MarketDataGateway] Subscribing client ${client.id} uirIds=${nonForcedUirIds.length} mode=${mode}`,
         );
-        await this.streamService.subscribeToInstruments(nonForcedUirIds, mode, client.id, lockedProvider ?? undefined);
+        // Key-level provider lock is enforced at gateway (cross-provider prefix rejection above).
+        // Do NOT pass lockedProvider as forcedProvider here — that would pin the UIR and disable
+        // kite dual-subscribe, breaking the vortex→kite tick fallback in handleTicks.
+        await this.streamService.subscribeToInstruments(nonForcedUirIds, mode, client.id);
       }
       // Dispatch forced subscriptions per-provider so the stream service can pin routing.
       for (const [providerName, entries] of forcedByProvider) {
