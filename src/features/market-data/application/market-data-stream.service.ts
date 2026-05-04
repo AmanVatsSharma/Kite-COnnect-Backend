@@ -623,8 +623,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           // Dual-subscribe: also route to secondary provider (kite↔vortex) when
           // the registry has a token for it and the provider is active. This enables
           // the cross-provider fallback in handleTicks when the primary gives null prices.
-          // Pinned UIRs skip this — explicit provider pin means single-provider only.
-          if (pinned) continue;
+          // Pinned UIRs still get dual-subscribed — the pin means "this is primary",
+          // not "block all others". Fallback must remain available.
           const secondaryProviders: InternalProviderName[] =
             prov === 'kite' ? ['vortex'] : prov === 'vortex' ? ['kite'] : [];
           for (const secondary of secondaryProviders) {
