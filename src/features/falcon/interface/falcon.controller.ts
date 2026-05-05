@@ -340,7 +340,7 @@ export class FalconController {
     }
   }
 
-  @Get('instruments/:token')
+  @Get('instruments/:token(\\d+)')
   async getInstrumentByToken(@Param('token') tokenRaw?: string) {
     try {
       const token = Number(tokenRaw);
@@ -1041,7 +1041,7 @@ export class FalconController {
     }
   }
 
-  @Get('historical/:token')
+  @Get('historical/:token(\\d+)')
   @ApiOperation({ summary: 'Historical candles for a single instrument token' })
   @ApiQuery({ name: 'from', required: true, example: '2026-04-01' })
   @ApiQuery({ name: 'to', required: true, example: '2026-04-11' })
