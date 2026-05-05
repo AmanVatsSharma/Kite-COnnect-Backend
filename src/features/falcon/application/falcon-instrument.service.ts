@@ -1794,13 +1794,16 @@ export class FalconInstrumentService implements OnModuleInit {
         if (exchange === 'NSE' || exchange === 'BSE') {
           suffix = exchange === 'NSE' ? 'NS' : 'BO';
         } else if (exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO')) {
-          // Extract base symbol for derivatives.
-          // NFO/MCX symbols usually follow: {SYMBOL}{YY}{MONTH}{STRIKE}{TYPE}
-          // e.g., "RELIANCE24MAYFUT" -> "RELIANCE", "NIFTY2452322000CE" -> "NIFTY"
-          // We look for the first occurrence of a digit to find the end of the base symbol.
-          const digitMatch = tradingsymbol.match(/\d/);
-          if (digitMatch && digitMatch.index !== undefined && digitMatch.index > 0) {
-            baseSymbol = tradingsymbol.substring(0, digitMatch.index);
+          // For NFO and MCX, Kite conveniently provides the underlying symbol in the 'name' field
+          const nameField = (item as any).name;
+          if (nameField && nameField.trim().length > 0) {
+            baseSymbol = nameField.trim().toUpperCase();
+          } else {
+            // Fallback regex if name is empty: match up to the first expiry date pattern
+            const digitMatch = tradingsymbol.match(/\d{2}[A-Z]{3}/);
+            if (digitMatch && digitMatch.index !== undefined && digitMatch.index > 0) {
+              baseSymbol = tradingsymbol.substring(0, digitMatch.index);
+            }
           }
         }
 
