@@ -53,7 +53,7 @@ export class FalconController {
     private readonly redis: RedisService,
   ) {}
 
-  @Get('instruments/stats')
+  @Get('instruments/instrument-statistics')
   async stats() {
     try {
       const data = await this.falconInstruments.getFalconInstrumentStats();
