@@ -255,10 +255,6 @@ export class FalconInstrumentService implements OnModuleInit {
       );
 
       const payloads: FalconInstrument[] = [];
-      if (rows.length > 0) {
-        this.logger.debug(`[FalconInstrumentService] First row keys: ${Object.keys(rows[0]).join(', ')}`);
-        this.logger.debug(`[FalconInstrumentService] First row ISIN: ${rows[0].isin}`);
-      }
       for (const row of rows) {
         const token = Number(row.instrument_token);
         if (!Number.isFinite(token)) continue;
@@ -1783,11 +1779,20 @@ export class FalconInstrumentService implements OnModuleInit {
       const isin =
         uirId != null ? (this.instrumentRegistry.getIsin(uirId) ?? null) : null;
 
-      // Free logo pattern (Groww): https://assets-netstorage.groww.in/stock-assets/logos/{ISIN}.png
-      // Only works for stocks that have an ISIN.
-      const logo_url = isin
-        ? `https://assets-netstorage.groww.in/stock-assets/logos/${isin}.png`
-        : null;
+      // Free logo pattern: Financial Modeling Prep (public asset)
+      // Pattern: https://financialmodelingprep.com/image-stock/{SYMBOL}.{EXCHANGE_SUFFIX}.png
+      // NSE: .NS, BSE: .BO
+      let logo_url: string | null = null;
+      const symbol = (item as any).tradingsymbol || (item as any).symbol;
+      const exchange = ((item as any).exchange || '').toUpperCase();
+
+      if (symbol && (exchange === 'NSE' || exchange === 'BSE')) {
+        const suffix = exchange === 'NSE' ? 'NS' : 'BO';
+        logo_url = `https://financialmodelingprep.com/image-stock/${symbol}.${suffix}.png`;
+      } else if (isin) {
+        // Fallback to Groww ISIN pattern if available
+        logo_url = `https://assets-netstorage.groww.in/stock-assets/logos/${isin}.png`;
+      }
 
       return {
         ...item,
