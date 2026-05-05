@@ -835,7 +835,7 @@ export class FalconInstrumentService implements OnModuleInit {
     const by_type: Record<string, number> = {};
     by_type_rows.forEach((r) => (by_type[r.instrument_type] = Number(r.count)));
 
-    const uir_coverage = await this.getFalconUirCoverage();
+    const uir_coverage = await this.getUirCoverage();
 
     return { total, by_exchange, by_type, active, inactive, uir_coverage };
   }
