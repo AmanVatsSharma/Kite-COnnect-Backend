@@ -50,6 +50,7 @@ export class InstrumentRegistryService implements OnModuleInit {
   private canonicalToUirId = new Map<string, number>(); // "NSE:RELIANCE" -> 42
   private uirIdToProviderTokens = new Map<number, Map<string, string>>(); // 42 -> { kite: "256265", vortex: "NSE_EQ-22" }
   private uirIdToExchange = new Map<number, string>(); // 42 -> "NSE"
+  private uirIdToIsin = new Map<number, string>(); // 42 -> "INE002A01018"
   // Underlying name (uppercase) -> all UIR entries with that underlying, for flex symbol resolution
   private underlyingToEntries = new Map<string, UnderlyingEntry[]>();
 
@@ -78,6 +79,9 @@ export class InstrumentRegistryService implements OnModuleInit {
       this.uirIdToCanonical.set(id, row.canonical_symbol);
       this.canonicalToUirId.set(row.canonical_symbol, id);
       this.uirIdToExchange.set(id, row.exchange);
+      if (row.isin) {
+        this.uirIdToIsin.set(id, row.isin);
+      }
 
       // Build underlying → entries map for flex symbol resolution ("RELIANCE" → [...])
       if (row.underlying) {
@@ -448,6 +452,11 @@ export class InstrumentRegistryService implements OnModuleInit {
   /** Exchange for one UIR ID (in-memory, O(1)). Used by UniversalLtpService for kite pair-building. */
   getExchange(uirId: number): string | undefined {
     return this.uirIdToExchange.get(uirId);
+  }
+
+  /** ISIN for one UIR ID (in-memory, O(1)). Used for free logo URL generation. */
+  getIsin(uirId: number): string | undefined {
+    return this.uirIdToIsin.get(uirId);
   }
 
   /**

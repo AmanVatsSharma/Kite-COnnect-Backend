@@ -277,6 +277,7 @@ export class FalconInstrumentService implements OnModuleInit {
           instrument_type: String(row.instrument_type || ''),
           segment: String(row.segment || ''),
           exchange: String(row.exchange || ''),
+          isin: String(row.isin || ''),
           is_active: true,
         } as FalconInstrument);
         try {
@@ -567,6 +568,7 @@ export class FalconInstrumentService implements OnModuleInit {
         segment: string;
         is_active: boolean;
         asset_class: string;
+        isin: string;
       };
       const uirRows: UirRow[] = [];
       const tokenToCanonical = new Map<string, string>(); // provider_token → canonical
@@ -612,6 +614,7 @@ export class FalconInstrumentService implements OnModuleInit {
             tick_size: Number(p.tick_size) || 0.05,
             name: p.name || '',
             segment: p.segment || '',
+            isin: p.isin || '',
             is_active: true,
             asset_class:
               normalizedExchange === 'MCX'
@@ -1757,7 +1760,13 @@ export class FalconInstrumentService implements OnModuleInit {
 
   private enrichWithUir<T extends { instrument_token: number }>(
     items: T[],
-  ): Array<T & { uir_id: number | null; canonical_symbol: string | null }> {
+  ): Array<
+    T & {
+      uir_id: number | null;
+      canonical_symbol: string | null;
+      logo_url: string | null;
+    }
+  > {
     return items.map((item) => {
       const uirId = this.instrumentRegistry.resolveProviderToken(
         'kite',
@@ -1767,7 +1776,21 @@ export class FalconInstrumentService implements OnModuleInit {
         uirId != null
           ? (this.instrumentRegistry.getCanonicalSymbol(uirId) ?? null)
           : null;
-      return { ...item, uir_id: uirId ?? null, canonical_symbol };
+      const isin =
+        uirId != null ? (this.instrumentRegistry.getIsin(uirId) ?? null) : null;
+
+      // Free logo pattern (Groww): https://assets-netstorage.groww.in/stock-assets/logos/{ISIN}.png
+      // Only works for stocks that have an ISIN.
+      const logo_url = isin
+        ? `https://assets-netstorage.groww.in/stock-assets/logos/${isin}.png`
+        : null;
+
+      return {
+        ...item,
+        uir_id: uirId ?? null,
+        canonical_symbol,
+        logo_url,
+      };
     });
   }
 

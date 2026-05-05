@@ -69,6 +69,9 @@ export class UniversalInstrument {
   @Column({ type: 'varchar', length: 16, default: 'equity' })
   asset_class: string;
 
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  isin: string;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

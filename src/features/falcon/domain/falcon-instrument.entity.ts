@@ -68,8 +68,11 @@ export class FalconInstrument {
   @Column({ type: 'varchar', length: 32 })
   segment: string;
 
-  @Column({ type: 'varchar', length: 16 })
+  @Column({ type: 'varchar', length: 16, default: '' })
   exchange: string;
+
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  isin: string;
 
   @Column({ default: true })
   is_active: boolean;
