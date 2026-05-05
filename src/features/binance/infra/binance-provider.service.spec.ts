@@ -27,7 +27,9 @@ import { BinanceProviderService } from './binance-provider.service';
 import { BinanceRestClient } from './binance-rest.client';
 import { BINANCE_MAX_STREAMS_PER_CONNECTION } from '../binance.constants';
 
-function makeRestStub(overrides: Partial<BinanceRestClient> = {}): BinanceRestClient {
+function makeRestStub(
+  overrides: Partial<BinanceRestClient> = {},
+): BinanceRestClient {
   return {
     isReady: () => true,
     getExchangeInfo: jest.fn(),
@@ -162,11 +164,29 @@ describe('BinanceProviderService', () => {
       getKlines: jest
         .fn()
         .mockResolvedValue([
-          [1714128000000, '50000', '50100', '49900', '50050', '1.5', 1714128059999, '75000', 100, '0.5', '25000', '0'],
+          [
+            1714128000000,
+            '50000',
+            '50100',
+            '49900',
+            '50050',
+            '1.5',
+            1714128059999,
+            '75000',
+            100,
+            '0.5',
+            '25000',
+            '0',
+          ],
         ]),
     } as any);
     const svc = new BinanceProviderService(rest);
-    const out = await svc.getHistoricalData('BTCUSDT', '2026-04-26', '2026-04-27', '1minute');
+    const out = await svc.getHistoricalData(
+      'BTCUSDT',
+      '2026-04-26',
+      '2026-04-27',
+      '1minute',
+    );
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({
       open: 50000,

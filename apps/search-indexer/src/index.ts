@@ -17,8 +17,8 @@ const { Client } = require('pg');
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type UniversalRow = {
-  id: string;                  // bigint comes as string from pg
-  canonical_symbol: string;    // e.g. "NSE:RELIANCE"
+  id: string; // bigint comes as string from pg
+  canonical_symbol: string; // e.g. "NSE:RELIANCE"
   exchange: string;
   underlying: string;
   instrument_type: string;
@@ -32,8 +32,8 @@ type UniversalRow = {
   is_active: boolean;
   asset_class: string;
   updated_at: string;
-  kite_token: string | null;    // pivoted from instrument_mappings (provider='kite', provider_token)
-  vortex_token: string | null;  // pivoted from instrument_mappings (provider='vortex', provider_token like "NSE_EQ-22")
+  kite_token: string | null; // pivoted from instrument_mappings (provider='kite', provider_token)
+  vortex_token: string | null; // pivoted from instrument_mappings (provider='vortex', provider_token like "NSE_EQ-22")
   massive_token: string | null; // pivoted from instrument_mappings (provider='massive', symbol string e.g. "AAPL")
   binance_token: string | null; // pivoted from instrument_mappings (provider='binance', symbol string e.g. "BTCUSDT")
 };
@@ -211,13 +211,25 @@ async function withPg<T>(fn: (client: any) => Promise<T>): Promise<T> {
   }
 }
 
-function toVortexExchange(exchange: string, segment: string, instrumentType: string): string {
+function toVortexExchange(
+  exchange: string,
+  segment: string,
+  instrumentType: string,
+): string {
   const ex = exchange.toUpperCase();
   const seg = (segment || '').toUpperCase();
   const it = (instrumentType || '').toUpperCase();
   if (ex === 'MCX' || seg.includes('MCX')) return 'MCX_FO';
-  if (seg.includes('CDS') || seg.includes('CUR') || it.includes('CUR')) return 'NSE_CUR';
-  if (it === 'FUT' || it === 'CE' || it === 'PE' || seg.includes('FO') || seg.includes('FNO')) return 'NSE_FO';
+  if (seg.includes('CDS') || seg.includes('CUR') || it.includes('CUR'))
+    return 'NSE_CUR';
+  if (
+    it === 'FUT' ||
+    it === 'CE' ||
+    it === 'PE' ||
+    seg.includes('FO') ||
+    seg.includes('FNO')
+  )
+    return 'NSE_FO';
   return 'NSE_EQ';
 }
 
@@ -227,10 +239,26 @@ function toDoc(r: UniversalRow): MeiliDoc {
   const isDerivative = it === 'FUT' || it === 'CE' || it === 'PE';
   const rankOrder = !isDerivative ? 0 : it === 'FUT' ? 1 : 2; // 0=equity 1=futures 2=options
   const ex = (r.exchange || '').toUpperCase();
-  const exchangeRank = ex === 'NSE' ? 0 : ex === 'BSE' ? 1
-    : (ex === 'NFO' || ex === 'BFO' || ex === 'MCX' || ex === 'CDS' || ex === 'BCD') ? 2 : 9;
-  const underlyingSymbol = isDerivative ? (symbol.match(/^[A-Z]+/)?.[0] ?? undefined) : undefined;
-  const vortexExchange = toVortexExchange(r.exchange, r.segment, r.instrument_type);
+  const exchangeRank =
+    ex === 'NSE'
+      ? 0
+      : ex === 'BSE'
+        ? 1
+        : ex === 'NFO' ||
+            ex === 'BFO' ||
+            ex === 'MCX' ||
+            ex === 'CDS' ||
+            ex === 'BCD'
+          ? 2
+          : 9;
+  const underlyingSymbol = isDerivative
+    ? (symbol.match(/^[A-Z]+/)?.[0] ?? undefined)
+    : undefined;
+  const vortexExchange = toVortexExchange(
+    r.exchange,
+    r.segment,
+    r.instrument_type,
+  );
 
   // Vortex provider_token is "NSE_EQ-22" — split on last '-' and take the numeric tail for vortexToken.
   // (Older indexer code just pulled m.instrument_token; we now share the same string-pivot column the
@@ -243,13 +271,18 @@ function toDoc(r: UniversalRow): MeiliDoc {
     if (Number.isFinite(n)) vortexToken = n;
   }
   const kiteToken = r.kite_token ? Number(r.kite_token) : undefined;
-  const massiveToken = r.massive_token ? r.massive_token.toUpperCase() : undefined;
-  const binanceToken = r.binance_token ? r.binance_token.toUpperCase() : undefined;
+  const massiveToken = r.massive_token
+    ? r.massive_token.toUpperCase()
+    : undefined;
+  const binanceToken = r.binance_token
+    ? r.binance_token.toUpperCase()
+    : undefined;
 
   // Routing: prefer the exchange→provider table (canonical fact). Fall back to whichever
   // mapping exists when an exchange isn't in the table (defensive — shouldn't happen for
   // active rows, but keeps us from emitting docs with an undefined streamProvider).
-  let streamProvider: StreamProviderName | undefined = EXCHANGE_TO_PROVIDER[r.exchange];
+  let streamProvider: StreamProviderName | undefined =
+    EXCHANGE_TO_PROVIDER[r.exchange];
   if (!streamProvider) {
     if (vortexToken !== undefined) streamProvider = 'vortex';
     else if (kiteToken !== undefined) streamProvider = 'kite';
@@ -283,38 +316,52 @@ function toDoc(r: UniversalRow): MeiliDoc {
     binanceToken,
     streamProvider,
     ...(() => {
-      const isCrypto = r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto';
-      if (!isCrypto) return { searchKeywords: [symbol, r.name].filter(Boolean) as string[] };
+      const isCrypto =
+        r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto';
+      if (!isCrypto)
+        return { searchKeywords: [symbol, r.name].filter(Boolean) as string[] };
       const base = extractCoinBase(symbol);
       const fullName = CRYPTO_BASE_NAMES[base];
       const kw: string[] = [symbol, r.name].filter(Boolean) as string[];
       if (fullName) kw.push(fullName);
-      if (symbol.length > 4 && (symbol.endsWith('USDT') || symbol.endsWith('USDC') || symbol.endsWith('BTC'))) {
+      if (
+        symbol.length > 4 &&
+        (symbol.endsWith('USDT') ||
+          symbol.endsWith('USDC') ||
+          symbol.endsWith('BTC'))
+      ) {
         kw.push(`${base}/${symbol.slice(-4)}`);
       }
       // Only USDT-quoted pairs get coinFullName so "ethereum" → ETHUSDT, not ETHBTC.
       // Both are equally relevant on coinFullName otherwise; USDT is the canonical USD price.
       const isUsdtQuoted = symbol.endsWith('USDT') || symbol.endsWith('USDC');
-      return { searchKeywords: kw, coinFullName: (fullName && isUsdtQuoted) ? fullName : undefined };
+      return {
+        searchKeywords: kw,
+        coinFullName: fullName && isUsdtQuoted ? fullName : undefined,
+      };
     })(),
   };
 }
 
 // ─── MeiliSearch index settings ──────────────────────────────────────────────
 
-async function applySettings(meiliBase: string, apiKey: string, index: string): Promise<void> {
+async function applySettings(
+  meiliBase: string,
+  apiKey: string,
+  index: string,
+): Promise<void> {
   const h = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
   await axios.patch(
     `${meiliBase}/indexes/${index}/settings`,
     {
       searchableAttributes: [
-        'coinFullName',      // P0: crypto full name (Bitcoin/Ethereum/Solana) — only Binance docs have this;
-                             // ranks crypto tickers above US equity funds that happen to mention the coin
-        'symbol',            // P1: direct ticker (RELIANCE, NIFTY, BTCUSDT)
-        'canonicalSymbol',   // P2: "NSE:RELIANCE"
-        'name',              // P3: company/pair name
-        'underlyingSymbol',  // P4: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
-        'searchKeywords',    // P5: combined fallback bag
+        'coinFullName', // P0: crypto full name (Bitcoin/Ethereum/Solana) — only Binance docs have this;
+        // ranks crypto tickers above US equity funds that happen to mention the coin
+        'symbol', // P1: direct ticker (RELIANCE, NIFTY, BTCUSDT)
+        'canonicalSymbol', // P2: "NSE:RELIANCE"
+        'name', // P3: company/pair name
+        'underlyingSymbol', // P4: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
+        'searchKeywords', // P5: combined fallback bag
       ],
       filterableAttributes: [
         'exchange',
@@ -331,25 +378,41 @@ async function applySettings(meiliBase: string, apiKey: string, index: string): 
         // New routing/coverage facets — let clients filter "all binance pairs", "all massive crypto", etc.
         'streamProvider',
       ],
-      sortableAttributes: ['symbol', 'name', 'rankOrder', 'exchangeRank', 'expiry', 'strike', 'optionType'],
+      sortableAttributes: [
+        'symbol',
+        'name',
+        'rankOrder',
+        'exchangeRank',
+        'expiry',
+        'strike',
+        'optionType',
+      ],
       rankingRules: [
         'words',
         'typo',
         'proximity',
-        'attribute',   // respects searchableAttributes priority order
-        'exactness',   // exact symbol match must beat partial name matches (e.g. "RELIANCE" beats "RELIANCE COMMS")
-        'sort',        // broker sort: rankOrder(equity→fut→options) → exchangeRank(NSE→BSE) → expiry → strike → CE/PE
+        'attribute', // respects searchableAttributes priority order
+        'exactness', // exact symbol match must beat partial name matches (e.g. "RELIANCE" beats "RELIANCE COMMS")
+        'sort', // broker sort: rankOrder(equity→fut→options) → exchangeRank(NSE→BSE) → expiry → strike → CE/PE
       ],
       typoTolerance: {
         enabled: true,
         minWordSizeForTypos: {
-          oneTypo: 4,   // protects short symbols like TCS, SBI, LT
+          oneTypo: 4, // protects short symbols like TCS, SBI, LT
           twoTypos: 8,
         },
         disableOnAttributes: ['instrumentType', 'exchange', 'optionType'],
       },
       pagination: { maxTotalHits: 2000 },
-      stopWords: ['limited', 'ltd', 'pvt', 'private', 'industries', 'india', 'and'],
+      stopWords: [
+        'limited',
+        'ltd',
+        'pvt',
+        'private',
+        'industries',
+        'india',
+        'and',
+      ],
       synonyms: {
         NIFTY: ['NIFTY50', 'NIFTY 50', 'CNX NIFTY', 'NIFTY INDEX'],
         BANKNIFTY: ['BANK NIFTY', 'BANK-NIFTY', 'CNX BANK', 'BANKEX'],
@@ -456,17 +519,23 @@ async function backfill(): Promise<void> {
   const meiliBase = env('MEILI_HOST', 'http://meilisearch:7700')!;
   const meiliKey = env('MEILI_MASTER_KEY', '')!;
   const index = env('MEILI_INDEX', 'instruments_v1')!;
-  const headers: Record<string, string> = meiliKey ? { Authorization: `Bearer ${meiliKey}` } : {};
+  const headers: Record<string, string> = meiliKey
+    ? { Authorization: `Bearer ${meiliKey}` }
+    : {};
   const batchSize = Number(env('INDEXER_BATCH_SIZE', '2000'));
 
   await axios
     .post(`${meiliBase}/indexes`, { uid: index, primaryKey: 'id' }, { headers })
-    .catch((e) => { if (e?.response?.status !== 409) throw e; });
+    .catch((e) => {
+      if (e?.response?.status !== 409) throw e;
+    });
 
   await applySettings(meiliBase, meiliKey, index);
 
   const exchangeFilter = env('INDEXER_EXCHANGE_FILTER');
-  const filterClause = exchangeFilter ? `AND u.exchange = '${exchangeFilter.toUpperCase()}'` : '';
+  const filterClause = exchangeFilter
+    ? `AND u.exchange = '${exchangeFilter.toUpperCase()}'`
+    : '';
 
   const total: number = await withPg(async (pg) => {
     const r = await pg.query(
@@ -476,7 +545,9 @@ async function backfill(): Promise<void> {
   });
 
   // eslint-disable-next-line no-console
-  console.log(`[indexer] backfill start: total=${total}, batchSize=${batchSize}${exchangeFilter ? `, exchange=${exchangeFilter}` : ''}`);
+  console.log(
+    `[indexer] backfill start: total=${total}, batchSize=${batchSize}${exchangeFilter ? `, exchange=${exchangeFilter}` : ''}`,
+  );
 
   let offset = 0;
   while (offset < total) {
@@ -506,11 +577,14 @@ async function backfill(): Promise<void> {
 async function incremental(): Promise<void> {
   const meiliBase = env('MEILI_HOST', 'http://meilisearch:7700')!;
   const meiliKey = env('MEILI_MASTER_KEY', '')!;
-  const headers: Record<string, string> = meiliKey ? { Authorization: `Bearer ${meiliKey}` } : {};
+  const headers: Record<string, string> = meiliKey
+    ? { Authorization: `Bearer ${meiliKey}` }
+    : {};
   const index = env('MEILI_INDEX', 'instruments_v1')!;
   const pollSec = Number(env('INDEXER_POLL_SEC', '300'));
 
-  let since = env('INDEXER_SINCE') ?? new Date(Date.now() - pollSec * 1000).toISOString();
+  let since =
+    env('INDEXER_SINCE') ?? new Date(Date.now() - pollSec * 1000).toISOString();
 
   // eslint-disable-next-line no-console
   console.log(`[indexer] incremental watcher poll=${pollSec}s`);
@@ -532,7 +606,9 @@ async function incremental(): Promise<void> {
       await upsertBatch(meiliBase, headers, index, rows.map(toDoc));
       since = rows[rows.length - 1].updated_at;
       // eslint-disable-next-line no-console
-      console.log(`[indexer] incremental upserted ${rows.length}, since=${since}`);
+      console.log(
+        `[indexer] incremental upserted ${rows.length}, since=${since}`,
+      );
     }
 
     await new Promise((r) => setTimeout(r, pollSec * 1000));
@@ -554,7 +630,13 @@ async function applySynonymsFromRedis(): Promise<void> {
     const qSymCounts: Record<string, Record<string, number>> = {};
     let cursor = '0';
     do {
-      const [nextCursor, keys]: [string, string[]] = await redis.scan(cursor, 'MATCH', 'syn:q:*', 'COUNT', 500);
+      const [nextCursor, keys]: [string, string[]] = await redis.scan(
+        cursor,
+        'MATCH',
+        'syn:q:*',
+        'COUNT',
+        500,
+      );
       cursor = nextCursor;
       if (keys.length) {
         // Use mget instead of pipeline to avoid blocked exec() pattern
@@ -582,7 +664,9 @@ async function applySynonymsFromRedis(): Promise<void> {
         .slice(0, MAX_PER_SYMBOL)
         .map(([q]) => q);
       if (pairs.length) {
-        dynamicSyn[sym] = Array.from(new Set([...(dynamicSyn[sym] || []), ...pairs]));
+        dynamicSyn[sym] = Array.from(
+          new Set([...(dynamicSyn[sym] || []), ...pairs]),
+        );
         pairs.forEach((q) => {
           dynamicSyn[q] = Array.from(new Set([...(dynamicSyn[q] || []), sym]));
         });
@@ -592,9 +676,12 @@ async function applySynonymsFromRedis(): Promise<void> {
     const meiliBase = env('MEILI_HOST', 'http://meilisearch:7700')!;
     const meiliKey = env('MEILI_MASTER_KEY', '')!;
     const index = env('MEILI_INDEX', 'instruments_v1')!;
-    const h: Record<string, string> = meiliKey ? { Authorization: `Bearer ${meiliKey}` } : {};
+    const h: Record<string, string> = meiliKey
+      ? { Authorization: `Bearer ${meiliKey}` }
+      : {};
 
-    const existing = await axios.get(`${meiliBase}/indexes/${index}/settings`, { headers: h })
+    const existing = await axios
+      .get(`${meiliBase}/indexes/${index}/settings`, { headers: h })
       .then((r) => r.data || {})
       .catch(() => ({}));
 
@@ -605,7 +692,9 @@ async function applySynonymsFromRedis(): Promise<void> {
     );
 
     // eslint-disable-next-line no-console
-    console.log(`[synonyms] applied ${Object.keys(dynamicSyn).length} dynamic synonym entries`);
+    console.log(
+      `[synonyms] applied ${Object.keys(dynamicSyn).length} dynamic synonym entries`,
+    );
   } finally {
     await redis.quit().catch(() => {});
   }

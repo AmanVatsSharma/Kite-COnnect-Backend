@@ -23,7 +23,11 @@ import { RedisService } from '@infra/redis/redis.service';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
-import { internalToClientProviderName, internalToPublicProviderName, InternalProviderName } from '@shared/utils/provider-label.util';
+import {
+  internalToClientProviderName,
+  internalToPublicProviderName,
+  InternalProviderName,
+} from '@shared/utils/provider-label.util';
 import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { denormalizeExchange } from '@shared/utils/exchange-normalizer';
 
@@ -57,15 +61,24 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   private readonly lastUpstreamAt = new Map<number, number>();
   private syntheticPulseTimer: NodeJS.Timeout | null = null;
   /** Per-provider last valid (lp > 0) tick per UIR — enables cross-provider fallback. */
-  private readonly perProviderTickCache = new Map<InternalProviderName, Map<number, any>>();
+  private readonly perProviderTickCache = new Map<
+    InternalProviderName,
+    Map<number, any>
+  >();
   /** Persistent per-UIR mode — survives batch-queue clears; authoritative for reconnect and disconnect re-routing. */
-  private readonly subscribedUirModes = new Map<number, 'ltp' | 'ohlcv' | 'full'>();
+  private readonly subscribedUirModes = new Map<
+    number,
+    'ltp' | 'ohlcv' | 'full'
+  >();
   /**
    * Per-UIR forced provider — pinned by `Provider:identifier` WS prefix subscriptions.
    * When set, the batch processor skips `getBestProviderForUirId` and the kite↔vortex
    * dual-subscribe path. Cleared when the last client unsubscribes from that UIR.
    */
-  private readonly forcedProviderByUir = new Map<number, InternalProviderName>();
+  private readonly forcedProviderByUir = new Map<
+    number,
+    InternalProviderName
+  >();
   /** Set by admin stop; prevents auto-start from overriding an explicit admin decision. Cleared on admin start. */
   private adminStopped = false;
   /** Prevents concurrent auto-start races when multiple clients subscribe simultaneously. */
@@ -164,7 +177,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   }
 
   private ensureSubscriptionQueueCapacity(incomingNewTokens: number) {
-    while (this.subscriptionQueue.size + incomingNewTokens > this.SUB_QUEUE_MAX) {
+    while (
+      this.subscriptionQueue.size + incomingNewTokens >
+      this.SUB_QUEUE_MAX
+    ) {
       const first = this.subscriptionQueue.keys().next().value;
       if (first === undefined) break;
       this.subscriptionQueue.delete(first);
@@ -225,7 +241,11 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         // ticker instance itself changes (e.g. after restartTicker).
         let state = this.activeProviderState.get(providerName);
         if (!state || state.ticker !== ticker) {
-          state = { ticker, subscribedUirIds: new Set<number>(), isConnected: false };
+          state = {
+            ticker,
+            subscribedUirIds: new Set<number>(),
+            isConnected: false,
+          };
           this.activeProviderState.set(providerName, state);
         }
 
@@ -245,7 +265,9 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             if (liveState) liveState.isConnected = true;
             this.isStreaming = true;
             try {
-              this.metrics.marketDataStreamTickerConnected.labels(providerName).set(1);
+              this.metrics.marketDataStreamTickerConnected
+                .labels(providerName)
+                .set(1);
             } catch {}
             try {
               this.redisService.publish('stream:status', {
@@ -262,10 +284,15 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               );
               for (const [uirId, mode] of this.subscribedUirModes) {
                 if (!this.subscriptionQueue.has(uirId)) {
-                  this.subscriptionQueue.set(uirId, { mode, timestamp: Date.now(), clients: new Set() });
+                  this.subscriptionQueue.set(uirId, {
+                    mode,
+                    timestamp: Date.now(),
+                    clients: new Set(),
+                  });
                 }
               }
-              if (!this.subscriptionBatchInterval) this.startSubscriptionBatching();
+              if (!this.subscriptionBatchInterval)
+                this.startSubscriptionBatching();
             }
           });
 
@@ -273,9 +300,13 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             this.logger.log(`[${providerName}] Provider ticker disconnected`);
             const liveState = this.activeProviderState.get(providerName);
             if (liveState) liveState.isConnected = false;
-            this.isStreaming = Array.from(this.activeProviderState.values()).some((s) => s.isConnected);
+            this.isStreaming = Array.from(
+              this.activeProviderState.values(),
+            ).some((s) => s.isConnected);
             try {
-              this.metrics.marketDataStreamTickerConnected.labels(providerName).set(0);
+              this.metrics.marketDataStreamTickerConnected
+                .labels(providerName)
+                .set(0);
             } catch {}
             try {
               this.redisService.publish('stream:status', {
@@ -294,10 +325,15 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               for (const uirId of orphaned) {
                 const mode = this.subscribedUirModes.get(uirId) ?? 'ltp';
                 if (!this.subscriptionQueue.has(uirId)) {
-                  this.subscriptionQueue.set(uirId, { mode, timestamp: Date.now(), clients: new Set() });
+                  this.subscriptionQueue.set(uirId, {
+                    mode,
+                    timestamp: Date.now(),
+                    clients: new Set(),
+                  });
                 }
               }
-              if (!this.subscriptionBatchInterval) this.startSubscriptionBatching();
+              if (!this.subscriptionBatchInterval)
+                this.startSubscriptionBatching();
             }
           });
 
@@ -305,9 +341,13 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             this.logger.error(`[${providerName}] Provider ticker error`, error);
             const liveState = this.activeProviderState.get(providerName);
             if (liveState) liveState.isConnected = false;
-            this.isStreaming = Array.from(this.activeProviderState.values()).some((s) => s.isConnected);
+            this.isStreaming = Array.from(
+              this.activeProviderState.values(),
+            ).some((s) => s.isConnected);
             try {
-              this.metrics.marketDataStreamTickerConnected.labels(providerName).set(0);
+              this.metrics.marketDataStreamTickerConnected
+                .labels(providerName)
+                .set(0);
             } catch {}
             try {
               this.redisService.publish('stream:status', {
@@ -324,7 +364,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           try {
             ticker.connect?.();
           } catch (e) {
-            this.logger.error(`[${providerName}] Error connecting provider ticker`, e);
+            this.logger.error(
+              `[${providerName}] Error connecting provider ticker`,
+              e,
+            );
           }
         }, 0);
       }
@@ -341,7 +384,9 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
    * Lazily connect a provider's WS ticker on first subscription.
    * Called from the batch processor when a UIR ID maps to a provider that isn't yet active.
    */
-  private async lazyInitProvider(providerName: InternalProviderName): Promise<void> {
+  private async lazyInitProvider(
+    providerName: InternalProviderName,
+  ): Promise<void> {
     try {
       const provider = this.providerResolver.getProvider(providerName);
       const ticker = provider.initializeTicker?.();
@@ -349,23 +394,34 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
       let state = this.activeProviderState.get(providerName);
       if (!state || state.ticker !== ticker) {
-        state = { ticker, subscribedUirIds: new Set<number>(), isConnected: false };
+        state = {
+          ticker,
+          subscribedUirIds: new Set<number>(),
+          isConnected: false,
+        };
         this.activeProviderState.set(providerName, state);
       }
 
       if (!this.tickerStreamHandlersBound.has(ticker)) {
         this.tickerStreamHandlersBound.set(ticker, true);
-        ticker.on('ticks', (ticks: any[]) => void this.handleTicks(providerName, ticks));
+        ticker.on(
+          'ticks',
+          (ticks: any[]) => void this.handleTicks(providerName, ticks),
+        );
         ticker.on('connect', () => {
           const s = this.activeProviderState.get(providerName);
           if (s) s.isConnected = true;
           this.isStreaming = true;
-          this.logger.log(`[${providerName}] Lazy-initialized provider ticker connected`);
+          this.logger.log(
+            `[${providerName}] Lazy-initialized provider ticker connected`,
+          );
         });
         ticker.on('disconnect', () => {
           const s = this.activeProviderState.get(providerName);
           if (s) s.isConnected = false;
-          this.isStreaming = Array.from(this.activeProviderState.values()).some((st) => st.isConnected);
+          this.isStreaming = Array.from(this.activeProviderState.values()).some(
+            (st) => st.isConnected,
+          );
         });
         ticker.on('error', (error: any) => {
           this.logger.error(`[${providerName}] Ticker error`, error);
@@ -373,10 +429,14 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       }
 
       setTimeout(() => {
-        try { ticker.connect?.(); } catch {}
+        try {
+          ticker.connect?.();
+        } catch {}
       }, 0);
 
-      this.logger.log(`[${providerName}] Lazy-initialized provider ticker for first subscription`);
+      this.logger.log(
+        `[${providerName}] Lazy-initialized provider ticker for first subscription`,
+      );
     } catch (e) {
       this.logger.warn(`[${providerName}] lazyInitProvider failed`, e as any);
     }
@@ -412,7 +472,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
         tick._uirId = uirId;
-        tick._canonicalSymbol = this.instrumentRegistry.getCanonicalSymbol(uirId);
+        tick._canonicalSymbol =
+          this.instrumentRegistry.getCanonicalSymbol(uirId);
 
         // Update in-memory LTP cache first for hot-read path
         const lp = Number(tick.last_price);
@@ -435,11 +496,20 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         let effectiveTick = tick;
         if (!lpValid) {
           const peers: InternalProviderName[] =
-            providerName === 'kite' ? ['vortex'] : providerName === 'vortex' ? ['kite'] : [];
+            providerName === 'kite'
+              ? ['vortex']
+              : providerName === 'vortex'
+                ? ['kite']
+                : [];
           for (const peer of peers) {
             const peerTick = this.perProviderTickCache.get(peer)?.get(uirId);
             if (peerTick) {
-              effectiveTick = { ...peerTick, ...tick, last_price: peerTick.last_price, _fallbackProvider: peer };
+              effectiveTick = {
+                ...peerTick,
+                ...tick,
+                last_price: peerTick.last_price,
+                _fallbackProvider: peer,
+              };
               break;
             }
           }
@@ -526,7 +596,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       const modeP = { ltp: 1, ohlcv: 2, full: 3 } as const;
       for (const token of instrumentTokens) {
         const cur = this.subscribedUirModes.get(token);
-        if (!cur || modeP[mode] > modeP[cur]) this.subscribedUirModes.set(token, mode);
+        if (!cur || modeP[mode] > modeP[cur])
+          this.subscribedUirModes.set(token, mode);
       }
 
       // Start batching interval if not already started
@@ -542,7 +613,6 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       throw error;
     }
   }
-
 
   async unsubscribeFromInstruments(
     instrumentTokens: number[],
@@ -610,7 +680,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         for (const [uirId, sub] of this.subscriptionQueue) {
           // Pinned provider (from `Provider:identifier` WS prefix) overrides best-provider routing.
           const pinned = this.forcedProviderByUir.get(uirId);
-          const prov = pinned ?? this.instrumentRegistry.getBestProviderForUirId(uirId);
+          const prov =
+            pinned ?? this.instrumentRegistry.getBestProviderForUirId(uirId);
           if (!prov) continue;
           // Lazy-init provider ticker on first subscription (e.g. massive for US stocks)
           if (!this.activeProviderState.has(prov)) {
@@ -629,8 +700,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             prov === 'kite' ? ['vortex'] : prov === 'vortex' ? ['kite'] : [];
           for (const secondary of secondaryProviders) {
             if (!this.activeProviderState.has(secondary)) continue;
-            if (!this.instrumentRegistry.getProviderToken(uirId, secondary)) continue;
-            if (!byProvider.has(secondary)) byProvider.set(secondary, new Map());
+            if (!this.instrumentRegistry.getProviderToken(uirId, secondary))
+              continue;
+            if (!byProvider.has(secondary))
+              byProvider.set(secondary, new Map());
             // Only add if not already in the secondary group (primary might be secondary for another UIR)
             if (!byProvider.get(secondary)!.has(uirId)) {
               byProvider.get(secondary)!.set(uirId, { mode: sub.mode });
@@ -692,18 +765,28 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           if (providerName === 'vortex') {
             const primePairs: Array<{ token: number; exchange: string }> = [];
             for (const [uirId] of subscriptions) {
-              const pt = this.instrumentRegistry.getProviderToken(uirId, 'vortex');
+              const pt = this.instrumentRegistry.getProviderToken(
+                uirId,
+                'vortex',
+              );
               const canon = this.instrumentRegistry.getCanonicalSymbol(uirId);
               const canonExch = canon?.split(':')[0] ?? '';
               const vortexExch = denormalizeExchange(canonExch, 'vortex');
-              const tokenNum = parseInt((pt ?? '').split('-').pop() ?? pt ?? '', 10);
-              if (!isNaN(tokenNum)) primePairs.push({ token: tokenNum, exchange: vortexExch });
+              const tokenNum = parseInt(
+                (pt ?? '').split('-').pop() ?? pt ?? '',
+                10,
+              );
+              if (!isNaN(tokenNum))
+                primePairs.push({ token: tokenNum, exchange: vortexExch });
             }
             if (primePairs.length) {
               try {
                 provider.primeExchangeMapping?.(primePairs);
               } catch (e) {
-                this.logger.warn('[StreamBatching][vortex] primeExchangeMapping failed', e as any);
+                this.logger.warn(
+                  '[StreamBatching][vortex] primeExchangeMapping failed',
+                  e as any,
+                );
               }
             }
           }
@@ -718,7 +801,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           for (const [mode, uirIds] of modeGroups) {
             const providerTokens: (number | string)[] = [];
             for (const uirId of uirIds) {
-              const pt = this.instrumentRegistry.getProviderToken(uirId, providerName);
+              const pt = this.instrumentRegistry.getProviderToken(
+                uirId,
+                providerName,
+              );
               if (pt != null) {
                 const numPt = Number(pt);
                 providerTokens.push(Number.isFinite(numPt) ? numPt : pt);
@@ -727,8 +813,15 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             this.logger.log(
               `[StreamBatching][${providerName}] Subscribing ${providerTokens.length} tokens (${uirIds.length} UIR IDs) mode=${mode}`,
             );
-            for (let i = 0; i < providerTokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
-              const chunk = providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE);
+            for (
+              let i = 0;
+              i < providerTokens.length;
+              i += this.SUBSCRIBE_CHUNK_SIZE
+            ) {
+              const chunk = providerTokens.slice(
+                i,
+                i + this.SUBSCRIBE_CHUNK_SIZE,
+              );
               state.ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
             }
             uirIds.forEach((uirId) => {
@@ -740,7 +833,9 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           // Update Kite gauge
           if (providerName === 'kite') {
             try {
-              this.metrics.kiteTickerSubscribedInstruments.set(state.subscribedUirIds.size);
+              this.metrics.kiteTickerSubscribedInstruments.set(
+                state.subscribedUirIds.size,
+              );
             } catch {}
           }
         }
@@ -764,23 +859,36 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
 
           const providerTokens: (number | string)[] = [];
           for (const uirId of inThisProvider) {
-            const pt = this.instrumentRegistry.getProviderToken(uirId, providerName);
+            const pt = this.instrumentRegistry.getProviderToken(
+              uirId,
+              providerName,
+            );
             if (pt != null) {
               const numPt = Number(pt);
               providerTokens.push(Number.isFinite(numPt) ? numPt : pt);
             }
           }
-          for (let i = 0; i < providerTokens.length; i += this.SUBSCRIBE_CHUNK_SIZE) {
-            state.ticker.unsubscribe(providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE));
+          for (
+            let i = 0;
+            i < providerTokens.length;
+            i += this.SUBSCRIBE_CHUNK_SIZE
+          ) {
+            state.ticker.unsubscribe(
+              providerTokens.slice(i, i + this.SUBSCRIBE_CHUNK_SIZE),
+            );
           }
-          inThisProvider.forEach((uirId) => state.subscribedUirIds.delete(uirId));
+          inThisProvider.forEach((uirId) =>
+            state.subscribedUirIds.delete(uirId),
+          );
 
           this.logger.log(
             `[StreamBatching][${providerName}] Processed ${inThisProvider.length} unsubscriptions`,
           );
           if (providerName === 'kite') {
             try {
-              this.metrics.kiteTickerSubscribedInstruments.set(state.subscribedUirIds.size);
+              this.metrics.kiteTickerSubscribedInstruments.set(
+                state.subscribedUirIds.size,
+              );
             } catch {}
           }
         }
@@ -797,10 +905,14 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         const elapsed = (Date.now() - t0) / 1000;
         // Emit metric for each provider that participated in this batch
         for (const prov of providerLabelsUsed) {
-          this.metrics.marketDataStreamBatchSeconds.labels(prov).observe(elapsed);
+          this.metrics.marketDataStreamBatchSeconds
+            .labels(prov)
+            .observe(elapsed);
         }
         if (providerLabelsUsed.size === 0) {
-          this.metrics.marketDataStreamBatchSeconds.labels('none').observe(elapsed);
+          this.metrics.marketDataStreamBatchSeconds
+            .labels('none')
+            .observe(elapsed);
         }
       } catch {}
     }
@@ -810,7 +922,9 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     try {
       for (const [providerName, state] of this.activeProviderState) {
         if (!state.isConnected) continue;
-        const relevant = instrumentTokens.filter((id) => state.subscribedUirIds.has(id));
+        const relevant = instrumentTokens.filter((id) =>
+          state.subscribedUirIds.has(id),
+        );
         if (relevant.length === 0) continue;
         try {
           state.ticker.setMode(mode, relevant);
@@ -931,14 +1045,23 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
    * Health snapshot for /health and admin: streaming flags, queues, ticker presence.
    */
   async getMarketDataHealthSnapshot() {
-    const providers: Record<string, { isConnected: boolean; subscribedCount: number }> = {};
+    const providers: Record<
+      string,
+      { isConnected: boolean; subscribedCount: number }
+    > = {};
     for (const [name, state] of this.activeProviderState) {
-      providers[internalToPublicProviderName(name)] = { isConnected: state.isConnected, subscribedCount: state.subscribedUirIds.size };
+      providers[internalToPublicProviderName(name)] = {
+        isConnected: state.isConnected,
+        subscribedCount: state.subscribedUirIds.size,
+      };
     }
     const anyConnected = Object.values(providers).some((p) => p.isConnected);
     // Legacy fields derived from the first active provider for backward compat
     const firstEntry = this.activeProviderState.entries().next().value as
-      | [InternalProviderName, { ticker: any; subscribedUirIds: Set<number>; isConnected: boolean }]
+      | [
+          InternalProviderName,
+          { ticker: any; subscribedUirIds: Set<number>; isConnected: boolean },
+        ]
       | undefined;
     const legacyProviderLabel = firstEntry
       ? internalToClientProviderName(firstEntry[0])
@@ -966,14 +1089,17 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       marketDataDegraded: snapshot.marketDataDegraded,
       queues: snapshot.queues,
       providers: snapshot.providers,
-      enabledProviders: Array.from(this.activeProviderState.keys()).map(internalToPublicProviderName),
+      enabledProviders: Array.from(this.activeProviderState.keys()).map(
+        internalToPublicProviderName,
+      ),
     };
   }
 
   /** Current count of instruments subscribed across all active providers. */
   getSubscribedInstrumentCount(): number {
     let total = 0;
-    for (const [, state] of this.activeProviderState) total += state.subscribedUirIds.size;
+    for (const [, state] of this.activeProviderState)
+      total += state.subscribedUirIds.size;
     return total;
   }
 
@@ -1006,8 +1132,14 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       }
 
       for (const [providerName, state] of this.activeProviderState) {
-        try { state.ticker?.disconnect?.(); } catch {}
-        try { this.metrics.marketDataStreamTickerConnected.labels(providerName).set(0); } catch {}
+        try {
+          state.ticker?.disconnect?.();
+        } catch {}
+        try {
+          this.metrics.marketDataStreamTickerConnected
+            .labels(providerName)
+            .set(0);
+        } catch {}
       }
       this.activeProviderState.clear();
 
@@ -1026,7 +1158,9 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   async autoStartIfNeeded(timeoutMs = 6_000): Promise<boolean> {
     if (this.isStreaming) return true;
     if (this.adminStopped) {
-      this.logger.warn('[autoStart] Blocked — streaming was stopped by admin. Resume via admin API.');
+      this.logger.warn(
+        '[autoStart] Blocked — streaming was stopped by admin. Resume via admin API.',
+      );
       return false;
     }
 
@@ -1092,14 +1226,20 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       if (this.activeProviderState.size === 0) {
-        this.logger.log('reconnectIfStreaming: no active providers; re-initializing');
+        this.logger.log(
+          'reconnectIfStreaming: no active providers; re-initializing',
+        );
         await this.initializeStreaming();
         return;
       }
       for (const [providerName, state] of this.activeProviderState) {
         if (!state.ticker?.disconnect || !state.ticker?.connect) continue;
-        this.logger.log(`[${providerName}] Reconnecting provider ticker after token update`);
-        try { state.ticker.disconnect(); } catch {}
+        this.logger.log(
+          `[${providerName}] Reconnecting provider ticker after token update`,
+        );
+        try {
+          state.ticker.disconnect();
+        } catch {}
         setTimeout(() => {
           try {
             state.ticker.connect();

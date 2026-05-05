@@ -11,8 +11,10 @@ export function limitsToRows(data: unknown): KvRow[] {
   const o = data as Record<string, unknown>;
   const rows: KvRow[] = [];
   if (o.key !== undefined) rows.push({ label: 'Key', value: String(o.key) });
-  if (o.tenant_id !== undefined) rows.push({ label: 'Tenant', value: String(o.tenant_id) });
-  if (o.is_active !== undefined) rows.push({ label: 'Active', value: o.is_active ? 'Yes' : 'No' });
+  if (o.tenant_id !== undefined)
+    rows.push({ label: 'Tenant', value: String(o.tenant_id) });
+  if (o.is_active !== undefined)
+    rows.push({ label: 'Active', value: o.is_active ? 'Yes' : 'No' });
   const lim = o.limits;
   if (lim && typeof lim === 'object') {
     for (const [k, v] of Object.entries(lim as Record<string, unknown>)) {
@@ -28,8 +30,10 @@ export function usageBundleToRows(data: unknown): KvRow[] {
   const o = data as Record<string, unknown>;
   const rows: KvRow[] = [];
   if (o.key !== undefined) rows.push({ label: 'Key', value: String(o.key) });
-  if (o.tenant_id !== undefined) rows.push({ label: 'Tenant', value: String(o.tenant_id) });
-  if (o.is_active !== undefined) rows.push({ label: 'Active', value: o.is_active ? 'Yes' : 'No' });
+  if (o.tenant_id !== undefined)
+    rows.push({ label: 'Tenant', value: String(o.tenant_id) });
+  if (o.is_active !== undefined)
+    rows.push({ label: 'Active', value: o.is_active ? 'Yes' : 'No' });
   if (o.limits && typeof o.limits === 'object') {
     rows.push({ label: 'Limits', value: '—' });
     rows.push(...flattenObject(o.limits, 'limits', 2));

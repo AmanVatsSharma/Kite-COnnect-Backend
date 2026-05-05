@@ -42,7 +42,9 @@ export class MarketDataWsInterestService {
   }
 
   /** Top N most-subscribed instruments sorted by subscriber count descending. */
-  getTopInstruments(limit: number): Array<{ token: number; subscribers: number }> {
+  getTopInstruments(
+    limit: number,
+  ): Array<{ token: number; subscribers: number }> {
     return [...this.refCount.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, limit)

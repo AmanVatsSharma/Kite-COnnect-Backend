@@ -11,7 +11,9 @@ import { flattenObject, type KvRow } from './flatten';
 
 export function healthOverallStatus(data: unknown): 'ok' | 'warn' | 'bad' {
   if (!data || typeof data !== 'object') return 'bad';
-  const s = String((data as Record<string, unknown>).status || '').toLowerCase();
+  const s = String(
+    (data as Record<string, unknown>).status || '',
+  ).toLowerCase();
   if (s === 'healthy') return 'ok';
   if (s === 'unhealthy') return 'bad';
   return 'warn';
@@ -31,45 +33,71 @@ export function marketDataSummaryRows(data: unknown): KvRow[] {
   if (!data || typeof data !== 'object') return [];
   const o = data as Record<string, unknown>;
   const rows: KvRow[] = [];
-  if (o.provider !== undefined) rows.push({ label: 'Global provider', value: String(o.provider) });
-  if (o.timestamp) rows.push({ label: 'Timestamp', value: String(o.timestamp) });
+  if (o.provider !== undefined)
+    rows.push({ label: 'Global provider', value: String(o.provider) });
+  if (o.timestamp)
+    rows.push({ label: 'Timestamp', value: String(o.timestamp) });
   const streaming = o.streaming;
   if (streaming && typeof streaming === 'object') {
     const st = streaming as Record<string, unknown>;
-    if (st.isStreaming !== undefined) rows.push({ label: 'Streaming', value: st.isStreaming ? 'Active' : 'Inactive' });
-    if (st.providerName !== undefined) rows.push({ label: 'Stream provider', value: String(st.providerName) });
+    if (st.isStreaming !== undefined)
+      rows.push({
+        label: 'Streaming',
+        value: st.isStreaming ? 'Active' : 'Inactive',
+      });
+    if (st.providerName !== undefined)
+      rows.push({ label: 'Stream provider', value: String(st.providerName) });
   }
   const md = o.marketData;
   if (md && typeof md === 'object') {
     for (const [k, v] of Object.entries(md as Record<string, unknown>)) {
-      if (typeof v === 'boolean') rows.push({ label: `Market ${k}`, value: v ? 'Yes' : 'No' });
-      else if (typeof v === 'string' || typeof v === 'number') rows.push({ label: `Market ${k}`, value: String(v) });
+      if (typeof v === 'boolean')
+        rows.push({ label: `Market ${k}`, value: v ? 'Yes' : 'No' });
+      else if (typeof v === 'string' || typeof v === 'number')
+        rows.push({ label: `Market ${k}`, value: String(v) });
     }
   }
   const vortex = o.vortex;
   if (vortex && typeof vortex === 'object') {
     const vx = vortex as Record<string, unknown>;
-    if (vx.httpOk !== undefined) rows.push({ label: 'Vortex HTTP', value: vx.httpOk ? 'Reachable' : 'Unreachable' });
+    if (vx.httpOk !== undefined)
+      rows.push({
+        label: 'Vortex HTTP',
+        value: vx.httpOk ? 'Reachable' : 'Unreachable',
+      });
   }
   return rows;
 }
 
-export function stockStatsMetricCards(data: unknown): { label: string; value: string; hint?: string }[] {
+export function stockStatsMetricCards(
+  data: unknown,
+): { label: string; value: string; hint?: string }[] {
   if (!data || typeof data !== 'object') return [];
   const o = data as Record<string, unknown>;
   const cards: { label: string; value: string; hint?: string }[] = [];
-  if (typeof o.instruments === 'number') cards.push({ label: 'Instruments', value: String(o.instruments) });
+  if (typeof o.instruments === 'number')
+    cards.push({ label: 'Instruments', value: String(o.instruments) });
   if (typeof o.marketDataRecords === 'number') {
-    cards.push({ label: 'Market data rows', value: String(o.marketDataRecords) });
+    cards.push({
+      label: 'Market data rows',
+      value: String(o.marketDataRecords),
+    });
   }
   if (typeof o.activeSubscriptions === 'number') {
-    cards.push({ label: 'Active subscriptions', value: String(o.activeSubscriptions) });
+    cards.push({
+      label: 'Active subscriptions',
+      value: String(o.activeSubscriptions),
+    });
   }
   const conn = o.connectionStats;
   if (conn && typeof conn === 'object') {
     const c = conn as Record<string, unknown>;
     if (typeof c.totalConnections === 'number') {
-      cards.push({ label: 'WS connections', value: String(c.totalConnections), hint: 'from gateway snapshot' });
+      cards.push({
+        label: 'WS connections',
+        value: String(c.totalConnections),
+        hint: 'from gateway snapshot',
+      });
     }
   }
   return cards;
@@ -98,8 +126,10 @@ export function streamSummaryRows(data: unknown): KvRow[] {
   if (!data || typeof data !== 'object') return flattenObject(data, '', 2);
   const o = data as Record<string, unknown>;
   const rows: KvRow[] = [];
-  if (o.isStreaming !== undefined) rows.push({ label: 'Streaming', value: o.isStreaming ? 'Yes' : 'No' });
-  if (o.providerName !== undefined) rows.push({ label: 'Provider', value: String(o.providerName) });
+  if (o.isStreaming !== undefined)
+    rows.push({ label: 'Streaming', value: o.isStreaming ? 'Yes' : 'No' });
+  if (o.providerName !== undefined)
+    rows.push({ label: 'Provider', value: String(o.providerName) });
   return rows.length ? rows : flattenObject(data, '', 2);
 }
 
@@ -107,11 +137,19 @@ export function wsStatusSummaryRows(data: unknown): KvRow[] {
   if (!data || typeof data !== 'object') return [];
   const o = data as Record<string, unknown>;
   const rows: KvRow[] = [];
-  if (o.namespace !== undefined) rows.push({ label: 'Namespace', value: String(o.namespace) });
-  if (o.protocol_version !== undefined) rows.push({ label: 'Protocol', value: String(o.protocol_version) });
-  if (typeof o.connections === 'number') rows.push({ label: 'Connections', value: String(o.connections) });
-  if (o.redis_ok !== undefined) rows.push({ label: 'Redis', value: o.redis_ok ? 'OK' : 'Issue' });
-  if (Array.isArray(o.subscriptions)) rows.push({ label: 'Subscription groups', value: String(o.subscriptions.length) });
+  if (o.namespace !== undefined)
+    rows.push({ label: 'Namespace', value: String(o.namespace) });
+  if (o.protocol_version !== undefined)
+    rows.push({ label: 'Protocol', value: String(o.protocol_version) });
+  if (typeof o.connections === 'number')
+    rows.push({ label: 'Connections', value: String(o.connections) });
+  if (o.redis_ok !== undefined)
+    rows.push({ label: 'Redis', value: o.redis_ok ? 'OK' : 'Issue' });
+  if (Array.isArray(o.subscriptions))
+    rows.push({
+      label: 'Subscription groups',
+      value: String(o.subscriptions.length),
+    });
   return rows;
 }
 
@@ -127,7 +165,9 @@ export function buildTickerSegments(input: {
 }): string[] {
   const parts: string[] = [];
   const hs = healthOverallStatus(input.health);
-  parts.push(hs === 'ok' ? 'HEALTH OK' : hs === 'bad' ? 'HEALTH FAIL' : 'HEALTH WARN');
+  parts.push(
+    hs === 'ok' ? 'HEALTH OK' : hs === 'bad' ? 'HEALTH FAIL' : 'HEALTH WARN',
+  );
 
   if (input.mdHealth && typeof input.mdHealth === 'object') {
     const md = input.mdHealth as Record<string, unknown>;
@@ -137,7 +177,8 @@ export function buildTickerSegments(input: {
   if (input.stats && typeof input.stats === 'object') {
     const s = input.stats as Record<string, unknown>;
     if (typeof s.instruments === 'number') parts.push(`Inst ${s.instruments}`);
-    if (typeof s.activeSubscriptions === 'number') parts.push(`Subs ${s.activeSubscriptions}`);
+    if (typeof s.activeSubscriptions === 'number')
+      parts.push(`Subs ${s.activeSubscriptions}`);
   }
 
   if (!input.hasAdminToken) {
@@ -155,7 +196,8 @@ export function buildTickerSegments(input: {
 
   if (input.ws && typeof input.ws === 'object') {
     const w = input.ws as Record<string, unknown>;
-    if (typeof w.connections === 'number') parts.push(`WS ${w.connections} conn`);
+    if (typeof w.connections === 'number')
+      parts.push(`WS ${w.connections} conn`);
   }
 
   return parts;

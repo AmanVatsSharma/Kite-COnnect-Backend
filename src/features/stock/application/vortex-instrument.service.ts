@@ -15,6 +15,7 @@ import { VortexInstrumentCacheService } from '@features/stock/application/vortex
 import { VortexInstrumentSearchService } from '@features/stock/application/vortex-instrument-search.service';
 import { VortexInstrumentReadService } from '@features/stock/application/vortex-instrument-read.service';
 import { VortexInstrumentLtpService } from '@features/stock/application/vortex-instrument-ltp.service';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 
 @Injectable()
 export class VortexInstrumentService {
@@ -25,12 +26,41 @@ export class VortexInstrumentService {
     private readonly search: VortexInstrumentSearchService,
     private readonly read: VortexInstrumentReadService,
     private readonly ltp: VortexInstrumentLtpService,
+    private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
+
+  /**
+   * Enrich Vortex items with UIR fields.
+   */
+  enrichWithUir<T extends { token: number }>(
+    items: T[],
+  ): Array<T & { uir_id: number | null; canonical_symbol: string | null }> {
+    return items.map((item) => {
+      const uirId = this.instrumentRegistry.resolveProviderToken(
+        'vortex',
+        item.token,
+      );
+      const canonical_symbol =
+        uirId != null
+          ? (this.instrumentRegistry.getCanonicalSymbol(uirId) ?? null)
+          : null;
+      return { ...item, uir_id: uirId ?? null, canonical_symbol };
+    });
+  }
+
+  /**
+   * Enrich a single Vortex item with UIR fields.
+   */
+  enrichSingleWithUir<T extends { token: number }>(item: T) {
+    return this.enrichWithUir([item])[0];
+  }
 
   syncVortexInstruments(
     exchange?: string,
     csvUrl?: string,
-    onProgress?: Parameters<VortexInstrumentSyncService['syncVortexInstruments']>[2],
+    onProgress?: Parameters<
+      VortexInstrumentSyncService['syncVortexInstruments']
+    >[2],
   ): ReturnType<VortexInstrumentSyncService['syncVortexInstruments']> {
     return this.sync.syncVortexInstruments(exchange, csvUrl, onProgress);
   }
@@ -40,7 +70,9 @@ export class VortexInstrumentService {
   }
 
   getVortexInstruments(
-    filters?: Parameters<VortexInstrumentSearchService['getVortexInstruments']>[0],
+    filters?: Parameters<
+      VortexInstrumentSearchService['getVortexInstruments']
+    >[0],
   ): ReturnType<VortexInstrumentSearchService['getVortexInstruments']> {
     return this.search.getVortexInstruments(filters);
   }
@@ -58,7 +90,9 @@ export class VortexInstrumentService {
     return this.read.getVortexInstrumentByToken(token);
   }
 
-  getVortexInstrumentStats(): ReturnType<VortexInstrumentReadService['getVortexInstrumentStats']> {
+  getVortexInstrumentStats(): ReturnType<
+    VortexInstrumentReadService['getVortexInstrumentStats']
+  > {
     return this.read.getVortexInstrumentStats();
   }
 
@@ -70,8 +104,12 @@ export class VortexInstrumentService {
   }
 
   searchVortexInstrumentsAdvanced(
-    filters: Parameters<VortexInstrumentSearchService['searchVortexInstrumentsAdvanced']>[0],
-  ): ReturnType<VortexInstrumentSearchService['searchVortexInstrumentsAdvanced']> {
+    filters: Parameters<
+      VortexInstrumentSearchService['searchVortexInstrumentsAdvanced']
+    >[0],
+  ): ReturnType<
+    VortexInstrumentSearchService['searchVortexInstrumentsAdvanced']
+  > {
     return this.search.searchVortexInstrumentsAdvanced(filters);
   }
 
@@ -112,7 +150,9 @@ export class VortexInstrumentService {
     return this.read.getVortexInstrumentDetails(tokens);
   }
 
-  getVortexLTP(tokens: number[]): ReturnType<VortexInstrumentLtpService['getVortexLTP']> {
+  getVortexLTP(
+    tokens: number[],
+  ): ReturnType<VortexInstrumentLtpService['getVortexLTP']> {
     return this.ltp.getVortexLTP(tokens);
   }
 
@@ -131,33 +171,49 @@ export class VortexInstrumentService {
 
   getVortexPopularInstrumentsCached(
     limit?: number,
-  ): ReturnType<VortexInstrumentCacheService['getVortexPopularInstrumentsCached']> {
+  ): ReturnType<
+    VortexInstrumentCacheService['getVortexPopularInstrumentsCached']
+  > {
     return this.cache.getVortexPopularInstrumentsCached(limit);
   }
 
   getVortexInstrumentByTokenCached(
     token: number,
-  ): ReturnType<VortexInstrumentCacheService['getVortexInstrumentByTokenCached']> {
+  ): ReturnType<
+    VortexInstrumentCacheService['getVortexInstrumentByTokenCached']
+  > {
     return this.cache.getVortexInstrumentByTokenCached(token);
   }
 
-  clearVortexCache(pattern?: string): ReturnType<VortexInstrumentCacheService['clearVortexCache']> {
+  clearVortexCache(
+    pattern?: string,
+  ): ReturnType<VortexInstrumentCacheService['clearVortexCache']> {
     return this.cache.clearVortexCache(pattern);
   }
 
   validateAndCleanupInstruments(
-    filters: Parameters<VortexInstrumentCleanupService['validateAndCleanupInstruments']>[0],
-    onProgress?: Parameters<VortexInstrumentCleanupService['validateAndCleanupInstruments']>[1],
-  ): ReturnType<VortexInstrumentCleanupService['validateAndCleanupInstruments']> {
+    filters: Parameters<
+      VortexInstrumentCleanupService['validateAndCleanupInstruments']
+    >[0],
+    onProgress?: Parameters<
+      VortexInstrumentCleanupService['validateAndCleanupInstruments']
+    >[1],
+  ): ReturnType<
+    VortexInstrumentCleanupService['validateAndCleanupInstruments']
+  > {
     return this.cleanup.validateAndCleanupInstruments(filters, onProgress);
   }
 
-  deleteInactiveInstruments(): ReturnType<VortexInstrumentCleanupService['deleteInactiveInstruments']> {
+  deleteInactiveInstruments(): ReturnType<
+    VortexInstrumentCleanupService['deleteInactiveInstruments']
+  > {
     return this.cleanup.deleteInactiveInstruments();
   }
 
   deleteInstrumentsByFilter(
-    opts: Parameters<VortexInstrumentCleanupService['deleteInstrumentsByFilter']>[0],
+    opts: Parameters<
+      VortexInstrumentCleanupService['deleteInstrumentsByFilter']
+    >[0],
   ): ReturnType<VortexInstrumentCleanupService['deleteInstrumentsByFilter']> {
     return this.cleanup.deleteInstrumentsByFilter(opts);
   }

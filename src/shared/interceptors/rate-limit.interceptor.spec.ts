@@ -30,12 +30,14 @@ describe('RateLimitInterceptor (unit)', () => {
     const redis = createRedisMock();
     const config = createConfigMock({ RATE_LIMIT_PER_KEY: 2 });
     const rl = new RateLimitInterceptor(redis, config);
-    const req: any = { route: { path: '/x' }, ip: '1.2.3.4', headers: { 'x-api-key': 'k' } };
+    const req: any = {
+      route: { path: '/x' },
+      ip: '1.2.3.4',
+      headers: { 'x-api-key': 'k' },
+    };
 
     await expect(rl.guardRequest(req)).resolves.toBeUndefined();
     await expect(rl.guardRequest(req)).resolves.toBeUndefined();
     await expect(rl.guardRequest(req)).rejects.toBeInstanceOf(HttpException);
   });
 });
-
-

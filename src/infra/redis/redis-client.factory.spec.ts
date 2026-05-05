@@ -41,7 +41,10 @@ describe('RedisClientFactory', () => {
   let factory: RedisClientFactory;
 
   const build = async (configOverrides: Record<string, any> = {}) => {
-    const config = makeConfig({ REDIS_CONNECT_TIMEOUT_MS: 100, ...configOverrides });
+    const config = makeConfig({
+      REDIS_CONNECT_TIMEOUT_MS: 100,
+      ...configOverrides,
+    });
     const metrics = makeMetrics();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -56,12 +59,19 @@ describe('RedisClientFactory', () => {
   };
 
   afterEach(async () => {
-    try { await factory?.onModuleDestroy(); } catch {}
+    try {
+      await factory?.onModuleDestroy();
+    } catch {}
     jest.clearAllMocks();
   });
 
   it('returns null clients when no Redis config provided', async () => {
-    await build({ REDIS_HOST: undefined, REDIS_URL: undefined, REDIS_SENTINEL_HOSTS: undefined, REDIS_CLUSTER_NODES: undefined });
+    await build({
+      REDIS_HOST: undefined,
+      REDIS_URL: undefined,
+      REDIS_SENTINEL_HOSTS: undefined,
+      REDIS_CLUSTER_NODES: undefined,
+    });
     expect(factory.isConfigured()).toBe(false);
     expect(factory.getClient('default')).toBeNull();
     expect(factory.getClient('io-adapter-pub')).toBeNull();
@@ -71,14 +81,23 @@ describe('RedisClientFactory', () => {
     await build({ REDIS_HOST: 'localhost' });
     expect(factory.isConfigured()).toBe(true);
     expect(factory.getMode()).toBe('standard');
-    const names = ['default', 'pubsub-pub', 'pubsub-sub', 'io-adapter-pub', 'io-adapter-sub'] as const;
+    const names = [
+      'default',
+      'pubsub-pub',
+      'pubsub-sub',
+      'io-adapter-pub',
+      'io-adapter-sub',
+    ] as const;
     for (const name of names) {
       expect(factory.getClient(name)).not.toBeNull();
     }
   });
 
   it('returns mode=sentinel when REDIS_SENTINEL_HOSTS is set', async () => {
-    await build({ REDIS_SENTINEL_HOSTS: 'sentinel1:26379', REDIS_SENTINEL_NAME: 'mymaster' });
+    await build({
+      REDIS_SENTINEL_HOSTS: 'sentinel1:26379',
+      REDIS_SENTINEL_NAME: 'mymaster',
+    });
     expect(factory.getMode()).toBe('sentinel');
   });
 
@@ -91,7 +110,10 @@ describe('RedisClientFactory', () => {
     await build({ REDIS_HOST: 'localhost' });
     const IORedis = require('ioredis').default;
     const allInstances: any[] = IORedis.mock.results.map((r: any) => r.value);
-    const connectCalls = allInstances.filter((i: any) => i.connect && i.connect.mock && i.connect.mock.calls.length > 0);
+    const connectCalls = allInstances.filter(
+      (i: any) =>
+        i.connect && i.connect.mock && i.connect.mock.calls.length > 0,
+    );
     expect(connectCalls.length).toBeGreaterThanOrEqual(5);
   });
 
@@ -100,7 +122,9 @@ describe('RedisClientFactory', () => {
     const IORedis = require('ioredis').default;
     const instancesBefore = IORedis.mock.results.map((r: any) => r.value);
     await factory.onModuleDestroy();
-    const quitCalls = instancesBefore.filter((i: any) => i.quit && i.quit.mock && i.quit.mock.calls.length > 0);
+    const quitCalls = instancesBefore.filter(
+      (i: any) => i.quit && i.quit.mock && i.quit.mock.calls.length > 0,
+    );
     expect(quitCalls.length).toBeGreaterThanOrEqual(5);
   });
 });

@@ -13,7 +13,10 @@ import * as admin from '../lib/admin-api';
 import * as pub from '../lib/public-api';
 import { useRefreshInterval } from './useRefreshInterval';
 
-function useTimedFn<T>(recordLatency: (ms: number) => void, fn: () => Promise<T>) {
+function useTimedFn<T>(
+  recordLatency: (ms: number) => void,
+  fn: () => Promise<T>,
+) {
   return useCallback(async () => {
     const t0 = performance.now();
     try {
@@ -29,7 +32,9 @@ export interface LiveAdminMetrics {
   health: UseQueryResult<Awaited<ReturnType<typeof pub.getHealth>>>;
   mdHealth: UseQueryResult<Awaited<ReturnType<typeof pub.getMarketDataHealth>>>;
   stats: UseQueryResult<Awaited<ReturnType<typeof pub.getStockStats>>>;
-  globalProv: UseQueryResult<Awaited<ReturnType<typeof admin.getGlobalProvider>>>;
+  globalProv: UseQueryResult<
+    Awaited<ReturnType<typeof admin.getGlobalProvider>>
+  >;
   stream: UseQueryResult<Awaited<ReturnType<typeof admin.getStreamStatus>>>;
   ws: UseQueryResult<Awaited<ReturnType<typeof admin.getWsStatus>>>;
   refetchInterval: number | false;

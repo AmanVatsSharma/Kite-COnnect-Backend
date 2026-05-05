@@ -38,12 +38,13 @@ export class HealthController {
   @ApiOperation({ summary: 'Basic health' })
   async getHealth() {
     try {
-      const [systemStats, streamingStatus, vortexPing, redisCheck] = await Promise.all([
-        this.stockService.getSystemStats(),
-        this.marketDataStreamService.getStreamingStatus(),
-        this.vortexProvider.ping?.(),
-        this.redisHealth.check(),
-      ]);
+      const [systemStats, streamingStatus, vortexPing, redisCheck] =
+        await Promise.all([
+          this.stockService.getSystemStats(),
+          this.marketDataStreamService.getStreamingStatus(),
+          this.vortexProvider.ping?.(),
+          this.redisHealth.check(),
+        ]);
 
       const resolved =
         await this.resolver.getResolvedInternalProviderNameForWebsocket();
@@ -83,7 +84,8 @@ export class HealthController {
         this.marketDataStreamService.getMarketDataHealthSnapshot(),
       ]);
 
-      const internal = await this.resolver.getResolvedInternalProviderNameForWebsocket();
+      const internal =
+        await this.resolver.getResolvedInternalProviderNameForWebsocket();
       const healthData = {
         provider: internalToClientProviderName(internal),
         streaming: streamingStatus,

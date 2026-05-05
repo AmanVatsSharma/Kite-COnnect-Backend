@@ -64,9 +64,13 @@ export class RedisIoAdapter extends IoAdapter {
       }
 
       if (factory.getMode() === 'cluster') {
-        const { createShardedAdapter } = await import('@socket.io/redis-adapter');
+        const { createShardedAdapter } = await import(
+          '@socket.io/redis-adapter'
+        );
         this.adapterConstructor = createShardedAdapter(pub as any, sub as any);
-        this.logger.log('[RedisIoAdapter] Socket.IO sharded Redis adapter configured (cluster mode)');
+        this.logger.log(
+          '[RedisIoAdapter] Socket.IO sharded Redis adapter configured (cluster mode)',
+        );
       } else {
         this.adapterConstructor = createAdapter(pub as any, sub as any);
         this.logger.log('[RedisIoAdapter] Socket.IO Redis adapter configured');
@@ -87,4 +91,3 @@ export class RedisIoAdapter extends IoAdapter {
     return server;
   }
 }
-

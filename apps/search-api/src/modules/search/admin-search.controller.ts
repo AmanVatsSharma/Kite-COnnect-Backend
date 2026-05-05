@@ -33,7 +33,10 @@ import {
   Logger,
   Query,
 } from '@nestjs/common';
-import { AdminSearchService, SearchAdminOverview } from './admin-search.service';
+import {
+  AdminSearchService,
+  SearchAdminOverview,
+} from './admin-search.service';
 
 @Controller('search/admin')
 export class AdminSearchController {
@@ -55,8 +58,8 @@ export class AdminSearchController {
     const data = await this.admin.getOverview(topN);
     this.logger.log(
       `[AdminOverview] docs=${data.meili.numberOfDocuments} synonyms=${data.meili.settings.synonymCount} ` +
-      `signalsScanned=${data.selectionSignals.scanned} popularCount=${data.popularQueries.length} ` +
-      `errors=${data.errors.length}`,
+        `signalsScanned=${data.selectionSignals.scanned} popularCount=${data.popularQueries.length} ` +
+        `errors=${data.errors.length}`,
     );
     return { success: true, data };
   }
@@ -71,7 +74,10 @@ export class AdminSearchController {
     if (!expected) {
       // Fail closed — refuse admin requests if the search-api container has no token configured
       throw new HttpException(
-        { success: false, message: 'admin disabled (ADMIN_TOKEN not set on search-api)' },
+        {
+          success: false,
+          message: 'admin disabled (ADMIN_TOKEN not set on search-api)',
+        },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }

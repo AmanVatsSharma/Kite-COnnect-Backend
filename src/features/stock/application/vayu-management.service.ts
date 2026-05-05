@@ -633,9 +633,7 @@ export class VayuManagementService {
     try {
       this.logger.log('Starting instrument validation', body);
       const result =
-        await this.vortexInstrumentService.validateAndCleanupInstruments(
-          body,
-        );
+        await this.vortexInstrumentService.validateAndCleanupInstruments(body);
       return {
         success: true,
         data: result,

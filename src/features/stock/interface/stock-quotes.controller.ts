@@ -16,9 +16,10 @@ import {
   HttpStatus,
   UseGuards,
   Request,
-} from "@nestjs/common";
-import { StockService } from "@features/stock/application/stock.service";
-import { UniversalLtpService } from "@features/stock/application/universal-ltp.service";
+} from '@nestjs/common';
+import { StockService } from '@features/stock/application/stock.service';
+import { UniversalLtpService } from '@features/stock/application/universal-ltp.service';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import {
   ApiTags,
   ApiOperation,
@@ -27,19 +28,45 @@ import {
   ApiHeader,
   ApiBody,
   ApiResponse,
-} from "@nestjs/swagger";
-import { ApiKeyGuard } from "@shared/guards/api-key.guard";
-import { InstrumentsRequestDto } from "./dto/instruments.dto";
+} from '@nestjs/swagger';
+import { ApiKeyGuard } from '@shared/guards/api-key.guard';
+import { InstrumentsRequestDto } from './dto/instruments.dto';
 
-@Controller("stock")
+@Controller('stock')
 @UseGuards(ApiKeyGuard)
-@ApiTags("stock")
-@ApiSecurity("apiKey")
+@ApiTags('stock')
+@ApiSecurity('apiKey')
 export class StockQuotesController {
   constructor(
     private readonly stockService: StockService,
     private readonly universalLtpService: UniversalLtpService,
+    private readonly registry: InstrumentRegistryService,
   ) {}
+
+  /**
+   * Helper to enrich items with UIR metadata.
+   */
+  private enrichWithUir(item: any, token: string | number) {
+    const uirId = this.registry.resolveTokenAcrossProviders(token);
+    const canonical_symbol =
+      uirId != null ? (this.registry.getCanonicalSymbol(uirId) ?? null) : null;
+    return {
+      ...item,
+      uir_id: uirId ?? null,
+      canonical_symbol,
+    };
+  }
+
+  /**
+   * Helper to enrich a record/map of items.
+   */
+  private enrichRecordWithUir(data: Record<string, any>) {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(data || {})) {
+      out[k] = this.enrichWithUir(v, k);
+    }
+    return out;
+  }
 
   /**
    * POST /api/stock/universal/ltp
@@ -53,7 +80,12 @@ export class StockQuotesController {
     description:
       'Accepts an array of universal_instruments.id values. Resolves each to vortex or kite provider internally and returns a map of id → { last_price }.',
   })
-  @ApiBody({ schema: { properties: { ids: { type: 'array', items: { type: 'number' } } }, required: ['ids'] } })
+  @ApiBody({
+    schema: {
+      properties: { ids: { type: 'array', items: { type: 'number' } } },
+      required: ['ids'],
+    },
+  })
   async universalLtp(@Body() body: { ids: number[] }) {
     return this.universalLtpService.getUniversalLtp(
       (body?.ids || []).map(Number).filter(Number.isFinite),
@@ -98,55 +130,38 @@ export class StockQuotesController {
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Quote data response. When ltp_only=true, only instruments with last_price are returned.',
+    description: 'Quote data map',
   })
   async getQuotes(
     @Body() body: InstrumentsRequestDto,
-    @Request() req: any,
-    @Query('mode') mode?: 'ltp' | 'ohlc' | 'full',
-    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
+    @Query('mode') modeRaw?: string,
+    @Query('ltp_only') ltpOnlyRaw?: string,
+    @Request() req?: any,
   ) {
     try {
-      const { instruments } = body;
-      if (
-        !instruments ||
-        !Array.isArray(instruments) ||
-        instruments.length === 0
-      ) {
+      const instruments = (body?.instruments || [])
+        .map(Number)
+        .filter(Number.isFinite);
+      if (!instruments.length) {
         throw new HttpException(
-          {
-            success: false,
-            message: 'Instruments array is required',
-          },
+          { success: false, message: 'instruments array is required' },
           HttpStatus.BAD_REQUEST,
         );
       }
+      const modeNorm = (modeRaw || 'full').toLowerCase();
+      const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true';
 
-      if (instruments.length > 100) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Maximum 100 instruments allowed per request',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const modeNorm = (mode || 'full').toLowerCase();
-      const ltpOnly =
-        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
-        ltpOnlyRaw === true;
-      let quotes: any;
-      if (modeNorm === 'ltp') {
-        quotes = await this.stockService.getLTP(
+      let quotes: any = {};
+      const provider = req.headers?.['x-provider'];
+
+      if (provider === 'falcon' || provider === 'kite') {
+        quotes = await this.stockService.getKiteQuotes(
           instruments,
-          req.headers,
           req.headers?.['x-api-key'] || req.query?.['api_key'],
         );
-      } else if (modeNorm === 'ohlc') {
-        quotes = await this.stockService.getOHLC(
+      } else if (provider === 'vortex' || provider === 'vayu') {
+        quotes = await this.stockService.getVortexQuotes(
           instruments,
-          req.headers,
           req.headers?.['x-api-key'] || req.query?.['api_key'],
         );
       } else {
@@ -166,9 +181,12 @@ export class StockQuotesController {
         });
         quotes = filtered;
       }
+
+      const enriched = this.enrichRecordWithUir(quotes as any);
+
       return {
         success: true,
-        data: quotes,
+        data: enriched,
         timestamp: new Date().toISOString(),
         mode: modeNorm,
         ltp_only: ltpOnly || false,
@@ -208,14 +226,19 @@ export class StockQuotesController {
       const ltp = tokens.length ? await this.stockService.getLTP(tokens) : {};
       return {
         success: true,
-        data: items.map((i) => ({
-          instrument_token: i.instrument_token,
-          symbol: i.tradingsymbol,
-          segment: i.segment,
-          instrument_type: i.instrument_type,
-          last_price:
-            ltp?.[i.instrument_token]?.last_price ?? i.last_price ?? null,
-        })),
+        data: items.map((i) =>
+          this.enrichWithUir(
+            {
+              instrument_token: i.instrument_token,
+              symbol: i.tradingsymbol,
+              segment: i.segment,
+              instrument_type: i.instrument_type,
+              last_price:
+                ltp?.[i.instrument_token]?.last_price ?? i.last_price ?? null,
+            },
+            i.instrument_token,
+          ),
+        ),
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
@@ -246,16 +269,16 @@ export class StockQuotesController {
       const ltp = await this.stockService.getLTP([instrument.instrument_token]);
       return {
         success: true,
-        data: {
-          instrument_token: instrument.instrument_token,
-          symbol: instrument.tradingsymbol,
-          segment: instrument.segment,
-          instrument_type: instrument.instrument_type,
-          last_price:
-            ltp?.[instrument.instrument_token]?.last_price ??
-            instrument.last_price ??
-            null,
-        },
+        data: this.enrichWithUir(
+          {
+            instrument_token: instrument.instrument_token,
+            symbol: instrument.tradingsymbol,
+            segment: instrument.segment,
+            instrument_type: instrument.instrument_type,
+            last_price: ltp?.[instrument.instrument_token]?.last_price ?? null,
+          },
+          instrument.instrument_token,
+        ),
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
@@ -270,65 +293,30 @@ export class StockQuotesController {
     }
   }
 
-  @Post('ltp')
-  @ApiOperation({ summary: 'Get LTP for instruments' })
-  @ApiHeader({
-    name: 'x-provider',
-    required: false,
-    description: 'Force provider for this request: falcon|vayu',
-  })
-  @ApiBody({
-    schema: {
-      properties: {
-        instruments: {
-          type: 'array',
-          items: { type: 'number' },
-          example: [738561, 5633],
-        },
-      },
-    },
-  })
-  async getLTP(@Body() body: InstrumentsRequestDto, @Request() req: any) {
+  /**
+   * GET /api/stock/ltp
+   * Legacy LTP endpoint.
+   */
+  @Get('ltp')
+  @ApiOperation({ summary: 'Get LTP for instrument tokens (comma-separated)' })
+  @ApiQuery({ name: 'tokens', required: true, example: '256265,738561' })
+  async getLtpLegacy(@Query('tokens') tokensRaw: string) {
     try {
-      const { instruments } = body;
-      if (
-        !instruments ||
-        !Array.isArray(instruments) ||
-        instruments.length === 0
-      ) {
+      const tokens = (tokensRaw || '')
+        .split(',')
+        .map(Number)
+        .filter(Number.isFinite);
+      if (!tokens.length) {
         throw new HttpException(
-          {
-            success: false,
-            message: 'Instruments array is required',
-          },
+          { success: false, message: 'tokens query is required' },
           HttpStatus.BAD_REQUEST,
         );
       }
-
-      if (instruments.length > 100) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Maximum 100 instruments allowed per request',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const ltp = await this.stockService.getLTP(
-        instruments,
-        req.headers,
-        req.headers?.['x-api-key'] || req.query?.['api_key'],
-      );
-      return {
-        success: true,
-        data: ltp,
-        timestamp: new Date().toISOString(),
-      };
+      const ltp = await this.stockService.getLTP(tokens);
+      const enriched = this.enrichRecordWithUir(ltp as any);
+      return { success: true, data: enriched };
     } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
+      if (error instanceof HttpException) throw error;
       throw new HttpException(
         {
           success: false,
@@ -340,65 +328,59 @@ export class StockQuotesController {
     }
   }
 
-  @Post('ohlc')
-  @ApiOperation({ summary: 'Get OHLC for instruments' })
-  @ApiHeader({
-    name: 'x-provider',
-    required: false,
-    description: 'Force provider for this request: falcon|vayu',
-  })
-  @ApiBody({
-    schema: {
-      properties: {
-        instruments: {
-          type: 'array',
-          items: { type: 'number' },
-          example: [738561, 5633],
-        },
-      },
-    },
-  })
-  async getOHLC(@Body() body: InstrumentsRequestDto, @Request() req: any) {
+  /**
+   * POST /api/stock/ltp
+   * Legacy LTP endpoint (POST).
+   */
+  @Post('ltp')
+  @ApiOperation({ summary: 'Get LTP for instrument tokens' })
+  async postLtpLegacy(@Body() body: { instruments: number[] }) {
     try {
-      const { instruments } = body;
-      if (
-        !instruments ||
-        !Array.isArray(instruments) ||
-        instruments.length === 0
-      ) {
+      const tokens = (body?.instruments || [])
+        .map(Number)
+        .filter(Number.isFinite);
+      if (!tokens.length) {
         throw new HttpException(
-          {
-            success: false,
-            message: 'Instruments array is required',
-          },
+          { success: false, message: 'instruments array is required' },
           HttpStatus.BAD_REQUEST,
         );
       }
-
-      if (instruments.length > 100) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Maximum 100 instruments allowed per request',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const ohlc = await this.stockService.getOHLC(
-        instruments,
-        req.headers,
-        req.headers?.['x-api-key'] || req.query?.['api_key'],
-      );
-      return {
-        success: true,
-        data: ohlc,
-        timestamp: new Date().toISOString(),
-      };
+      const ltp = await this.stockService.getLTP(tokens);
+      const enriched = this.enrichRecordWithUir(ltp as any);
+      return { success: true, data: enriched };
     } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to fetch LTP',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('ohlc')
+  @ApiOperation({ summary: 'Get OHLC for instrument tokens (comma-separated)' })
+  @ApiQuery({ name: 'tokens', required: true, example: '256265,738561' })
+  async getOhlcLegacy(@Query('tokens') tokensRaw: string) {
+    try {
+      const tokens = (tokensRaw || '')
+        .split(',')
+        .map(Number)
+        .filter(Number.isFinite);
+      if (!tokens.length) {
+        throw new HttpException(
+          { success: false, message: 'tokens query is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
+      const data = await this.stockService.getOHLC(tokens);
+      const enriched = this.enrichRecordWithUir(data as any);
+      return { success: true, data: enriched };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new HttpException(
         {
           success: false,
@@ -411,139 +393,44 @@ export class StockQuotesController {
   }
 
   @Get('historical/:token')
-  @ApiOperation({ summary: 'Get historical data for an instrument' })
-  @ApiHeader({
-    name: 'x-provider',
-    required: false,
-    description: 'Force provider for this request: falcon|vayu',
-  })
-  @ApiQuery({ name: 'from', required: true, example: '2024-01-01' })
-  @ApiQuery({ name: 'to', required: true, example: '2024-01-31' })
-  @ApiQuery({ name: 'interval', required: false, example: 'day' })
-  async getHistoricalData(
-    @Param('token') token: string,
-    @Query('from') fromDate: string,
-    @Query('to') toDate: string,
-    @Query('interval') interval: string = 'day',
-    @Request() req?: any,
+  @ApiOperation({ summary: 'Get historical data for an instrument token' })
+  @ApiQuery({ name: 'from', required: true, example: '2026-04-01' })
+  @ApiQuery({ name: 'to', required: true, example: '2026-04-11' })
+  @ApiQuery({ name: 'interval', required: true, example: 'day' })
+  async getHistorical(
+    @Param('token') tokenRaw: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('interval') interval: string,
   ) {
     try {
-      const instrumentToken = parseInt(token);
-      if (isNaN(instrumentToken)) {
+      const token = Number(tokenRaw);
+      if (!Number.isFinite(token)) {
         throw new HttpException(
-          {
-            success: false,
-            message: 'Invalid instrument token',
-          },
+          { success: false, message: 'Invalid token' },
           HttpStatus.BAD_REQUEST,
         );
       }
-
-      if (!fromDate || !toDate) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'From date and to date are required',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const historicalData = await this.stockService.getHistoricalData(
-        instrumentToken,
-        fromDate,
-        toDate,
+      const data = await this.stockService.getHistoricalData(
+        token,
+        from,
+        to,
         interval,
-        req?.headers,
-        req?.headers?.['x-api-key'] || req?.query?.['api_key'],
       );
-
+      // Historical data is an array of candles, we don't enrich individual candles with UIR
+      // but we could wrap the response if needed. For now, keep as-is or enrich top-level.
       return {
         success: true,
-        data: historicalData,
-        instrumentToken,
-        fromDate,
-        toDate,
-        interval,
-        timestamp: new Date().toISOString(),
+        instrument_token: token,
+        ...this.enrichWithUir({}, token), // Add uir_id and canonical_symbol at top level
+        data,
       };
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Failed to fetch historical data',
-          error: error.message,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Get('market-data/:token/history')
-  async getMarketDataHistory(
-    @Param('token') token: string,
-    @Query('limit') limit?: number,
-    @Query('offset') offset?: number,
-  ) {
-    try {
-      const instrumentToken = parseInt(token);
-      if (isNaN(instrumentToken)) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Invalid instrument token',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const result = await this.stockService.getMarketDataHistory(
-        instrumentToken,
-        limit ? parseInt(limit.toString()) : 100,
-        offset ? parseInt(offset.toString()) : 0,
-      );
-
-      return {
-        success: true,
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Failed to fetch market data history',
-          error: error.message,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Get('market-data/:token/last')
-  @ApiOperation({ summary: 'Get last cached tick for an instrument' })
-  async getLastTick(@Param('token') token: string) {
-    try {
-      const instrumentToken = parseInt(token);
-      if (isNaN(instrumentToken)) {
-        throw new HttpException(
-          { success: false, message: 'Invalid instrument token' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const tick = await this.stockService.getLastTick(instrumentToken);
-      return { success: true, data: tick };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
         {
           success: false,
-          message: 'Failed to fetch last tick',
+          message: 'Failed to fetch historical data',
           error: error.message,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,

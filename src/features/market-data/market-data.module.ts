@@ -78,7 +78,7 @@ import { ApiKey } from '../auth/domain/api-key.entity'; // Import ApiKey
     LtpMemoryCacheService,
     MarketDataWsInterestService,
     InstrumentRegistryService,
-    TypeOrmModule
+    TypeOrmModule,
   ],
 })
 export class MarketDataModule {}

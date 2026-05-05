@@ -39,10 +39,7 @@ import { BinanceModule } from '../binance/binance.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      VortexSession,
-      VortexInstrument,
-    ]),
+    TypeOrmModule.forFeature([VortexSession, VortexInstrument]),
     ScheduleModule.forRoot(),
     ConfigModule,
     RedisModule,
@@ -79,10 +76,6 @@ import { BinanceModule } from '../binance/binance.module';
     VayuMarketDataService,
     UniversalLtpService,
   ],
-  exports: [
-    StockService,
-    VortexProviderService,
-    VortexInstrumentService,
-  ],
+  exports: [StockService, VortexProviderService, VortexInstrumentService],
 })
 export class StockModule {}

@@ -83,5 +83,3 @@ export class FalconInstrument {
   @UpdateDateColumn()
   updated_at: Date;
 }
-
-

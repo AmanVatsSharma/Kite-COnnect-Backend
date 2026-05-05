@@ -58,7 +58,9 @@ describe('exchange-normalizer', () => {
     });
 
     it('returns unknown exchange codes unchanged for Kite', () => {
-      expect(normalizeExchange('UNKNOWN_EXCHANGE', 'kite')).toBe('UNKNOWN_EXCHANGE');
+      expect(normalizeExchange('UNKNOWN_EXCHANGE', 'kite')).toBe(
+        'UNKNOWN_EXCHANGE',
+      );
     });
 
     it('returns unknown exchange codes unchanged for Vortex', () => {

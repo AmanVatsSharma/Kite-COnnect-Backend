@@ -16,44 +16,44 @@ export interface MassiveStatusEvent {
 export interface MassiveTradeEvent {
   ev: 'T';
   sym: string;
-  i?: string;        // trade ID
-  x: number;        // exchange ID
-  p: number;        // price
-  s: number;        // size
-  c?: number[];     // conditions
-  t: number;        // timestamp (Unix ms)
-  q?: number;       // sequence number
+  i?: string; // trade ID
+  x: number; // exchange ID
+  p: number; // price
+  s: number; // size
+  c?: number[]; // conditions
+  t: number; // timestamp (Unix ms)
+  q?: number; // sequence number
 }
 
 export interface MassiveQuoteEvent {
   ev: 'Q';
   sym: string;
-  bx?: number;      // bid exchange
-  bp: number;       // bid price
-  bs: number;       // bid size
-  ax?: number;      // ask exchange
-  ap: number;       // ask price
-  as: number;       // ask size
-  c?: number[];     // conditions
-  t: number;        // timestamp (Unix ms)
+  bx?: number; // bid exchange
+  bp: number; // bid price
+  bs: number; // bid size
+  ax?: number; // ask exchange
+  ap: number; // ask price
+  as: number; // ask size
+  c?: number[]; // conditions
+  t: number; // timestamp (Unix ms)
 }
 
 export interface MassiveMinuteAggEvent {
   ev: 'AM' | 'A';
   sym: string;
-  v: number;        // volume
-  av?: number;      // accumulated volume (today)
-  op?: number;      // official opening price
-  vw: number;       // VWAP
-  o: number;        // open
-  c: number;        // close (last in window)
-  h: number;        // high
-  l: number;        // low
-  a?: number;       // average price
-  z?: number;       // avg trade size
-  s: number;        // window start (Unix ms)
-  e: number;        // window end (Unix ms)
-  t?: number;       // alias for s on some feeds
+  v: number; // volume
+  av?: number; // accumulated volume (today)
+  op?: number; // official opening price
+  vw: number; // VWAP
+  o: number; // open
+  c: number; // close (last in window)
+  h: number; // high
+  l: number; // low
+  a?: number; // average price
+  z?: number; // avg trade size
+  s: number; // window start (Unix ms)
+  e: number; // window end (Unix ms)
+  t?: number; // alias for s on some feeds
 }
 
 export interface MassiveCryptoTradeEvent {
@@ -89,9 +89,9 @@ export interface MassiveCryptoQuoteEvent {
 
 export interface MassiveForexQuoteEvent {
   ev: 'C';
-  p: string;        // pair e.g. "EUR/USD"
-  a: number;        // ask
-  b: number;        // bid
+  p: string; // pair e.g. "EUR/USD"
+  a: number; // ask
+  b: number; // bid
   t: number;
   x: number;
 }

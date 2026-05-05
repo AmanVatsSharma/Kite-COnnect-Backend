@@ -121,7 +121,9 @@ export class ProviderQueueService {
       this.metrics.providerRequestsTotal.labels(endpoint).inc();
       const result = await fn();
       const total = Date.now() - start;
-      this.metrics.providerLatencySeconds.labels(endpoint).observe(total / 1000);
+      this.metrics.providerLatencySeconds
+        .labels(endpoint)
+        .observe(total / 1000);
       this.logger.log(
         `[ProviderQueue] (fallback) ${endpoint} served after ${total}ms`,
       );

@@ -82,7 +82,8 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
       'BINANCE_INSTRUMENTS_CRON',
       '30 0 * * *',
     );
-    const tz = this.config.get<string>('BINANCE_INSTRUMENTS_CRON_TZ', 'UTC') || 'UTC';
+    const tz =
+      this.config.get<string>('BINANCE_INSTRUMENTS_CRON_TZ', 'UTC') || 'UTC';
     try {
       const job = new CronJob(
         cronExpr,
@@ -97,16 +98,20 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
       job.start();
       this.logger.log(`[BinanceSync] Cron scheduled: ${cronExpr} (${tz})`);
     } catch (err) {
-      this.logger.error('[BinanceSync] Failed to register cron job', err as any);
+      this.logger.error(
+        '[BinanceSync] Failed to register cron job',
+        err as any,
+      );
     }
   }
 
   /** Quote-asset whitelist: env BINANCE_QUOTES overrides BINANCE_DEFAULT_QUOTE_FILTER. */
   private getQuoteFilter(): Set<string> {
     const raw = this.config.get<string>('BINANCE_QUOTES', '');
-    const list = (raw && raw.trim().length > 0
-      ? raw.split(',')
-      : Array.from(BINANCE_DEFAULT_QUOTE_FILTER)
+    const list = (
+      raw && raw.trim().length > 0
+        ? raw.split(',')
+        : Array.from(BINANCE_DEFAULT_QUOTE_FILTER)
     )
       .map((q) => q.trim().toUpperCase())
       .filter(Boolean);
@@ -118,7 +123,14 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
     onProgress?: (p: { processed: number; linked: number }) => void,
   ): Promise<BinanceSyncResult> {
     if (this.syncInProgress) {
-      return { total: 0, synced: 0, linked: 0, skipped: 0, durationMs: 0, error: 'sync_in_progress' };
+      return {
+        total: 0,
+        synced: 0,
+        linked: 0,
+        skipped: 0,
+        durationMs: 0,
+        error: 'sync_in_progress',
+      };
     }
     this.syncInProgress = true;
     const t0 = Date.now();
@@ -132,16 +144,32 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
       if (!info?.symbols?.length) {
         const err = 'exchangeInfo returned no symbols';
         this.logger.error(`[BinanceSync] ${err}`);
-        return this.finishSync({ total: 0, synced: 0, linked: 0, skipped: 0, durationMs: Date.now() - t0, error: err });
+        return this.finishSync({
+          total: 0,
+          synced: 0,
+          linked: 0,
+          skipped: 0,
+          durationMs: Date.now() - t0,
+          error: err,
+        });
       }
 
       const quoteFilter = this.getQuoteFilter();
       const accepted: BinanceExchangeInfoSymbol[] = [];
       for (const s of info.symbols) {
         total++;
-        if (s.status !== 'TRADING') { skipped++; continue; }
-        if (!s.isSpotTradingAllowed) { skipped++; continue; }
-        if (!quoteFilter.has(s.quoteAsset.toUpperCase())) { skipped++; continue; }
+        if (s.status !== 'TRADING') {
+          skipped++;
+          continue;
+        }
+        if (!s.isSpotTradingAllowed) {
+          skipped++;
+          continue;
+        }
+        if (!quoteFilter.has(s.quoteAsset.toUpperCase())) {
+          skipped++;
+          continue;
+        }
         accepted.push(s);
       }
       this.logger.log(
@@ -187,17 +215,33 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
         await this.instrumentRegistry.refresh();
         this.logger.log('[BinanceSync] Instrument registry refreshed');
       } catch (err) {
-        this.logger.warn('[BinanceSync] Registry refresh failed (non-fatal)', err as any);
+        this.logger.warn(
+          '[BinanceSync] Registry refresh failed (non-fatal)',
+          err as any,
+        );
       }
 
       this.logger.log(
         `[BinanceSync] Completed: total=${total}, synced=${synced}, linked=${linked}, skipped=${skipped}, ms=${Date.now() - t0}`,
       );
-      return this.finishSync({ total, synced, linked, skipped, durationMs: Date.now() - t0 });
+      return this.finishSync({
+        total,
+        synced,
+        linked,
+        skipped,
+        durationMs: Date.now() - t0,
+      });
     } catch (err) {
       const msg = (err as any)?.message || String(err);
       this.logger.error(`[BinanceSync] failed: ${msg}`, err as any);
-      return this.finishSync({ total, synced, linked, skipped, durationMs: Date.now() - t0, error: msg });
+      return this.finishSync({
+        total,
+        synced,
+        linked,
+        skipped,
+        durationMs: Date.now() - t0,
+        error: msg,
+      });
     }
   }
 
@@ -213,9 +257,9 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
     const priceFilter = s.filters.find(
       (f) => f.filterType === 'PRICE_FILTER',
     ) as BinancePriceFilter | undefined;
-    const lotFilter = s.filters.find(
-      (f) => f.filterType === 'LOT_SIZE',
-    ) as BinanceLotSizeFilter | undefined;
+    const lotFilter = s.filters.find((f) => f.filterType === 'LOT_SIZE') as
+      | BinanceLotSizeFilter
+      | undefined;
     const notionalFilter = s.filters.find(
       (f) => f.filterType === 'MIN_NOTIONAL' || f.filterType === 'NOTIONAL',
     ) as BinanceMinNotionalFilter | undefined;
@@ -261,7 +305,8 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
               is_active: true,
               asset_class: 'crypto',
               lot_size: 1,
-              tick_size: row.tick_size != null ? Number(row.tick_size) : 0.00000001,
+              tick_size:
+                row.tick_size != null ? Number(row.tick_size) : 0.00000001,
               expiry: null,
               strike: 0,
               option_type: null,
@@ -277,7 +322,10 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
           });
           if (uirRow) {
             await this.mappingRepo.update(
-              { provider: BINANCE_PROVIDER_NAME as any, provider_token: row.symbol },
+              {
+                provider: BINANCE_PROVIDER_NAME as any,
+                provider_token: row.symbol,
+              },
               { uir_id: Number(uirRow.id) },
             );
             linked++;
@@ -297,12 +345,16 @@ export class BinanceInstrumentSyncService implements OnModuleInit {
   private async runScheduledSyncWithRetries(maxAttempts = 3): Promise<void> {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        this.logger.log(`[BinanceSync] Scheduled sync attempt ${attempt}/${maxAttempts}`);
+        this.logger.log(
+          `[BinanceSync] Scheduled sync attempt ${attempt}/${maxAttempts}`,
+        );
         const r = await this.syncBinanceInstruments();
         if (!r.error) return;
         if (attempt < maxAttempts) {
           const delayMs = 5000 * Math.pow(2, attempt - 1);
-          this.logger.warn(`[BinanceSync] Attempt ${attempt} returned error: ${r.error}; retry in ${delayMs}ms`);
+          this.logger.warn(
+            `[BinanceSync] Attempt ${attempt} returned error: ${r.error}; retry in ${delayMs}ms`,
+          );
           await new Promise((res) => setTimeout(res, delayMs));
         }
       } catch (err) {

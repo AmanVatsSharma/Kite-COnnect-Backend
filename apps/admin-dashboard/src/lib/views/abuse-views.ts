@@ -23,8 +23,10 @@ export function abuseFlagDetailRows(flag: AbuseFlag): KvRow[] {
   if (flag.reason_codes?.length) {
     rows.push({ label: 'Reason codes', value: flag.reason_codes.join(', ') });
   }
-  if (flag.detected_at) rows.push({ label: 'Detected', value: flag.detected_at });
-  if (flag.last_seen_at) rows.push({ label: 'Last seen', value: flag.last_seen_at });
+  if (flag.detected_at)
+    rows.push({ label: 'Detected', value: flag.detected_at });
+  if (flag.last_seen_at)
+    rows.push({ label: 'Last seen', value: flag.last_seen_at });
   return rows;
 }
 
@@ -41,12 +43,16 @@ export function abuseFlagFromUnknown(data: unknown): KvRow[] {
       risk_score: o.risk_score,
       blocked: o.blocked,
       tenant_id:
-        typeof o.tenant_id === 'string' || o.tenant_id === null ? (o.tenant_id as string | null) : undefined,
+        typeof o.tenant_id === 'string' || o.tenant_id === null
+          ? (o.tenant_id as string | null)
+          : undefined,
       reason_codes: Array.isArray(o.reason_codes)
         ? o.reason_codes.filter((x): x is string => typeof x === 'string')
         : undefined,
-      detected_at: typeof o.detected_at === 'string' ? o.detected_at : undefined,
-      last_seen_at: typeof o.last_seen_at === 'string' ? o.last_seen_at : undefined,
+      detected_at:
+        typeof o.detected_at === 'string' ? o.detected_at : undefined,
+      last_seen_at:
+        typeof o.last_seen_at === 'string' ? o.last_seen_at : undefined,
     };
     return abuseFlagDetailRows(flag);
   }

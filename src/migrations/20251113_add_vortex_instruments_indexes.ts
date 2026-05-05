@@ -7,7 +7,9 @@
  */
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddVortexInstrumentsIndexes1731490000000 implements MigrationInterface {
+export class AddVortexInstrumentsIndexes1731490000000
+  implements MigrationInterface
+{
   name = 'AddVortexInstrumentsIndexes1731490000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -27,17 +29,9 @@ export class AddVortexInstrumentsIndexes1731490000000 implements MigrationInterf
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS idx_vi_active_expiry`,
-    );
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS idx_vi_active_exchange_name`,
-    );
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS idx_vi_symbol_trgm`,
-    );
+    await queryRunner.query(`DROP INDEX IF EXISTS idx_vi_active_expiry`);
+    await queryRunner.query(`DROP INDEX IF EXISTS idx_vi_active_exchange_name`);
+    await queryRunner.query(`DROP INDEX IF EXISTS idx_vi_symbol_trgm`);
     // Do not drop extension automatically (may be used elsewhere)
   }
 }
-
-

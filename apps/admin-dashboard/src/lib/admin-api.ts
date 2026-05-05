@@ -59,31 +59,47 @@ export function updateApiKeyLimits(body: {
 }
 
 export function getApiKeyLimits(key: string) {
-  return apiFetch<Record<string, unknown>>(`/api/admin/apikeys/${encodeURIComponent(key)}/limits`, {
-    ...admin,
-  });
+  return apiFetch<Record<string, unknown>>(
+    `/api/admin/apikeys/${encodeURIComponent(key)}/limits`,
+    {
+      ...admin,
+    },
+  );
 }
 
 export function getApiKeyUsage(key: string) {
-  return apiFetch<Record<string, unknown>>(`/api/admin/apikeys/${encodeURIComponent(key)}/usage`, {
-    ...admin,
-  });
+  return apiFetch<Record<string, unknown>>(
+    `/api/admin/apikeys/${encodeURIComponent(key)}/usage`,
+    {
+      ...admin,
+    },
+  );
 }
 
 export function listApiKeysUsage(page = 1, pageSize = 50) {
-  const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-  return apiFetch<PaginatedUsage>(`/api/admin/apikeys/usage?${q}`, { ...admin });
+  const q = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+  return apiFetch<PaginatedUsage>(`/api/admin/apikeys/usage?${q}`, {
+    ...admin,
+  });
 }
 
 /** Legacy query-param usage report (same data shape as embedded usage in other endpoints). */
 export function getUsageReport(key: string) {
   const q = new URLSearchParams({ key });
-  return apiFetch<Record<string, unknown>>(`/api/admin/usage?${q}`, { ...admin });
+  return apiFetch<Record<string, unknown>>(`/api/admin/usage?${q}`, {
+    ...admin,
+  });
 }
 
 export type AdminProviderName = 'kite' | 'vortex' | 'massive' | 'binance';
 
-export function setApiKeyProvider(body: { key: string; provider?: AdminProviderName | null }) {
+export function setApiKeyProvider(body: {
+  key: string;
+  provider?: AdminProviderName | null;
+}) {
   return apiFetch<{ success: boolean }>('/api/admin/apikeys/provider', {
     ...admin,
     method: 'POST',
@@ -92,23 +108,31 @@ export function setApiKeyProvider(body: { key: string; provider?: AdminProviderN
 }
 
 export function setGlobalProvider(provider: AdminProviderName) {
-  return apiFetch<{ success: boolean; message?: string }>('/api/admin/provider/global', {
-    ...admin,
-    method: 'POST',
-    body: JSON.stringify({ provider }),
-  });
+  return apiFetch<{ success: boolean; message?: string }>(
+    '/api/admin/provider/global',
+    {
+      ...admin,
+      method: 'POST',
+      body: JSON.stringify({ provider }),
+    },
+  );
 }
 
 export function getGlobalProvider() {
-  return apiFetch<GlobalProviderRes>('/api/admin/provider/global', { ...admin });
+  return apiFetch<GlobalProviderRes>('/api/admin/provider/global', {
+    ...admin,
+  });
 }
 
 export function startStream() {
-  return apiFetch<{ success: boolean; status?: StreamStatus }>('/api/admin/provider/stream/start', {
-    ...admin,
-    method: 'POST',
-    body: JSON.stringify({}),
-  });
+  return apiFetch<{ success: boolean; status?: StreamStatus }>(
+    '/api/admin/provider/stream/start',
+    {
+      ...admin,
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+  );
 }
 
 export function stopStream() {
@@ -143,7 +167,10 @@ export function setWsRateLimits(body: {
   });
 }
 
-export function setWsEntitlements(body: { apiKey: string; exchanges: string[] }) {
+export function setWsEntitlements(body: {
+  apiKey: string;
+  exchanges: string[];
+}) {
   return apiFetch<{ success: boolean }>('/api/admin/ws/entitlements', {
     ...admin,
     method: 'POST',
@@ -173,7 +200,11 @@ export function flushWsCaches(caches: string[]) {
   });
 }
 
-export function wsBroadcast(body: { event: string; room?: string; payload: unknown }) {
+export function wsBroadcast(body: {
+  event: string;
+  room?: string;
+  payload: unknown;
+}) {
   return apiFetch<{ success: boolean; message?: string; error?: string }>(
     '/api/admin/ws/namespace/broadcast',
     {
@@ -185,16 +216,25 @@ export function wsBroadcast(body: { event: string; room?: string; payload: unkno
 }
 
 export function getKiteDebug() {
-  return apiFetch<Record<string, unknown>>('/api/admin/debug/falcon', { ...admin });
+  return apiFetch<Record<string, unknown>>('/api/admin/debug/falcon', {
+    ...admin,
+  });
 }
 
 export function getVortexDebug() {
-  return apiFetch<Record<string, unknown>>('/api/admin/debug/vayu', { ...admin });
+  return apiFetch<Record<string, unknown>>('/api/admin/debug/vayu', {
+    ...admin,
+  });
 }
 
 // ─── Provider credential management ──────────────────────────────────────────
 
-export interface CredKeyStatus { masked: string | null; source: 'db' | 'env' | 'none'; configured?: boolean; hasValue?: boolean }
+export interface CredKeyStatus {
+  masked: string | null;
+  source: 'db' | 'env' | 'none';
+  configured?: boolean;
+  hasValue?: boolean;
+}
 
 export interface KiteConfigStatus {
   apiKey: CredKeyStatus;
@@ -221,33 +261,66 @@ export interface MassiveConfigStatus {
 }
 
 export function getKiteConfig() {
-  return apiFetch<KiteConfigStatus>('/api/admin/provider/kite/config', { ...admin });
+  return apiFetch<KiteConfigStatus>('/api/admin/provider/kite/config', {
+    ...admin,
+  });
 }
 
-export function setKiteCredentials(body: { apiKey?: string; apiSecret?: string }) {
-  return apiFetch<{ success: boolean }>('/api/admin/provider/kite/credentials', {
-    ...admin, method: 'POST', body: JSON.stringify(body),
-  });
+export function setKiteCredentials(body: {
+  apiKey?: string;
+  apiSecret?: string;
+}) {
+  return apiFetch<{ success: boolean }>(
+    '/api/admin/provider/kite/credentials',
+    {
+      ...admin,
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export function getVayuConfig() {
-  return apiFetch<VayuConfigStatus>('/api/admin/provider/vortex/config', { ...admin });
+  return apiFetch<VayuConfigStatus>('/api/admin/provider/vortex/config', {
+    ...admin,
+  });
 }
 
-export function updateVayuConfig(body: { apiKey?: string; baseUrl?: string; wsUrl?: string; appId?: string }) {
-  return apiFetch<{ success: boolean }>('/api/admin/provider/vortex/credentials', {
-    ...admin, method: 'POST', body: JSON.stringify(body),
-  });
+export function updateVayuConfig(body: {
+  apiKey?: string;
+  baseUrl?: string;
+  wsUrl?: string;
+  appId?: string;
+}) {
+  return apiFetch<{ success: boolean }>(
+    '/api/admin/provider/vortex/credentials',
+    {
+      ...admin,
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export function getMassiveConfig() {
-  return apiFetch<MassiveConfigStatus>('/api/admin/provider/massive/config', { ...admin });
+  return apiFetch<MassiveConfigStatus>('/api/admin/provider/massive/config', {
+    ...admin,
+  });
 }
 
-export function setMassiveCredentials(body: { apiKey?: string; realtime?: boolean; assetClass?: string }) {
-  return apiFetch<{ success: boolean }>('/api/admin/provider/massive/credentials', {
-    ...admin, method: 'POST', body: JSON.stringify(body),
-  });
+export function setMassiveCredentials(body: {
+  apiKey?: string;
+  realtime?: boolean;
+  assetClass?: string;
+}) {
+  return apiFetch<{ success: boolean }>(
+    '/api/admin/provider/massive/credentials',
+    {
+      ...admin,
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export function getAuditConfig() {
@@ -255,7 +328,10 @@ export function getAuditConfig() {
 }
 
 export function listAbuseFlags(page = 1, pageSize = 50, blocked?: boolean) {
-  const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  const q = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
   if (blocked === true) q.set('blocked', 'true');
   if (blocked === false) q.set('blocked', 'false');
   return apiFetch<PaginatedAbuse>(`/api/admin/abuse/flags?${q}`, { ...admin });
@@ -292,5 +368,7 @@ export interface AdminStreamEvent {
 }
 
 export function getAdminEvents(limit = 20) {
-  return apiFetch<AdminStreamEvent[]>(`/api/admin/events?limit=${limit}`, { ...admin });
+  return apiFetch<AdminStreamEvent[]>(`/api/admin/events?limit=${limit}`, {
+    ...admin,
+  });
 }

@@ -261,7 +261,10 @@ export class VortexInstrumentSearchService {
 
       return { instrument: best, candidates: list };
     } catch (error) {
-      this.logger.error('[VortexInstrumentSearchService] Error resolving Vortex symbol', error);
+      this.logger.error(
+        '[VortexInstrumentSearchService] Error resolving Vortex symbol',
+        error,
+      );
       return { instrument: null, candidates: [] };
     }
   }
@@ -406,7 +409,9 @@ export class VortexInstrumentSearchService {
 
       const instruments = await qb.getMany();
 
-      const hasMore = filters.skip_count ? instruments.length === limit : offset + limit < total;
+      const hasMore = filters.skip_count
+        ? instruments.length === limit
+        : offset + limit < total;
 
       const queryTime = Date.now() - startTime;
 
@@ -424,7 +429,10 @@ export class VortexInstrumentSearchService {
         queryTime,
       };
     } catch (error) {
-      this.logger.error('[VortexInstrumentSearchService] Error in advanced search', error);
+      this.logger.error(
+        '[VortexInstrumentSearchService] Error in advanced search',
+        error,
+      );
       throw error;
     }
   }
@@ -453,7 +461,13 @@ export class VortexInstrumentSearchService {
 
       const suggestions = await this.vortexInstrumentRepo
         .createQueryBuilder('v')
-        .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name', 'v.description'])
+        .select([
+          'v.token',
+          'v.symbol',
+          'v.exchange',
+          'v.instrument_name',
+          'v.description',
+        ])
         .where('v.is_active = :active', { active: true })
         .andWhere('v.symbol ILIKE :query', { query: `${trimmedQuery}%` })
         .orderBy('v.symbol', 'ASC')
@@ -473,7 +487,10 @@ export class VortexInstrumentSearchService {
         queryTime,
       };
     } catch (error) {
-      this.logger.error('[VortexInstrumentSearchService] Error in autocomplete', error);
+      this.logger.error(
+        '[VortexInstrumentSearchService] Error in autocomplete',
+        error,
+      );
       return { suggestions: [], queryTime: Date.now() - startTime };
     }
   }

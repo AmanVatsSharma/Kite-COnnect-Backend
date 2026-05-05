@@ -37,7 +37,11 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const { admin, headers: h, ...rest } = init;
   const headers = new Headers(h);
-  if (!headers.has('Content-Type') && rest.body && typeof rest.body === 'string') {
+  if (
+    !headers.has('Content-Type') &&
+    rest.body &&
+    typeof rest.body === 'string'
+  ) {
     headers.set('Content-Type', 'application/json');
   }
   if (admin) {
@@ -87,7 +91,11 @@ export async function apiRequestRaw(
 ): Promise<{ status: number; ok: boolean; data: unknown; rawText: string }> {
   const { admin: useAdmin, apiKey, headers: h, ...rest } = init;
   const headers = new Headers(h);
-  if (!headers.has('Content-Type') && rest.body && typeof rest.body === 'string') {
+  if (
+    !headers.has('Content-Type') &&
+    rest.body &&
+    typeof rest.body === 'string'
+  ) {
     headers.set('Content-Type', 'application/json');
   }
   if (useAdmin) {

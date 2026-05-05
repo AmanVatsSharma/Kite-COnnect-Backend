@@ -70,8 +70,7 @@ export class OriginAuditService {
       1,
     );
     this.httpAlwaysLogErrors =
-      this.configService.get('AUDIT_HTTP_ALWAYS_LOG_ERRORS', 'true') ===
-      'true';
+      this.configService.get('AUDIT_HTTP_ALWAYS_LOG_ERRORS', 'true') === 'true';
     this.wsSubSampleRate = this.getNumberEnv(
       'AUDIT_WS_SUB_SAMPLE_RATE',
       0,
@@ -191,28 +190,31 @@ export class OriginAuditService {
    */
   private flushSoon(delayMs: number): void {
     this.flushScheduled = true;
-    setTimeout(() => {
-      this.flush()
-        .catch((err) => {
-          this.logger.warn(
-            '[OriginAuditService] Flush failed; entries will be retried on next flush',
-            err as any,
-          );
-          // Console for easy later debugging
-          // eslint-disable-next-line no-console
-          console.error(
-            '[OriginAuditService] Flush error',
-            (err as any)?.message ?? err,
-          );
-        })
-        .finally(() => {
-          this.flushScheduled = false;
-          // If new items arrived during flush, schedule another round.
-          if (this.buffer.length > 0) {
-            this.flushSoon(this.flushIntervalMs);
-          }
-        });
-    }, Math.max(0, delayMs));
+    setTimeout(
+      () => {
+        this.flush()
+          .catch((err) => {
+            this.logger.warn(
+              '[OriginAuditService] Flush failed; entries will be retried on next flush',
+              err as any,
+            );
+            // Console for easy later debugging
+            // eslint-disable-next-line no-console
+            console.error(
+              '[OriginAuditService] Flush error',
+              (err as any)?.message ?? err,
+            );
+          })
+          .finally(() => {
+            this.flushScheduled = false;
+            // If new items arrived during flush, schedule another round.
+            if (this.buffer.length > 0) {
+              this.flushSoon(this.flushIntervalMs);
+            }
+          });
+      },
+      Math.max(0, delayMs),
+    );
   }
 
   /**
@@ -272,5 +274,3 @@ export class OriginAuditService {
     return Math.max(min, Math.min(max, raw));
   }
 }
-
-

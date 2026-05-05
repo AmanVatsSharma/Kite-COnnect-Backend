@@ -59,7 +59,11 @@ export type SearchAdminOverview = {
    * Top-N most-searched queries (aggregated across symbols). Useful to sanity-check
    * that the indexer's tokenization + synonyms cover the real query distribution.
    */
-  popularQueries: { q: string; totalSelections: number; uniqueSymbols: number }[];
+  popularQueries: {
+    q: string;
+    totalSelections: number;
+    uniqueSymbols: number;
+  }[];
   errors: string[];
   generatedAt: string;
 };
@@ -71,9 +75,10 @@ export class AdminSearchService {
   private readonly redis?: Redis;
 
   constructor() {
-    const host = process.env.MEILI_HOST_PRIMARY
-      || process.env.MEILI_HOST
-      || 'http://meilisearch:7700';
+    const host =
+      process.env.MEILI_HOST_PRIMARY ||
+      process.env.MEILI_HOST ||
+      'http://meilisearch:7700';
     const apiKey = process.env.MEILI_MASTER_KEY || '';
     this.meili = axios.create({
       baseURL: host,
@@ -88,7 +93,9 @@ export class AdminSearchService {
         lazyConnect: true,
       });
     } catch {
-      this.logger.warn('Redis init failed — admin panel will skip synonym signals');
+      this.logger.warn(
+        'Redis init failed — admin panel will skip synonym signals',
+      );
     }
   }
 
@@ -103,20 +110,33 @@ export class AdminSearchService {
       }),
       this.fetchSelectionSignals(topN).catch((e) => {
         errors.push(`redis: ${e?.message ?? 'unknown'}`);
-        return { scanned: 0, top: [] as { q: string; symbol: string; count: number }[] };
+        return {
+          scanned: 0,
+          top: [] as { q: string; symbol: string; count: number }[],
+        };
       }),
     ]);
 
     // Aggregate per-query totals from selection signals (one Redis scan, two views).
-    const queryAgg = new Map<string, { totalSelections: number; symbols: Set<string> }>();
+    const queryAgg = new Map<
+      string,
+      { totalSelections: number; symbols: Set<string> }
+    >();
     for (const sig of signals.top) {
-      const cur = queryAgg.get(sig.q) ?? { totalSelections: 0, symbols: new Set<string>() };
+      const cur = queryAgg.get(sig.q) ?? {
+        totalSelections: 0,
+        symbols: new Set<string>(),
+      };
       cur.totalSelections += sig.count;
       cur.symbols.add(sig.symbol);
       queryAgg.set(sig.q, cur);
     }
     const popularQueries = Array.from(queryAgg.entries())
-      .map(([q, v]) => ({ q, totalSelections: v.totalSelections, uniqueSymbols: v.symbols.size }))
+      .map(([q, v]) => ({
+        q,
+        totalSelections: v.totalSelections,
+        uniqueSymbols: v.symbols.size,
+      }))
       .sort((a, b) => b.totalSelections - a.totalSelections)
       .slice(0, topN);
 
@@ -131,7 +151,9 @@ export class AdminSearchService {
 
   // ── Meili stats + settings ────────────────────────────────────────────────
 
-  private async fetchMeiliBlock(indexName: string): Promise<SearchAdminOverview['meili']> {
+  private async fetchMeiliBlock(
+    indexName: string,
+  ): Promise<SearchAdminOverview['meili']> {
     const [statsResp, settingsResp] = await Promise.all([
       this.meili.get(`/indexes/${indexName}/stats`),
       this.meili.get(`/indexes/${indexName}/settings`),
@@ -141,16 +163,27 @@ export class AdminSearchService {
     const settings = settingsResp.data || {};
     return {
       indexName,
-      numberOfDocuments: typeof stats.numberOfDocuments === 'number' ? stats.numberOfDocuments : null,
-      isIndexing: typeof stats.isIndexing === 'boolean' ? stats.isIndexing : null,
+      numberOfDocuments:
+        typeof stats.numberOfDocuments === 'number'
+          ? stats.numberOfDocuments
+          : null,
+      isIndexing:
+        typeof stats.isIndexing === 'boolean' ? stats.isIndexing : null,
       fieldDistribution: stats.fieldDistribution ?? null,
       settings: {
-        searchableAttributes: Array.isArray(settings.searchableAttributes) ? settings.searchableAttributes : null,
-        filterableAttributes: Array.isArray(settings.filterableAttributes) ? settings.filterableAttributes : null,
-        sortableAttributes: Array.isArray(settings.sortableAttributes) ? settings.sortableAttributes : null,
-        synonymCount: settings.synonyms && typeof settings.synonyms === 'object'
-          ? Object.keys(settings.synonyms).length
+        searchableAttributes: Array.isArray(settings.searchableAttributes)
+          ? settings.searchableAttributes
           : null,
+        filterableAttributes: Array.isArray(settings.filterableAttributes)
+          ? settings.filterableAttributes
+          : null,
+        sortableAttributes: Array.isArray(settings.sortableAttributes)
+          ? settings.sortableAttributes
+          : null,
+        synonymCount:
+          settings.synonyms && typeof settings.synonyms === 'object'
+            ? Object.keys(settings.synonyms).length
+            : null,
       },
     };
   }

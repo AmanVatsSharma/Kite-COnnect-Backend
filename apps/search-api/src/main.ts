@@ -13,10 +13,13 @@ async function bootstrap() {
     app.setGlobalPrefix('api');
 
     app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true })
+      new ValidationPipe({ whitelist: true, transform: true }),
     );
     app.useGlobalFilters(new HttpExceptionFilter());
-    app.useGlobalInterceptors(new LoggingInterceptor(), new TimeoutInterceptor());
+    app.useGlobalInterceptors(
+      new LoggingInterceptor(),
+      new TimeoutInterceptor(),
+    );
 
     const port = Number(process.env.PORT || 3000);
     await app.listen(port);
@@ -31,5 +34,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-
-

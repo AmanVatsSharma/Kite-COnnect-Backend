@@ -74,5 +74,3 @@ export class AddWsLimitsToApiKeys1764547200000 implements MigrationInterface {
     }
   }
 }
-
-

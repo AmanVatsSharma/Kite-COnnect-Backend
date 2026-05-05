@@ -67,12 +67,18 @@ export class MassiveWebSocketClient {
 
   private handlers = new Map<TickerEvent, TickerHandler[]>();
 
-  init(apiKey: string, realtime: boolean, assetClass: MassiveAssetClass = 'stocks'): void {
+  init(
+    apiKey: string,
+    realtime: boolean,
+    assetClass: MassiveAssetClass = 'stocks',
+  ): void {
     this.apiKey = apiKey;
     this.wsBase = realtime ? MASSIVE_WS_REALTIME_BASE : MASSIVE_WS_DELAYED_BASE;
     this.assetClass = assetClass;
     this.authFailed = false;
-    this.logger.log(`[Massive WS] Configured for ${assetClass} (${realtime ? 'realtime' : 'delayed'})`);
+    this.logger.log(
+      `[Massive WS] Configured for ${assetClass} (${realtime ? 'realtime' : 'delayed'})`,
+    );
   }
 
   isReady(): boolean {
@@ -87,7 +93,9 @@ export class MassiveWebSocketClient {
 
   private emit(event: TickerEvent, ...args: any[]): void {
     for (const h of this.handlers.get(event) ?? []) {
-      try { h(...args); } catch {}
+      try {
+        h(...args);
+      } catch {}
     }
   }
 
@@ -107,7 +115,9 @@ export class MassiveWebSocketClient {
       this.reconnectTimer = null;
     }
     if (this.ws) {
-      try { this.ws.close(); } catch {}
+      try {
+        this.ws.close();
+      } catch {}
       this.ws = null;
     }
     this.isConnected = false;
@@ -122,9 +132,7 @@ export class MassiveWebSocketClient {
    * the instrument registry maps `massive:<symbol>` keys, not numeric tokens.
    */
   subscribe(tokens: (string | number)[], _mode?: string): void {
-    const symbols = tokens
-      .map(String)
-      .filter((t) => t && !/^\d+$/.test(t)); // keep non-numeric strings only
+    const symbols = tokens.map(String).filter((t) => t && !/^\d+$/.test(t)); // keep non-numeric strings only
 
     if (!symbols.length) return;
 
@@ -136,31 +144,36 @@ export class MassiveWebSocketClient {
   }
 
   unsubscribe(tokens: (string | number)[]): void {
-    const symbols = tokens
-      .map(String)
-      .filter((t) => t && !/^\d+$/.test(t));
+    const symbols = tokens.map(String).filter((t) => t && !/^\d+$/.test(t));
 
     if (!symbols.length) return;
 
     for (const sym of symbols) this.subscribedSymbols.delete(sym);
 
     if (this.isAuthenticated && this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        action: 'unsubscribe',
-        params: symbols.map((s) => `T.${s}`).join(','),
-      }));
+      this.ws.send(
+        JSON.stringify({
+          action: 'unsubscribe',
+          params: symbols.map((s) => `T.${s}`).join(','),
+        }),
+      );
     }
   }
 
   private openConnection(): void {
     // Massive requires the API key as a query parameter on the upgrade request — 403 without it.
     const url = `${this.wsBase}/${this.assetClass}?apiKey=${this.apiKey}`;
-    this.logger.log(`[Massive WS] Connecting to ${this.wsBase}/${this.assetClass}`);
+    this.logger.log(
+      `[Massive WS] Connecting to ${this.wsBase}/${this.assetClass}`,
+    );
 
     // MASSIVE_WS_REJECT_UNAUTHORIZED=false disables TLS verification for self-signed / proxy certs.
     // Default is secure (true). Only set false in dev environments.
-    const rejectUnauthorized = process.env.MASSIVE_WS_REJECT_UNAUTHORIZED !== 'false';
-    const wsOptions: WebSocket.ClientOptions = rejectUnauthorized ? {} : { rejectUnauthorized: false };
+    const rejectUnauthorized =
+      process.env.MASSIVE_WS_REJECT_UNAUTHORIZED !== 'false';
+    const wsOptions: WebSocket.ClientOptions = rejectUnauthorized
+      ? {}
+      : { rejectUnauthorized: false };
 
     try {
       this.ws = new WebSocket(url, wsOptions);
@@ -182,7 +195,9 @@ export class MassiveWebSocketClient {
       const wasConnected = this.isConnected;
       this.isConnected = false;
       this.isAuthenticated = false;
-      this.logger.warn(`[Massive WS] Closed (reason=${reason?.toString() || 'none'})`);
+      this.logger.warn(
+        `[Massive WS] Closed (reason=${reason?.toString() || 'none'})`,
+      );
       if (wasConnected) this.emit('disconnect');
       this.scheduleReconnect();
     });
@@ -213,7 +228,11 @@ export class MassiveWebSocketClient {
     }
   }
 
-  private handleStatus(event: { ev: 'status'; status: string; message: string }): void {
+  private handleStatus(event: {
+    ev: 'status';
+    status: string;
+    message: string;
+  }): void {
     this.logger.log(`[Massive WS] Status: ${event.status} — ${event.message}`);
 
     if (event.status === 'connected') {
@@ -254,12 +273,19 @@ export class MassiveWebSocketClient {
     if (this.assetClass === 'forex') {
       params = symbols.map((s) => `C.${s.replace(/^C:/i, '')}`).join(',');
     } else if (this.assetClass === 'crypto') {
-      params = symbols.map((s) => { const c = s.replace(/^X:/i, ''); return `XT.${c},XA.${c}`; }).join(',');
+      params = symbols
+        .map((s) => {
+          const c = s.replace(/^X:/i, '');
+          return `XT.${c},XA.${c}`;
+        })
+        .join(',');
     } else {
       params = symbols.map((s) => `T.${s},AM.${s}`).join(',');
     }
     this.ws.send(JSON.stringify({ action: 'subscribe', params }));
-    this.logger.log(`[Massive WS] Subscribed: ${symbols.slice(0, 5).join(',')}${symbols.length > 5 ? `…+${symbols.length - 5}` : ''}`);
+    this.logger.log(
+      `[Massive WS] Subscribed: ${symbols.slice(0, 5).join(',')}${symbols.length > 5 ? `…+${symbols.length - 5}` : ''}`,
+    );
   }
 
   private eventToTick(event: MassiveWsEvent): MassiveCanonicalTick | null {
@@ -360,12 +386,18 @@ export class MassiveWebSocketClient {
   private scheduleReconnect(): void {
     if (!this.shouldReconnect) return;
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.logger.error('[Massive WS] Max reconnect attempts reached — giving up');
+      this.logger.error(
+        '[Massive WS] Max reconnect attempts reached — giving up',
+      );
       return;
     }
-    const delayMs = Math.min(60_000, 1000 * Math.pow(2, this.reconnectAttempts)) + Math.random() * 1000;
+    const delayMs =
+      Math.min(60_000, 1000 * Math.pow(2, this.reconnectAttempts)) +
+      Math.random() * 1000;
     this.reconnectAttempts++;
-    this.logger.log(`[Massive WS] Reconnect attempt ${this.reconnectAttempts} in ${Math.round(delayMs)}ms`);
+    this.logger.log(
+      `[Massive WS] Reconnect attempt ${this.reconnectAttempts} in ${Math.round(delayMs)}ms`,
+    );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.openConnection();

@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateMassiveInstruments1745075200000 implements MigrationInterface {
+export class CreateMassiveInstruments1745075200000
+  implements MigrationInterface
+{
   name = 'CreateMassiveInstruments1745075200000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -34,8 +36,12 @@ export class CreateMassiveInstruments1745075200000 implements MigrationInterface
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_massive_instruments_market`);
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_massive_instruments_ticker_market`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_massive_instruments_market`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_massive_instruments_ticker_market`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS massive_instruments`);
   }
 }

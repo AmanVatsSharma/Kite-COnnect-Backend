@@ -31,7 +31,12 @@ import { MarketDataModule } from '../market-data/market-data.module';
     MarketDataModule,
   ],
   controllers: [FalconController, AdminFalconController],
-  providers: [FalconInstrumentService, FalconProviderAdapter, FalconAuthService, AdminGuard],
+  providers: [
+    FalconInstrumentService,
+    FalconProviderAdapter,
+    FalconAuthService,
+    AdminGuard,
+  ],
   exports: [FalconInstrumentService, FalconProviderAdapter],
 })
 export class FalconModule {}

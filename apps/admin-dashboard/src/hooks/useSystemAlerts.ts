@@ -49,8 +49,15 @@ export function useSystemAlerts() {
         const errMsg = cur.lastErrorMsg;
         if (errMsg && errMsg !== lastErrorRef.current) {
           const lower = errMsg.toLowerCase();
-          if (lower.includes('token') || lower.includes('auth') || lower.includes('unauthorized') || lower.includes('forbidden')) {
-            notify.error('Kite auth error — re-authenticate at /auth', { duration: 12000 });
+          if (
+            lower.includes('token') ||
+            lower.includes('auth') ||
+            lower.includes('unauthorized') ||
+            lower.includes('forbidden')
+          ) {
+            notify.error('Kite auth error — re-authenticate at /auth', {
+              duration: 12000,
+            });
             lastErrorRef.current = errMsg;
           }
         }

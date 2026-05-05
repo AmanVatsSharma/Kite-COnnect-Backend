@@ -14,10 +14,16 @@ export function auditConfigToRows(data: unknown): KvRow[] {
     rows.push({ label: 'http_sample_rate', value: String(o.http_sample_rate) });
   }
   if (typeof o.http_always_log_errors === 'boolean') {
-    rows.push({ label: 'http_always_log_errors', value: o.http_always_log_errors ? 'Yes' : 'No' });
+    rows.push({
+      label: 'http_always_log_errors',
+      value: o.http_always_log_errors ? 'Yes' : 'No',
+    });
   }
   if (typeof o.ws_sub_sample_rate === 'number') {
-    rows.push({ label: 'ws_sub_sample_rate', value: String(o.ws_sub_sample_rate) });
+    rows.push({
+      label: 'ws_sub_sample_rate',
+      value: String(o.ws_sub_sample_rate),
+    });
   }
   return rows.length ? rows : flattenObject(data, '', 2);
 }

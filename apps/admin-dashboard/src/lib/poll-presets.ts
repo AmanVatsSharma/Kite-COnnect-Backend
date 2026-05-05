@@ -10,7 +10,13 @@ export type PollPresetId = 'pause' | '1s' | '3s' | '5s' | '15s';
 
 const STORAGE_KEY = 'admin_dashboard_poll_preset';
 
-export const POLL_PRESET_ORDER: PollPresetId[] = ['pause', '1s', '3s', '5s', '15s'];
+export const POLL_PRESET_ORDER: PollPresetId[] = [
+  'pause',
+  '1s',
+  '3s',
+  '5s',
+  '15s',
+];
 
 export const PRESET_MS: Record<PollPresetId, number | false> = {
   pause: false,

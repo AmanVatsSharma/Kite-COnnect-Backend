@@ -39,20 +39,27 @@ export class AdminBinanceController {
   ) {}
 
   @Post('instruments/sync')
-  @ApiOperation({ summary: 'Trigger Binance Spot instrument sync from /api/v3/exchangeInfo' })
+  @ApiOperation({
+    summary: 'Trigger Binance Spot instrument sync from /api/v3/exchangeInfo',
+  })
   async triggerSync() {
     const result = await this.syncService.syncBinanceInstruments();
     return { success: !result.error, result };
   }
 
   @Get('instruments/sync/status')
-  @ApiOperation({ summary: 'Get last Binance instrument sync result and timestamp' })
+  @ApiOperation({
+    summary: 'Get last Binance instrument sync result and timestamp',
+  })
   getSyncStatus() {
     return { success: true, ...this.syncService.getSyncStatus() };
   }
 
   @Get('status')
-  @ApiOperation({ summary: 'Provider runtime status: WS connection, subscriptions, shard health' })
+  @ApiOperation({
+    summary:
+      'Provider runtime status: WS connection, subscriptions, shard health',
+  })
   status() {
     const shards = this.provider.getShardStatus();
     return {
@@ -65,7 +72,9 @@ export class AdminBinanceController {
   }
 
   @Get('instruments')
-  @ApiOperation({ summary: 'Paginated list of synced Binance Spot instruments' })
+  @ApiOperation({
+    summary: 'Paginated list of synced Binance Spot instruments',
+  })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'pageSize', required: false, example: 50 })
   @ApiQuery({ name: 'quote', required: false, example: 'USDT' })
@@ -79,7 +88,10 @@ export class AdminBinanceController {
     @Query('activeOnly') activeOnly?: string,
   ) {
     const page = Math.max(1, parseInt(pageRaw || '1') || 1);
-    const pageSize = Math.max(1, Math.min(200, parseInt(pageSizeRaw || '50') || 50));
+    const pageSize = Math.max(
+      1,
+      Math.min(200, parseInt(pageSizeRaw || '50') || 50),
+    );
 
     const where: Record<string, any> = {};
     if (quote) where.quote_asset = quote.toUpperCase();
@@ -104,13 +116,19 @@ export class AdminBinanceController {
   }
 
   @Get('instruments/resolve')
-  @ApiOperation({ summary: 'Resolve a Binance symbol (e.g. BTCUSDT) to its UIR id and canonical symbol' })
+  @ApiOperation({
+    summary:
+      'Resolve a Binance symbol (e.g. BTCUSDT) to its UIR id and canonical symbol',
+  })
   @ApiQuery({ name: 'symbol', required: true, example: 'BTCUSDT' })
   async resolve(@Query('symbol') symbol?: string) {
-    if (!symbol) throw new BadRequestException('symbol query param is required');
+    if (!symbol)
+      throw new BadRequestException('symbol query param is required');
     const sym = symbol.toUpperCase();
 
-    const instrument = await this.binanceRepo.findOne({ where: { symbol: sym } });
+    const instrument = await this.binanceRepo.findOne({
+      where: { symbol: sym },
+    });
     const canonical = `${BINANCE_CANONICAL_EXCHANGE}:${sym}`;
     const cross = this.registry.resolveCrossProvider(canonical);
 

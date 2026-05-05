@@ -46,5 +46,3 @@ export class ApiKeyAbuseFlag {
   @Column({ type: 'timestamptz', nullable: true })
   last_seen_at: Date | null;
 }
-
-

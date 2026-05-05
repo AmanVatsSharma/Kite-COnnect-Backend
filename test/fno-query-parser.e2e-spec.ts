@@ -57,5 +57,3 @@ describe('FnoQueryParserService (trading-style F&O queries)', () => {
     expect(parsed.optionType).toBeUndefined();
   });
 });
-
-

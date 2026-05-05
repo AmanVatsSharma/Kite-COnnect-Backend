@@ -103,8 +103,7 @@ export class OriginAuditInterceptor implements NestInterceptor {
         (req?.tenant && (req.tenant.id as string)) ||
         (req?.tenant_id as string) ||
         null;
-      const apiKeyId =
-        (req?.tenant && (req.tenant.apiKeyId as number)) || null;
+      const apiKeyId = (req?.tenant && (req.tenant.apiKeyId as number)) || null;
 
       return { apiKey, apiKeyId, tenantId };
     } catch {
@@ -157,5 +156,3 @@ export class OriginAuditInterceptor implements NestInterceptor {
     }
   }
 }
-
-

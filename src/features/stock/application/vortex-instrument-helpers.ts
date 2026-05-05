@@ -29,8 +29,18 @@ export function generateVortexInstrumentDescription(instrument: {
       const month = instrument.expiry_date.substring(4, 6);
       const day = instrument.expiry_date.substring(6, 8);
       const monthNames = [
-        'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT',
-        'NOV', 'DEC',
+        'JAN',
+        'FEB',
+        'MAR',
+        'APR',
+        'MAY',
+        'JUN',
+        'JUL',
+        'AUG',
+        'SEP',
+        'OCT',
+        'NOV',
+        'DEC',
       ];
       const monthName = monthNames[parseInt(month, 10) - 1] || month;
       parts.push(`${day}${monthName}${year}`);

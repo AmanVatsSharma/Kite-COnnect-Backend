@@ -36,12 +36,7 @@ export class AbuseDetectionService {
     private readonly abuseRepo: Repository<ApiKeyAbuseFlag>,
     private readonly configService: ConfigService,
   ) {
-    this.windowMinutes = this.getNumberEnv(
-      'ABUSE_WINDOW_MINUTES',
-      10,
-      1,
-      120,
-    );
+    this.windowMinutes = this.getNumberEnv('ABUSE_WINDOW_MINUTES', 10, 1, 120);
     this.uniqueIpThreshold = this.getNumberEnv(
       'ABUSE_UNIQUE_IP_THRESHOLD',
       20,
@@ -171,8 +166,7 @@ export class AbuseDetectionService {
           });
         } else {
           // For strict enforcement, once blocked we keep it blocked until admin unblocks.
-          const newBlocked =
-            flag.blocked || score >= this.blockScoreThreshold;
+          const newBlocked = flag.blocked || score >= this.blockScoreThreshold;
           flag.risk_score = score;
           flag.reason_codes = reasons;
           flag.blocked = newBlocked;
@@ -232,5 +226,3 @@ export class AbuseDetectionService {
     return { score, reasons };
   }
 }
-
-

@@ -41,10 +41,10 @@ export class VayuOptionService {
       const parsed = q && q.trim() ? this.fnoQueryParser.parse(q) : undefined;
       const underlyingSymbol = parsed?.underlying;
 
-      let effectiveQuery = underlyingSymbol ? undefined : q;
+      const effectiveQuery = underlyingSymbol ? undefined : q;
       let effectiveOptionType: 'CE' | 'PE' | undefined = option_type;
-      let effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
-      let effectiveExpiryTo = parsed?.expiryTo || expiry_to;
+      const effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
+      const effectiveExpiryTo = parsed?.expiryTo || expiry_to;
       let effectiveStrikeMin = strike_min;
       let effectiveStrikeMax = strike_max;
 
@@ -186,7 +186,7 @@ export class VayuOptionService {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
           const lp = ltpByPair?.[key]?.last_price ?? null;
           const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
-          return {
+          return this.vortexInstrumentService.enrichSingleWithUir({
             token: i.token,
             symbol: i.symbol,
             exchange: i.exchange,
@@ -196,13 +196,9 @@ export class VayuOptionService {
             strike_price: i.strike_price,
             days_to_expiry: daysToExpiry,
             last_price: lp,
-          };
+          });
         });
-        const ranked = this.rankFoInstruments(
-          list,
-          sortMode,
-          parsedStrikeHint,
-        );
+        const ranked = this.rankFoInstruments(list, sortMode, parsedStrikeHint);
         const response = {
           success: true,
           data: {
@@ -297,7 +293,7 @@ export class VayuOptionService {
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
-        return {
+        return this.vortexInstrumentService.enrichSingleWithUir({
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
@@ -307,17 +303,12 @@ export class VayuOptionService {
           strike_price: i.strike_price,
           days_to_expiry: this.computeDaysToExpiry(i.expiry_date as any),
           last_price: lp,
-        };
+        });
       });
       const filtered = enriched.filter(
-        (v: any) =>
-          Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
+        (v: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
       );
-      const ranked = this.rankFoInstruments(
-        filtered,
-        sortMode,
-        parsed?.strike,
-      );
+      const ranked = this.rankFoInstruments(filtered, sortMode, parsed?.strike);
       const sliced = ranked.slice(0, requestedLimit);
 
       const response = {
@@ -383,10 +374,10 @@ export class VayuOptionService {
       const parsed = q && q.trim() ? this.fnoQueryParser.parse(q) : undefined;
       const underlyingSymbol = parsed?.underlying;
 
-      let effectiveQuery = underlyingSymbol ? undefined : q;
+      const effectiveQuery = underlyingSymbol ? undefined : q;
       let effectiveOptionType: 'CE' | 'PE' | undefined = option_type;
-      let effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
-      let effectiveExpiryTo = parsed?.expiryTo || expiry_to;
+      const effectiveExpiryFrom = parsed?.expiryFrom || expiry_from;
+      const effectiveExpiryTo = parsed?.expiryTo || expiry_to;
       let effectiveStrikeMin = strike_min;
       let effectiveStrikeMax = strike_max;
 
@@ -522,7 +513,7 @@ export class VayuOptionService {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
           const lp = ltpByPair?.[key]?.last_price ?? null;
           const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
-          return {
+          return this.vortexInstrumentService.enrichSingleWithUir({
             token: i.token,
             symbol: i.symbol,
             exchange: i.exchange,
@@ -532,7 +523,7 @@ export class VayuOptionService {
             strike_price: i.strike_price,
             days_to_expiry: daysToExpiry,
             last_price: lp,
-          };
+          });
         });
         const ranked = this.rankFoInstruments(
           list,
@@ -632,7 +623,7 @@ export class VayuOptionService {
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
-        return {
+        return this.vortexInstrumentService.enrichSingleWithUir({
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
@@ -642,11 +633,10 @@ export class VayuOptionService {
           strike_price: i.strike_price,
           days_to_expiry: this.computeDaysToExpiry(i.expiry_date as any),
           last_price: lp,
-        };
+        });
       });
       const filtered = enriched.filter(
-        (v: any) =>
-          Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
+        (v: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
       );
       const ranked = this.rankFoInstruments(
         filtered,
@@ -711,22 +701,27 @@ export class VayuOptionService {
           ? await this.vortexInstrumentService.getVortexLTP(allTokens)
           : {};
 
-      // Add live prices to options chain
+      // Add live prices to options chain and enrich with UIR
       const optionsWithPrices = { ...result.options };
-      for (const [expiry, strikes] of Object.entries(optionsWithPrices)) {
-        for (const [strikeStr, optionPair] of Object.entries(strikes)) {
-          const strike = Number(strikeStr);
+      for (const strikes of Object.values(optionsWithPrices)) {
+        for (const optionPair of Object.values(strikes)) {
           if (optionPair.CE) {
-            optionPair.CE = {
+            const ceWithLtp = {
               ...optionPair.CE,
               last_price: ltp?.[optionPair.CE.token]?.last_price ?? null,
-            } as any;
+            };
+            optionPair.CE = this.vortexInstrumentService.enrichSingleWithUir(
+              ceWithLtp as any,
+            ) as any;
           }
           if (optionPair.PE) {
-            optionPair.PE = {
+            const peWithLtp = {
               ...optionPair.PE,
               last_price: ltp?.[optionPair.PE.token]?.last_price ?? null,
-            } as any;
+            };
+            optionPair.PE = this.vortexInstrumentService.enrichSingleWithUir(
+              peWithLtp as any,
+            ) as any;
           }
         }
       }

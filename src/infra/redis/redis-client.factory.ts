@@ -32,7 +32,12 @@
  * Author:      BharatERP
  * Last-updated: 2026-04-19
  */
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import IORedis, { Redis, Cluster, RedisOptions } from 'ioredis';
 import { MetricsService } from '@infra/observability/metrics.service';
@@ -109,12 +114,15 @@ export class RedisClientFactory implements OnModuleInit, OnModuleDestroy {
         ),
         new Promise<never>((_, reject) =>
           setTimeout(
-            () => reject(new Error(`Redis connect timeout after ${timeoutMs}ms`)),
+            () =>
+              reject(new Error(`Redis connect timeout after ${timeoutMs}ms`)),
             timeoutMs,
           ),
         ),
       ]);
-      this.logger.log('[RedisClientFactory] All Redis clients connected successfully');
+      this.logger.log(
+        '[RedisClientFactory] All Redis clients connected successfully',
+      );
     } catch (err: any) {
       this.logger.warn(
         `[RedisClientFactory] Initial connect failed: ${err.message} — clients will retry in background`,
@@ -151,7 +159,10 @@ export class RedisClientFactory implements OnModuleInit, OnModuleDestroy {
 
   private buildClient(name: RedisClientName): Redis | Cluster {
     const maxRetries = this.config.get<number>('REDIS_MAX_RETRIES', 10);
-    const connectTimeout = this.config.get<number>('REDIS_CONNECT_TIMEOUT_MS', 5000);
+    const connectTimeout = this.config.get<number>(
+      'REDIS_CONNECT_TIMEOUT_MS',
+      5000,
+    );
     const password = this.config.get<string>('REDIS_PASSWORD', '') || undefined;
 
     const retryStrategy = (times: number): number | undefined => {
@@ -179,7 +190,11 @@ export class RedisClientFactory implements OnModuleInit, OnModuleDestroy {
       const cluster = new Cluster(nodes, {
         lazyConnect: true,
         clusterRetryStrategy: retryStrategy,
-        redisOptions: { password, connectTimeout, lazyConnect: true } as RedisOptions,
+        redisOptions: {
+          password,
+          connectTimeout,
+          lazyConnect: true,
+        } as RedisOptions,
       });
       this.wireEvents(name, cluster as unknown as Redis);
       return cluster;
@@ -193,7 +208,10 @@ export class RedisClientFactory implements OnModuleInit, OnModuleDestroy {
           const [host, port] = h.trim().split(':');
           return { host, port: parseInt(port, 10) || 26379 };
         });
-      const sentinelName = this.config.get<string>('REDIS_SENTINEL_NAME', 'mymaster');
+      const sentinelName = this.config.get<string>(
+        'REDIS_SENTINEL_NAME',
+        'mymaster',
+      );
       const client = new IORedis({
         sentinels,
         name: sentinelName,
@@ -237,13 +255,19 @@ export class RedisClientFactory implements OnModuleInit, OnModuleDestroy {
       this.metrics.redisConnected.labels(name).set(1);
     });
     client.on('error', (err: Error) => {
-      this.logger.warn(`[RedisClientFactory] Client '${name}' error: ${err.message}`);
+      this.logger.warn(
+        `[RedisClientFactory] Client '${name}' error: ${err.message}`,
+      );
     });
     client.on('reconnecting', () => {
-      this.logger.debug(`[RedisClientFactory] Client '${name}' reconnecting...`);
+      this.logger.debug(
+        `[RedisClientFactory] Client '${name}' reconnecting...`,
+      );
     });
     client.on('end', () => {
-      this.logger.warn(`[RedisClientFactory] Client '${name}' connection ended`);
+      this.logger.warn(
+        `[RedisClientFactory] Client '${name}' connection ended`,
+      );
       this.metrics.redisConnected.labels(name).set(0);
     });
     client.on('close', () => {

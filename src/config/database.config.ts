@@ -45,7 +45,9 @@ export const getDatabaseConfig = (
   // In production, prefer running migrations over synchronize.
   // Override with DB_SYNCHRONIZE=true only for development.
   synchronize: configService.get('DB_SYNCHRONIZE', 'false') === 'true',
-  logging: configService.get('NODE_ENV') === 'development' || configService.get('DB_LOGGING', 'false') === 'true',
+  logging:
+    configService.get('NODE_ENV') === 'development' ||
+    configService.get('DB_LOGGING', 'false') === 'true',
   migrations: ['dist/migrations/*.js'],
   // Enable auto-run migrations by default; disable with DB_MIGRATIONS_RUN=false if managed externally
   migrationsRun: configService.get('DB_MIGRATIONS_RUN', 'true') === 'true',

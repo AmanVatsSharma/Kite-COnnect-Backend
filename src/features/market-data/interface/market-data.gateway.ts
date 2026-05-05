@@ -117,9 +117,9 @@ export class MarketDataGateway
    * - Instantly unsubscribes from forbidden instruments.
    */
   private async handleApiKeyUpdate(key: string) {
-    const affectedClients = Array.from(this.subscriptionRegistry.values()).filter(
-      (sub) => sub.apiKey === key,
-    );
+    const affectedClients = Array.from(
+      this.subscriptionRegistry.values(),
+    ).filter((sub) => sub.apiKey === key);
 
     if (affectedClients.length === 0) return;
 
@@ -169,7 +169,7 @@ export class MarketDataGateway
       if (tokensToCheck.length === 0) continue;
 
       // Resolve tokens to exchanges (best effort)
-      let tokenExchangeMap = new Map<number, string>();
+      const tokenExchangeMap = new Map<number, string>();
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
         const exMap: Map<string, any> = (provider as any)?.resolveExchanges
@@ -217,10 +217,11 @@ export class MarketDataGateway
         // Notify client
         socket.emit('error', {
           code: 'entitlement_revoked',
-          message: 'Some subscriptions were revoked due to updated API key permissions',
+          message:
+            'Some subscriptions were revoked due to updated API key permissions',
           revoked_tokens: forbiddenTokens,
         });
-        
+
         // Send updated subscription list
         socket.emit('unsubscription_confirmed', {
           requested: forbiddenTokens,
@@ -253,13 +254,19 @@ export class MarketDataGateway
       const queryKey = (client.handshake.query['api_key'] as string) || '';
       const apiKey = headerKey || queryKey;
       if (!apiKey) {
-        client.emit('error', { code: 'missing_api_key', message: 'Missing x-api-key' });
+        client.emit('error', {
+          code: 'missing_api_key',
+          message: 'Missing x-api-key',
+        });
         client.disconnect(true);
         return;
       }
       const record = await this.apiKeyService.validateApiKey(apiKey);
       if (!record) {
-        client.emit('error', { code: 'invalid_api_key', message: 'Invalid API key' });
+        client.emit('error', {
+          code: 'invalid_api_key',
+          message: 'Invalid API key',
+        });
         client.disconnect(true);
         return;
       }
@@ -374,9 +381,16 @@ export class MarketDataGateway
       }
       // Emit current status snapshot to the just-connected client
       const snapshot = await this.streamService.getStreamingStatus();
-      client.emit('stream_status', { event: snapshot.isStreaming ? 'connected' : 'disconnected', snapshot, ts: Date.now() });
+      client.emit('stream_status', {
+        event: snapshot.isStreaming ? 'connected' : 'disconnected',
+        snapshot,
+        ts: Date.now(),
+      });
     } catch (e) {
-      this.logger.warn('Failed initializing stream status subscription', e as any);
+      this.logger.warn(
+        'Failed initializing stream status subscription',
+        e as any,
+      );
     }
 
     // Emit a branded welcome + onboarding payload for client UX
@@ -385,8 +399,12 @@ export class MarketDataGateway
       const record: any = (client.data as any)?.apiKeyRecord;
       const limits: Record<string, any> = {
         connection: record?.connection_limit || 3,
-        maxUpstreamInstruments: Number(process.env.KITE_TICKER_INSTRUMENT_LIMIT ?? 3000),
-        maxSubscriptionsPerSocket: record?.ws_max_instruments ?? Number(process.env.WS_MAX_INSTRUMENTS ?? 3000),
+        maxUpstreamInstruments: Number(
+          process.env.KITE_TICKER_INSTRUMENT_LIMIT ?? 3000,
+        ),
+        maxSubscriptionsPerSocket:
+          record?.ws_max_instruments ??
+          Number(process.env.WS_MAX_INSTRUMENTS ?? 3000),
       };
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
@@ -396,23 +414,26 @@ export class MarketDataGateway
         }
         const v = (provider as any)?.getVortexWsLimits?.() ?? null;
         if (v) {
-          limits.maxSubscriptionsPerSocket = record?.ws_max_instruments ?? v.perSocket;
+          limits.maxSubscriptionsPerSocket =
+            record?.ws_max_instruments ?? v.perSocket;
           limits.maxVortexShards = v.maxShards;
           limits.maxVortexInstruments = v.total;
         }
       } catch {}
-      const exchanges =
-        (Array.isArray(record?.metadata?.exchanges) &&
-          record?.metadata?.exchanges) || [
-          'NSE_EQ',
-          'NSE_FO',
-          'NSE_CUR',
-          'MCX_FO',
-        ];
+      const exchanges = (Array.isArray(record?.metadata?.exchanges) &&
+        record?.metadata?.exchanges) || [
+        'NSE_EQ',
+        'NSE_FO',
+        'NSE_CUR',
+        'MCX_FO',
+      ];
       const usage = await this.apiKeyService.getUsageReport(apiKey);
-      const lockedKeyProv = normalizeProviderAlias((record as any)?.provider ?? null);
-      const internal = lockedKeyProv ??
-        await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
+      const lockedKeyProv = normalizeProviderAlias(
+        (record as any)?.provider ?? null,
+      );
+      const internal =
+        lockedKeyProv ??
+        (await this.providerResolver.getResolvedInternalProviderNameForWebsocket());
       const clientProvider = internalToClientProviderName(internal);
       const instructions = {
         subscribe:
@@ -564,7 +585,12 @@ export class MarketDataGateway
 
       // Resolve symbols to provider tokens if provided.
       // Accepts both canonical format ("NSE:RELIANCE") and plain underlying names ("RELIANCE").
-      const resolvedSymbols: Array<{ symbol: string; uirId: number; providerToken?: number; resolvedAs?: string }> = [];
+      const resolvedSymbols: Array<{
+        symbol: string;
+        uirId: number;
+        providerToken?: number;
+        resolvedAs?: string;
+      }> = [];
       const unresolvedSymbols: string[] = [];
       // UIR IDs for instruments whose provider is not the global WS provider (e.g. massive US stocks).
       // These bypass exchange-pair resolution and are routed directly by the streaming batch processor.
@@ -583,10 +609,13 @@ export class MarketDataGateway
         provider: string;
         canonical: string;
       }> = [];
-      const enabledProviders = new Set(this.providerResolver.getEnabledProviders());
-      const lockedProvider: InternalProviderName | null = normalizeProviderAlias(
-        ((client.data as any).apiKeyRecord)?.provider ?? null,
+      const enabledProviders = new Set(
+        this.providerResolver.getEnabledProviders(),
       );
+      const lockedProvider: InternalProviderName | null =
+        normalizeProviderAlias(
+          (client.data as any).apiKeyRecord?.provider ?? null,
+        );
 
       const consumePrefixed = (items: Array<unknown>): unknown[] => {
         const remaining: unknown[] = [];
@@ -620,7 +649,9 @@ export class MarketDataGateway
             prefixed.identifier,
           );
           if (result.status === 'not_found') {
-            unresolvedSymbols.push(`${prefixed.raw} (not found in ${internalToClientProviderName(prefixed.provider)} catalog)`);
+            unresolvedSymbols.push(
+              `${prefixed.raw} (not found in ${internalToClientProviderName(prefixed.provider)} catalog)`,
+            );
             continue;
           }
           if (result.status === 'ambiguous') {
@@ -629,7 +660,8 @@ export class MarketDataGateway
             );
             continue;
           }
-          if (!forcedByProvider.has(prefixed.provider)) forcedByProvider.set(prefixed.provider, []);
+          if (!forcedByProvider.has(prefixed.provider))
+            forcedByProvider.set(prefixed.provider, []);
           forcedByProvider.get(prefixed.provider)!.push({
             uirId: result.uirId,
             canonical: result.canonical,
@@ -653,7 +685,8 @@ export class MarketDataGateway
       }
 
       if (Array.isArray(symbols) && symbols.length > 0) {
-        const providerName = lockedProvider ?? this.streamService.activeProviderName;
+        const providerName =
+          lockedProvider ?? this.streamService.activeProviderName;
         for (const sym of symbols) {
           const flexResult = this.instrumentRegistry.resolveFlexSymbol(sym);
           if (flexResult.status === 'not_found') {
@@ -661,11 +694,16 @@ export class MarketDataGateway
             continue;
           }
           if (flexResult.status === 'ambiguous') {
-            unresolvedSymbols.push(`${sym} (ambiguous — try: ${flexResult.candidates.join(', ')})`);
+            unresolvedSymbols.push(
+              `${sym} (ambiguous — try: ${flexResult.candidates.join(', ')})`,
+            );
             continue;
           }
           const { uirId, canonical } = flexResult;
-          const providerToken = this.instrumentRegistry.getProviderToken(uirId, providerName);
+          const providerToken = this.instrumentRegistry.getProviderToken(
+            uirId,
+            providerName,
+          );
           if (providerToken != null) {
             const numToken = Number(providerToken);
             if (Number.isFinite(numToken)) {
@@ -679,10 +717,15 @@ export class MarketDataGateway
             }
           } else {
             // No token for the global provider — check if another provider owns this UIR.
-            const bestProv = this.instrumentRegistry.getBestProviderForUirId(uirId);
+            const bestProv =
+              this.instrumentRegistry.getBestProviderForUirId(uirId);
             if (bestProv) {
               directUirIds.push(uirId);
-              resolvedSymbols.push({ symbol: sym, uirId, resolvedAs: canonical !== sym ? canonical : undefined });
+              resolvedSymbols.push({
+                symbol: sym,
+                uirId,
+                resolvedAs: canonical !== sym ? canonical : undefined,
+              });
             } else {
               unresolvedSymbols.push(sym);
             }
@@ -690,7 +733,10 @@ export class MarketDataGateway
         }
       }
 
-      const forcedTotal = Array.from(forcedByProvider.values()).reduce((n, arr) => n + arr.length, 0);
+      const forcedTotal = Array.from(forcedByProvider.values()).reduce(
+        (n, arr) => n + arr.length,
+        0,
+      );
 
       // Validate payload shape (instruments may now include symbol-resolved tokens)
       const v = validateSubscribePayload({ instruments, mode });
@@ -741,7 +787,8 @@ export class MarketDataGateway
 
       // Enforce admin WS blocklist (Redis-backed)
       try {
-        const apiKey: string = ((client.data as any)?.apiKey as string) || client.id;
+        const apiKey: string =
+          ((client.data as any)?.apiKey as string) || client.id;
         const [keyBlocked, rawBlockedExchanges] = await Promise.all([
           this.redisService.get(`ws:block:apikey:${apiKey}`),
           this.redisService.get('ws:block:exchanges'),
@@ -754,14 +801,18 @@ export class MarketDataGateway
           return;
         }
         if (rawBlockedExchanges) {
-          (client as any).__blockedExchanges = new Set<string>(JSON.parse(rawBlockedExchanges as string));
+          (client as any).__blockedExchanges = new Set<string>(
+            JSON.parse(rawBlockedExchanges as string),
+          );
         }
       } catch {}
 
       // Allow subscriptions that consist solely of direct UIR IDs (massive US symbols)
       // or forced provider-prefixed UIR IDs (Falcon:|Vayu:|Massive:|Binance:).
       if (
-        (!instruments || !Array.isArray(instruments) || instruments.length === 0) &&
+        (!instruments ||
+          !Array.isArray(instruments) ||
+          instruments.length === 0) &&
         directUirIds.length === 0 &&
         forcedTotal === 0
       ) {
@@ -789,7 +840,8 @@ export class MarketDataGateway
       // is lazy-init'd by the batch processor on first subscription. Forced provider-pinned
       // UIRs likewise skip auto-start; their ticker is lazy-init'd by the batch processor.
       const isPureDirectSubscription =
-        instruments.length === 0 && (directUirIds.length > 0 || forcedTotal > 0);
+        instruments.length === 0 &&
+        (directUirIds.length > 0 || forcedTotal > 0);
       if (!isPureDirectSubscription) {
         try {
           const status = await this.streamService.getStreamingStatus();
@@ -809,7 +861,10 @@ export class MarketDataGateway
             }
           }
         } catch (e) {
-          this.logger.warn('Failed to read/auto-start streaming status', e as any);
+          this.logger.warn(
+            'Failed to read/auto-start streaming status',
+            e as any,
+          );
         }
       }
 
@@ -825,7 +880,10 @@ export class MarketDataGateway
           if (m) {
             const ex = m[1] as any;
             const tok = Number(m[2]);
-            if (['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'].includes(ex) && Number.isFinite(tok)) {
+            if (
+              ['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'].includes(ex) &&
+              Number.isFinite(tok)
+            ) {
               explicitPairs.push({ token: tok, exchange: ex });
               continue;
             }
@@ -848,7 +906,10 @@ export class MarketDataGateway
           .filter((t) => exMap.has(String(t)))
           .map((t) => ({ token: t, exchange: exMap.get(String(t)) }));
       } catch (e) {
-        this.logger.warn('Exchange resolution failed for tokens; proceeding with explicit pairs only', e as any);
+        this.logger.warn(
+          'Exchange resolution failed for tokens; proceeding with explicit pairs only',
+          e as any,
+        );
       }
 
       // Merge explicit pairs and resolved pairs; explicit wins on conflicts
@@ -865,28 +926,37 @@ export class MarketDataGateway
       // Entitlement enforcement: filter pairs by allowed exchanges from API key metadata
       const record: any = (client.data as any)?.apiKeyRecord;
       const allowed = new Set(
-        (Array.isArray(record?.metadata?.exchanges) && record?.metadata?.exchanges) || [
+        (Array.isArray(record?.metadata?.exchanges) &&
+          record?.metadata?.exchanges) || [
           'NSE_EQ',
           'NSE_FO',
           'NSE_CUR',
           'MCX_FO',
         ],
       );
-      const forbiddenPairs = finalPairs.filter((p) => !allowed.has(String(p.exchange)));
+      const forbiddenPairs = finalPairs.filter(
+        (p) => !allowed.has(String(p.exchange)),
+      );
       finalPairs = finalPairs.filter((p) => allowed.has(String(p.exchange)));
 
       // Admin blocklist: filter out blocked exchanges
-      const blockedExSet: Set<string> | undefined = (client as any).__blockedExchanges;
+      const blockedExSet: Set<string> | undefined = (client as any)
+        .__blockedExchanges;
       if (blockedExSet && blockedExSet.size > 0) {
-        finalPairs = finalPairs.filter((p) => !blockedExSet.has(String(p.exchange)));
+        finalPairs = finalPairs.filter(
+          (p) => !blockedExSet.has(String(p.exchange)),
+        );
       }
 
       // Phase 3: resolve tokens to UIR IDs for internal tracking
-      const providerNameForResolve = lockedProvider ?? this.streamService.activeProviderName;
+      const providerNameForResolve =
+        lockedProvider ?? this.streamService.activeProviderName;
 
       // Enforce per-connection instrument subscription cap (using UIR IDs)
       const maxInstruments =
-        (record?.ws_max_instruments != null && Number.isFinite(record.ws_max_instruments) && record.ws_max_instruments > 0)
+        record?.ws_max_instruments != null &&
+        Number.isFinite(record.ws_max_instruments) &&
+        record.ws_max_instruments > 0
           ? record.ws_max_instruments
           : Number(process.env.WS_MAX_INSTRUMENTS ?? 3000);
       const currentInstrumentCount = subscription.instruments.length;
@@ -922,7 +992,10 @@ export class MarketDataGateway
           limit: maxInstruments,
           current: currentInstrumentCount,
         });
-        const allowedSet = new Set([...subscription.instruments, ...allowedNewIds]);
+        const allowedSet = new Set([
+          ...subscription.instruments,
+          ...allowedNewIds,
+        ]);
         finalPairs = finalPairs.filter((p) => {
           const uirId = this.resolveUirForPair(providerNameForResolve, p);
           return allowedSet.has(uirId != null ? uirId : p.token);
@@ -941,11 +1014,15 @@ export class MarketDataGateway
       }
       const priorInstrumentSet = new Set(subscription.instruments);
       // Forced (provider-prefixed) UIR IDs — pinned to a specific provider via stream service param.
-      const forcedUirIdsAll: number[] = Array.from(forcedByProvider.values()).flatMap((arr) =>
-        arr.map((e) => e.uirId),
-      );
+      const forcedUirIdsAll: number[] = Array.from(
+        forcedByProvider.values(),
+      ).flatMap((arr) => arr.map((e) => e.uirId));
       // Merge direct UIR IDs (massive/non-Indian instruments resolved via symbol lookup) + forced.
-      const allIncludedUirIds = [...includedUirIds, ...directUirIds, ...forcedUirIdsAll];
+      const allIncludedUirIds = [
+        ...includedUirIds,
+        ...directUirIds,
+        ...forcedUirIdsAll,
+      ];
       subscription.instruments = [
         ...new Set([...subscription.instruments, ...allIncludedUirIds]),
       ];
@@ -963,7 +1040,11 @@ export class MarketDataGateway
         // Key-level provider lock is enforced at gateway (cross-provider prefix rejection above).
         // Do NOT pass lockedProvider as forcedProvider here — that would pin the UIR and disable
         // kite dual-subscribe, breaking the vortex→kite tick fallback in handleTicks.
-        await this.streamService.subscribeToInstruments(nonForcedUirIds, mode, client.id);
+        await this.streamService.subscribeToInstruments(
+          nonForcedUirIds,
+          mode,
+          client.id,
+        );
       }
       // Dispatch forced subscriptions per-provider so the stream service can pin routing.
       for (const [providerName, entries] of forcedByProvider) {
@@ -971,13 +1052,22 @@ export class MarketDataGateway
         this.logger.debug(
           `[MarketDataGateway] Subscribing client ${client.id} forced provider=${providerName} uirIds=${uirIds.length} mode=${mode}`,
         );
-        await this.streamService.subscribeToInstruments(uirIds, mode, client.id, providerName);
+        await this.streamService.subscribeToInstruments(
+          uirIds,
+          mode,
+          client.id,
+          providerName,
+        );
       }
 
       // Phase 3: join UIR-keyed rooms only
-      const providerName = lockedProvider ?? this.streamService.activeProviderName;
+      const providerName =
+        lockedProvider ?? this.streamService.activeProviderName;
       includedTokens.forEach((token) => {
-        const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
+        const uirId = this.instrumentRegistry.resolveProviderToken(
+          providerName,
+          token,
+        );
         if (uirId != null) {
           client.join(`instrument:${uirId}`);
         } else {
@@ -1024,16 +1114,29 @@ export class MarketDataGateway
       } catch {}
 
       // Build symbol enrichment for included identifiers
-      const symbolEnrichment: Array<{ symbol: string; uirId: number; providerToken: number }> = [];
+      const symbolEnrichment: Array<{
+        symbol: string;
+        uirId: number;
+        providerToken: number;
+      }> = [];
       for (let i = 0; i < includedTokens.length; i++) {
         const token = includedTokens[i];
         const id = includedUirIds[i];
         const found = resolvedSymbols.find((r) => r.providerToken === token);
         if (found) {
-          symbolEnrichment.push({ symbol: found.symbol, uirId: found.uirId, providerToken: token });
+          symbolEnrichment.push({
+            symbol: found.symbol,
+            uirId: found.uirId,
+            providerToken: token,
+          });
         } else {
           const sym = this.instrumentRegistry.getCanonicalSymbol(id);
-          if (sym) symbolEnrichment.push({ symbol: sym, uirId: id, providerToken: token });
+          if (sym)
+            symbolEnrichment.push({
+              symbol: sym,
+              uirId: id,
+              providerToken: token,
+            });
         }
       }
 
@@ -1044,8 +1147,12 @@ export class MarketDataGateway
         resolved: symbolEnrichment.length > 0 ? symbolEnrichment : undefined,
         forced: forcedConfirm.length > 0 ? forcedConfirm : undefined,
         unresolved,
-        unresolvedSymbols: unresolvedSymbols.length > 0 ? unresolvedSymbols : undefined,
-        forbidden: forbiddenPairs.map((p) => ({ token: p.token, exchange: p.exchange })),
+        unresolvedSymbols:
+          unresolvedSymbols.length > 0 ? unresolvedSymbols : undefined,
+        forbidden: forbiddenPairs.map((p) => ({
+          token: p.token,
+          exchange: p.exchange,
+        })),
         snapshot,
         mode,
         limits: {
@@ -1067,9 +1174,7 @@ export class MarketDataGateway
       try {
         const apiKey: string =
           ((client.data as any)?.apiKey as string) || 'anonymous';
-        this.metrics.wsEventsByApiKeyTotal
-          .labels(apiKey, 'subscribe')
-          .inc();
+        this.metrics.wsEventsByApiKeyTotal.labels(apiKey, 'subscribe').inc();
       } catch {
         // Ignore metrics failures
       }
@@ -1129,7 +1234,10 @@ export class MarketDataGateway
       );
     } catch (error) {
       this.logger.error('Error handling instrument subscription', error);
-      client.emit('error', { code: 'subscribe_failed', message: 'Failed to subscribe to instruments' });
+      client.emit('error', {
+        code: 'subscribe_failed',
+        message: 'Failed to subscribe to instruments',
+      });
     }
   }
 
@@ -1265,7 +1373,10 @@ export class MarketDataGateway
       // Phase 3: resolve incoming provider tokens to UIR IDs for matching internal state
       const providerNameForResolve = this.streamService.activeProviderName;
       for (const token of requestedTokens) {
-        const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, token);
+        const uirId = this.instrumentRegistry.resolveProviderToken(
+          providerNameForResolve,
+          token,
+        );
         requestedUirIds.push(uirId != null ? uirId : token);
       }
 
@@ -1289,7 +1400,9 @@ export class MarketDataGateway
       // Leave UIR-keyed rooms
       requestedUirIds.forEach((id) => client.leave(`instrument:${id}`));
 
-      const removed = Array.from(before).filter((t) => !subscription.instruments.includes(t));
+      const removed = Array.from(before).filter(
+        (t) => !subscription.instruments.includes(t),
+      );
       removed.forEach((id) => this.wsInterest.removeInterest(id));
       const not_found = requestedUirIds.filter((id) => !before.has(id));
       client.emit('unsubscription_confirmed', {
@@ -1307,9 +1420,7 @@ export class MarketDataGateway
       try {
         const apiKey: string =
           ((client.data as any)?.apiKey as string) || 'anonymous';
-        this.metrics.wsEventsByApiKeyTotal
-          .labels(apiKey, 'unsubscribe')
-          .inc();
+        this.metrics.wsEventsByApiKeyTotal.labels(apiKey, 'unsubscribe').inc();
       } catch {
         // Ignore metrics failures
       }
@@ -1430,7 +1541,10 @@ export class MarketDataGateway
       });
     } catch (error) {
       this.logger.error('Error fetching quotes', error);
-      client.emit('error', { code: 'quote_failed', message: 'Failed to fetch quotes' });
+      client.emit('error', {
+        code: 'quote_failed',
+        message: 'Failed to fetch quotes',
+      });
     }
   }
 
@@ -1444,18 +1558,21 @@ export class MarketDataGateway
       const record: any = (client.data as any)?.apiKeyRecord;
       const apiKey: string = (client.data as any)?.apiKey;
       const usage = await this.apiKeyService.getUsageReport(apiKey);
-      const exchanges =
-        (Array.isArray(record?.metadata?.exchanges) &&
-          record?.metadata?.exchanges) || [
-          'NSE_EQ',
-          'NSE_FO',
-          'NSE_CUR',
-          'MCX_FO',
-        ];
+      const exchanges = (Array.isArray(record?.metadata?.exchanges) &&
+        record?.metadata?.exchanges) || [
+        'NSE_EQ',
+        'NSE_FO',
+        'NSE_CUR',
+        'MCX_FO',
+      ];
       const limits: Record<string, any> = {
         connection: record?.connection_limit || 3,
-        maxUpstreamInstruments: Number(process.env.KITE_TICKER_INSTRUMENT_LIMIT ?? 3000),
-        maxSubscriptionsPerSocket: record?.ws_max_instruments ?? Number(process.env.WS_MAX_INSTRUMENTS ?? 3000),
+        maxUpstreamInstruments: Number(
+          process.env.KITE_TICKER_INSTRUMENT_LIMIT ?? 3000,
+        ),
+        maxSubscriptionsPerSocket:
+          record?.ws_max_instruments ??
+          Number(process.env.WS_MAX_INSTRUMENTS ?? 3000),
       };
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
@@ -1465,7 +1582,8 @@ export class MarketDataGateway
         }
         const v = (provider as any)?.getVortexWsLimits?.() ?? null;
         if (v) {
-          limits.maxSubscriptionsPerSocket = record?.ws_max_instruments ?? v.perSocket;
+          limits.maxSubscriptionsPerSocket =
+            record?.ws_max_instruments ?? v.perSocket;
           limits.maxVortexShards = v.maxShards;
           limits.maxVortexInstruments = v.total;
         }
@@ -1479,8 +1597,9 @@ export class MarketDataGateway
       const lockedKeyProv = normalizeProviderAlias(
         ((client.data as any).apiKeyRecord as any)?.provider ?? null,
       );
-      const internalWho = lockedKeyProv ??
-        await this.providerResolver.getResolvedInternalProviderNameForWebsocket();
+      const internalWho =
+        lockedKeyProv ??
+        (await this.providerResolver.getResolvedInternalProviderNameForWebsocket());
       const clientProviderWho = internalToClientProviderName(internalWho);
 
       // Resolve pairs for better diagnostics
@@ -1488,7 +1607,9 @@ export class MarketDataGateway
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
         const exMap: Map<string, any> = (provider as any)?.resolveExchanges
-          ? await (provider as any).resolveExchanges(tokens.map((t) => String(t)))
+          ? await (provider as any).resolveExchanges(
+              tokens.map((t) => String(t)),
+            )
           : new Map();
         pairs = tokens
           .filter((t) => exMap.has(String(t)))
@@ -1510,7 +1631,10 @@ export class MarketDataGateway
       });
     } catch (e) {
       this.logger.warn('whoami failed', e as any);
-      client.emit('error', { code: 'whoami_failed', message: 'Failed to retrieve identity' });
+      client.emit('error', {
+        code: 'whoami_failed',
+        message: 'Failed to retrieve identity',
+      });
     }
   }
 
@@ -1563,7 +1687,10 @@ export class MarketDataGateway
       });
     } catch (error) {
       this.logger.error('Error fetching historical data', error);
-      client.emit('error', { code: 'historical_failed', message: 'Failed to fetch historical data' });
+      client.emit('error', {
+        code: 'historical_failed',
+        message: 'Failed to fetch historical data',
+      });
     }
   }
 
@@ -1575,14 +1702,20 @@ export class MarketDataGateway
   @SubscribeMessage('set_mode')
   async handleSetMode(
     @MessageBody()
-    body: { instruments: Array<number | string>; mode: 'ltp' | 'ohlcv' | 'full' },
+    body: {
+      instruments: Array<number | string>;
+      mode: 'ltp' | 'ohlcv' | 'full';
+    },
     @ConnectedSocket() client: Socket,
   ) {
     try {
       const { instruments, mode } = body as any;
       const subscription = this.subscriptionRegistry.get(client.id);
       if (!subscription) {
-        client.emit('error', { code: 'not_connected', message: 'No active subscription context' });
+        client.emit('error', {
+          code: 'not_connected',
+          message: 'No active subscription context',
+        });
         return;
       }
 
@@ -1644,7 +1777,10 @@ export class MarketDataGateway
       const providerNameForResolve = this.streamService.activeProviderName;
       const uirIds: number[] = [];
       for (const token of tokens) {
-        const uirId = this.instrumentRegistry.resolveProviderToken(providerNameForResolve, token);
+        const uirId = this.instrumentRegistry.resolveProviderToken(
+          providerNameForResolve,
+          token,
+        );
         uirIds.push(uirId != null ? uirId : token);
       }
 
@@ -1675,7 +1811,10 @@ export class MarketDataGateway
       }
     } catch (e) {
       this.logger.error('Error handling set_mode', e);
-      client.emit('error', { code: 'set_mode_failed', message: 'Failed to set mode' });
+      client.emit('error', {
+        code: 'set_mode_failed',
+        message: 'Failed to set mode',
+      });
     }
   }
 
@@ -1694,7 +1833,9 @@ export class MarketDataGateway
       try {
         const provider = await this.providerResolver.resolveForWebsocket();
         const exMap: Map<string, any> = (provider as any)?.resolveExchanges
-          ? await (provider as any).resolveExchanges(tokens.map((t) => String(t)))
+          ? await (provider as any).resolveExchanges(
+              tokens.map((t) => String(t)),
+            )
           : new Map();
         pairs = tokens
           .filter((t) => exMap.has(String(t)))
@@ -1709,7 +1850,10 @@ export class MarketDataGateway
       });
     } catch (e) {
       this.logger.warn('list_subscriptions failed', e as any);
-      client.emit('error', { code: 'list_failed', message: 'Failed to list subscriptions' });
+      client.emit('error', {
+        code: 'list_failed',
+        message: 'Failed to list subscriptions',
+      });
     }
   }
 
@@ -1737,7 +1881,10 @@ export class MarketDataGateway
       });
     } catch (e) {
       this.logger.warn('unsubscribe_all failed', e as any);
-      client.emit('error', { code: 'unsubscribe_all_failed', message: 'Failed to unsubscribe all' });
+      client.emit('error', {
+        code: 'unsubscribe_all_failed',
+        message: 'Failed to unsubscribe all',
+      });
     }
   }
 
@@ -1769,7 +1916,10 @@ export class MarketDataGateway
       });
     } catch (e) {
       this.logger.warn('status failed', e as any);
-      client.emit('error', { code: 'status_failed', message: 'Failed to get status' });
+      client.emit('error', {
+        code: 'status_failed',
+        message: 'Failed to get status',
+      });
     }
   }
 

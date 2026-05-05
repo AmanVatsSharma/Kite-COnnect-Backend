@@ -12,7 +12,13 @@ import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.
 import { RedisService } from '@infra/redis/redis.service';
 import { createHash } from 'crypto';
 
-type RateLimitKey = 'quote' | 'ltp' | 'ohlc' | 'historical' | 'profile' | 'margins';
+type RateLimitKey =
+  | 'quote'
+  | 'ltp'
+  | 'ohlc'
+  | 'historical'
+  | 'profile'
+  | 'margins';
 
 @Injectable()
 export class FalconProviderAdapter {
@@ -33,7 +39,12 @@ export class FalconProviderAdapter {
   private async rateLimit(key: RateLimitKey): Promise<void> {
     try {
       const limits: Record<RateLimitKey, number> = {
-        quote: 1, ltp: 1, ohlc: 1, historical: 3, profile: 1, margins: 1,
+        quote: 1,
+        ltp: 1,
+        ohlc: 1,
+        historical: 3,
+        profile: 1,
+        margins: 1,
       };
       const rps = limits[key] || 1;
       const lockTtlMs = Math.floor(1000 / rps);
@@ -41,7 +52,9 @@ export class FalconProviderAdapter {
       const deadline = Date.now() + 5000;
       let acquired = false;
       while (!acquired && Date.now() < deadline) {
-        acquired = await this.redis.tryAcquireLock(lockKey, lockTtlMs).catch(() => true); // fail-open
+        acquired = await this.redis
+          .tryAcquireLock(lockKey, lockTtlMs)
+          .catch(() => true); // fail-open
         if (!acquired) await new Promise((r) => setTimeout(r, 50));
       }
     } catch {}
@@ -51,12 +64,17 @@ export class FalconProviderAdapter {
     const status = e?.response?.status;
     const code = e?.code;
     if (status && (status >= 500 || status === 429)) return true;
-    if (code && ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(String(code))) return true;
+    if (code && ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(String(code)))
+      return true;
     if (e?.message && /timeout/i.test(String(e.message))) return true;
     return false;
   }
 
-  private async withRetry<T>(op: () => Promise<T>, key: string, maxRetries = 2): Promise<T> {
+  private async withRetry<T>(
+    op: () => Promise<T>,
+    key: string,
+    maxRetries = 2,
+  ): Promise<T> {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await op();
@@ -67,14 +85,19 @@ export class FalconProviderAdapter {
           e as any,
         );
         if (!retryable || attempt === maxRetries) throw e;
-        await new Promise((r) => setTimeout(r, Math.min(1500 * Math.pow(2, attempt), 4000)));
+        await new Promise((r) =>
+          setTimeout(r, Math.min(1500 * Math.pow(2, attempt), 4000)),
+        );
       }
     }
     throw new Error('unreachable');
   }
 
   private tokensHash(tokens: string[]): string {
-    return createHash('sha1').update([...tokens].sort().join(',')).digest('hex').slice(0, 12);
+    return createHash('sha1')
+      .update([...tokens].sort().join(','))
+      .digest('hex')
+      .slice(0, 12);
   }
 
   private async getFromRedis<T>(key: string): Promise<T | null> {
@@ -85,7 +108,11 @@ export class FalconProviderAdapter {
     }
   }
 
-  private async setToRedis(key: string, value: any, ttl: number): Promise<void> {
+  private async setToRedis(
+    key: string,
+    value: any,
+    ttl: number,
+  ): Promise<void> {
     try {
       await this.redis.set(key, value, ttl);
     } catch {}
@@ -93,7 +120,9 @@ export class FalconProviderAdapter {
 
   // ─── LTP ──────────────────────────────────────────────────────────────────
 
-  async getLTP(tokens: string[]): Promise<Record<string, { last_price: number | null }>> {
+  async getLTP(
+    tokens: string[],
+  ): Promise<Record<string, { last_price: number | null }>> {
     await this.rateLimit('ltp');
     const out: Record<string, { last_price: number | null }> = {};
     const cachedHits: string[] = [];
@@ -107,15 +136,24 @@ export class FalconProviderAdapter {
     }
     const remaining = tokens.filter((t) => !cachedHits.includes(t));
     if (!remaining.length) return out;
-    const fresh = await this.withRetry(() => this.kite.getLTP(remaining), 'getLTP');
+    const fresh = await this.withRetry(
+      () => this.kite.getLTP(remaining),
+      'getLTP',
+    );
     for (const [k, v] of Object.entries<any>(fresh || {})) {
       const lp = Number(v?.last_price);
       out[k] = { last_price: Number.isFinite(lp) && lp > 0 ? lp : null };
       if (Number.isFinite(lp) && lp > 0) {
-        await this.setToRedis(`ltp:${k}`, { last_price: lp, ts: Date.now() }, 10);
+        await this.setToRedis(
+          `ltp:${k}`,
+          { last_price: lp, ts: Date.now() },
+          10,
+        );
       }
     }
-    tokens.forEach((t) => { if (!(t in out)) out[t] = { last_price: null }; });
+    tokens.forEach((t) => {
+      if (!(t in out)) out[t] = { last_price: null };
+    });
     return out;
   }
 
@@ -127,7 +165,10 @@ export class FalconProviderAdapter {
     const cacheKey = `falcon:quote:${this.tokensHash(tokens)}`;
     const cached = await this.getFromRedis<Record<string, any>>(cacheKey);
     if (cached) return cached;
-    const data = await this.withRetry(() => this.kite.getQuote(tokens), 'getQuote');
+    const data = await this.withRetry(
+      () => this.kite.getQuote(tokens),
+      'getQuote',
+    );
     if (data && typeof data === 'object') {
       await this.setToRedis(cacheKey, data, 5);
     }
@@ -142,7 +183,10 @@ export class FalconProviderAdapter {
     const cacheKey = `falcon:ohlc:${this.tokensHash(tokens)}`;
     const cached = await this.getFromRedis<Record<string, any>>(cacheKey);
     if (cached) return cached;
-    const data = await this.withRetry(() => this.kite.getOHLC(tokens), 'getOHLC');
+    const data = await this.withRetry(
+      () => this.kite.getOHLC(tokens),
+      'getOHLC',
+    );
     if (data && typeof data === 'object') {
       await this.setToRedis(cacheKey, data, 5);
     }
@@ -161,8 +205,10 @@ export class FalconProviderAdapter {
   private historicalTtl(interval: string, to: string): number {
     const today = new Date().toISOString().slice(0, 10);
     const isToday = to >= today;
-    if (['minute', '3minute', '5minute'].includes(interval)) return isToday ? 60 : 3600;
-    if (['10minute', '15minute', '30minute'].includes(interval)) return isToday ? 300 : 7200;
+    if (['minute', '3minute', '5minute'].includes(interval))
+      return isToday ? 60 : 3600;
+    if (['10minute', '15minute', '30minute'].includes(interval))
+      return isToday ? 300 : 7200;
     if (interval === '60minute') return isToday ? 900 : 21600;
     // day or unknown: static historical after market close
     return isToday ? 1800 : 86400;
@@ -181,7 +227,8 @@ export class FalconProviderAdapter {
     const cached = await this.getFromRedis<any>(cacheKey);
     if (cached) return cached;
     const data = await this.withRetry(
-      () => this.kite.getHistoricalData(token, from, to, interval, continuous, oi),
+      () =>
+        this.kite.getHistoricalData(token, from, to, interval, continuous, oi),
       'getHistoricalData',
     );
     if (data) {
@@ -195,7 +242,14 @@ export class FalconProviderAdapter {
    * Each request uses the same caching as getHistoricalData().
    */
   async getBatchHistoricalData(
-    requests: Array<{ token: number; from: string; to: string; interval: string; continuous?: boolean; oi?: boolean }>,
+    requests: Array<{
+      token: number;
+      from: string;
+      to: string;
+      interval: string;
+      continuous?: boolean;
+      oi?: boolean;
+    }>,
   ): Promise<Record<number, any>> {
     const MAX = 10;
     const capped = requests.slice(0, MAX);
@@ -207,7 +261,12 @@ export class FalconProviderAdapter {
         chunk.map(async (r) => {
           try {
             results[r.token] = await this.getHistoricalData(
-              r.token, r.from, r.to, r.interval, r.continuous ?? false, r.oi ?? false,
+              r.token,
+              r.from,
+              r.to,
+              r.interval,
+              r.continuous ?? false,
+              r.oi ?? false,
             );
           } catch (e) {
             results[r.token] = { error: (e as any)?.message || 'failed' };
@@ -228,7 +287,10 @@ export class FalconProviderAdapter {
     const cacheKey = 'falcon:profile';
     const cached = await this.getFromRedis<any>(cacheKey);
     if (cached) return cached;
-    const data = await this.withRetry(() => this.kite.getProfile(), 'getProfile');
+    const data = await this.withRetry(
+      () => this.kite.getProfile(),
+      'getProfile',
+    );
     if (data) {
       await this.setToRedis(cacheKey, data, 300);
     }
@@ -242,7 +304,10 @@ export class FalconProviderAdapter {
     const cacheKey = `falcon:margins:${segment || 'all'}`;
     const cached = await this.getFromRedis<any>(cacheKey);
     if (cached) return cached;
-    const data = await this.withRetry(() => this.kite.getMargins(segment), 'getMargins');
+    const data = await this.withRetry(
+      () => this.kite.getMargins(segment),
+      'getMargins',
+    );
     if (data) {
       await this.setToRedis(cacheKey, data, 60);
     }

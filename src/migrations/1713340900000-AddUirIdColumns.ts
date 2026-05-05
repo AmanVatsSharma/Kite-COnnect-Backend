@@ -19,7 +19,9 @@ export class AddUirIdColumns1713340900000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_instrument_mappings_uir_id`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_instrument_mappings_uir_id`,
+    );
     await queryRunner.query(`
       ALTER TABLE subscriptions DROP COLUMN IF EXISTS uir_id
     `);

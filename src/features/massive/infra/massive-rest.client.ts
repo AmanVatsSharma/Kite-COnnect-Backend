@@ -8,10 +8,7 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
-import {
-  MassiveAggsResponse,
-  MassiveAggResult,
-} from '../dto/massive-aggs.dto';
+import { MassiveAggsResponse, MassiveAggResult } from '../dto/massive-aggs.dto';
 import {
   MassiveSnapshotResponse,
   MassiveTicker,
@@ -57,7 +54,10 @@ export class MassiveRestClient {
       );
       return data?.ticker ?? null;
     } catch (err) {
-      this.logger.error(`[Massive REST] getSnapshot(${ticker}) failed`, err as any);
+      this.logger.error(
+        `[Massive REST] getSnapshot(${ticker}) failed`,
+        err as any,
+      );
       return null;
     }
   }
@@ -81,7 +81,10 @@ export class MassiveRestClient {
         result[t.ticker] = t;
       }
     } catch (err) {
-      this.logger.error(`[Massive REST] getSnapshots(${tickers.slice(0, 5).join(',')}) failed`, err as any);
+      this.logger.error(
+        `[Massive REST] getSnapshots(${tickers.slice(0, 5).join(',')}) failed`,
+        err as any,
+      );
     }
     return result;
   }
@@ -105,11 +108,16 @@ export class MassiveRestClient {
     try {
       const { data } = await this.http.get<MassiveAggsResponse>(
         `/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/${span.multiplier}/${span.timespan}/${from}/${to}`,
-        { params: { apiKey: this.apiKey, adjusted, sort: 'asc', limit: 50000 } },
+        {
+          params: { apiKey: this.apiKey, adjusted, sort: 'asc', limit: 50000 },
+        },
       );
       return data?.results ?? [];
     } catch (err) {
-      this.logger.error(`[Massive REST] getAggregates(${ticker}) failed`, err as any);
+      this.logger.error(
+        `[Massive REST] getAggregates(${ticker}) failed`,
+        err as any,
+      );
       return [];
     }
   }
@@ -141,7 +149,10 @@ export class MassiveRestClient {
       );
       return data;
     } catch (err) {
-      this.logger.error('[Massive REST] getReferenceTickers failed', err as any);
+      this.logger.error(
+        '[Massive REST] getReferenceTickers failed',
+        err as any,
+      );
       return null;
     }
   }

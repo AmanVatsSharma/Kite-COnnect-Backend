@@ -8,14 +8,14 @@
  */
 
 export interface MassiveAggResult {
-  v: number;    // volume
-  vw: number;   // VWAP
-  o: number;    // open
-  c: number;    // close
-  h: number;    // high
-  l: number;    // low
-  t: number;    // start of window (Unix ms)
-  n?: number;   // number of transactions
+  v: number; // volume
+  vw: number; // VWAP
+  o: number; // open
+  c: number; // close
+  h: number; // high
+  l: number; // low
+  t: number; // start of window (Unix ms)
+  n?: number; // number of transactions
 }
 
 export interface MassiveAggsResponse {

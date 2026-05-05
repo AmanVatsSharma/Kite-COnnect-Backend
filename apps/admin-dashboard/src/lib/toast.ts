@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 export const notify = {
   ok: (msg: string) => toast.success(msg),
   warn: (msg: string) => toast.warning(msg),
-  error: (msg: string, opts?: { duration?: number }) => toast.error(msg, { duration: opts?.duration ?? 8000 }),
+  error: (msg: string, opts?: { duration?: number }) =>
+    toast.error(msg, { duration: opts?.duration ?? 8000 }),
   info: (msg: string) => toast(msg),
 };

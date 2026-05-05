@@ -91,7 +91,9 @@ describe('RedisHealthIndicator', () => {
   });
 
   it('measures non-negative latencyMs even on failure', async () => {
-    const indicator = await build('ready', () => Promise.reject(new Error('timeout')));
+    const indicator = await build('ready', () =>
+      Promise.reject(new Error('timeout')),
+    );
     const result = await indicator.check();
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
   });

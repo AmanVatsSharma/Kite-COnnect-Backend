@@ -92,7 +92,11 @@ export class VortexInstrumentLtpService {
       for (const [exToken, priceData] of Object.entries(ltpByPairKey || {})) {
         const tokenNum = pairKeyToToken.get(exToken);
         const lp = priceData?.last_price;
-        if (tokenNum !== undefined && Number.isFinite(lp) && (lp as number) > 0) {
+        if (
+          tokenNum !== undefined &&
+          Number.isFinite(lp) &&
+          (lp as number) > 0
+        ) {
           result[tokenNum] = { last_price: lp as number };
         }
       }
@@ -103,7 +107,10 @@ export class VortexInstrumentLtpService {
 
       return result;
     } catch (error) {
-      this.logger.error('[VortexInstrumentLtpService] Error getting Vortex LTP', error);
+      this.logger.error(
+        '[VortexInstrumentLtpService] Error getting Vortex LTP',
+        error,
+      );
       return {};
     }
   }

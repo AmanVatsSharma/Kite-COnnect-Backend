@@ -141,7 +141,9 @@ export class BinanceProviderService
   ): Promise<Record<string, { last_price: number | null }>> {
     const result: Record<string, { last_price: number | null }> = {};
     if (!pairs?.length) return result;
-    const tokens = [...new Set(pairs.map((p) => String(p.token).toUpperCase()))];
+    const tokens = [
+      ...new Set(pairs.map((p) => String(p.token).toUpperCase())),
+    ];
     let ltpMap: Record<string, any> = {};
     try {
       ltpMap = await this.getLTP(tokens);

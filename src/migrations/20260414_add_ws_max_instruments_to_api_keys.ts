@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddWsMaxInstrumentsToApiKeys1744646401000 implements MigrationInterface {
+export class AddWsMaxInstrumentsToApiKeys1744646401000
+  implements MigrationInterface
+{
   name = 'AddWsMaxInstrumentsToApiKeys1744646401000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

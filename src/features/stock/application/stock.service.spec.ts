@@ -112,7 +112,11 @@ describe('StockService', () => {
         },
         {
           provide: getRepositoryToken(InstrumentMapping),
-          useValue: { findOne: jest.fn(), save: jest.fn(), create: jest.fn((v) => v) },
+          useValue: {
+            findOne: jest.fn(),
+            save: jest.fn(),
+            create: jest.fn((v) => v),
+          },
         },
         {
           provide: KiteConnectService,
@@ -130,9 +134,15 @@ describe('StockService', () => {
           provide: MarketDataGateway,
           useValue: mockMarketDataGateway,
         },
-        { provide: MarketDataProviderResolverService, useValue: mockProviderResolver },
+        {
+          provide: MarketDataProviderResolverService,
+          useValue: mockProviderResolver,
+        },
         { provide: VortexInstrumentService, useValue: {} },
-        { provide: NativeWsService, useValue: { broadcastMarketData: jest.fn() } },
+        {
+          provide: NativeWsService,
+          useValue: { broadcastMarketData: jest.fn() },
+        },
         { provide: LtpMemoryCacheService, useValue: mockLtpCache },
         { provide: MetricsService, useValue: mockMetrics },
       ],
@@ -258,9 +268,10 @@ describe('StockService', () => {
       const result = await service.getQuotes([738561]);
 
       expect(result).toEqual(mockQuotes);
-      expect(mockRequestBatchingService.getQuote).toHaveBeenCalledWith([
-        '738561',
-      ], expect.anything());
+      expect(mockRequestBatchingService.getQuote).toHaveBeenCalledWith(
+        ['738561'],
+        expect.anything(),
+      );
       expect(mockRedisService.cacheQuote).toHaveBeenCalledWith(
         ['738561'],
         mockQuotes,

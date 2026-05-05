@@ -8,7 +8,10 @@
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MarketDataProvider, TickerLike } from '@features/market-data/infra/market-data.provider';
+import {
+  MarketDataProvider,
+  TickerLike,
+} from '@features/market-data/infra/market-data.provider';
 import axios, { AxiosInstance } from 'axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -63,7 +66,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   private initialized = false;
   private http: AxiosInstance | null = null;
   /** True when both the HTTP client AND an access token are available for API calls. */
-  get isConfigured(): boolean { return this.http !== null && this.accessToken !== null; }
+  get isConfigured(): boolean {
+    return this.http !== null && this.accessToken !== null;
+  }
   private accessToken: string | null = null;
   private wsConnected = false;
   private reconnectAttempts = 0;
@@ -84,7 +89,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   private ltpRefreshInFlight: Set<string> = new Set();
   // Micro-aggregator for pair LTP to avoid 1s batching wait
   private pairAggTimer: NodeJS.Timeout | null = null;
-  private pairAggWindowMs = Math.max(5, Number(process.env.LTP_AGG_WINDOW_MS || 25));
+  private pairAggWindowMs = Math.max(
+    5,
+    Number(process.env.LTP_AGG_WINDOW_MS || 25),
+  );
   private pairAggRequests: Array<{
     keys: string[];
     resolve: (v: Record<string, { last_price: number | null }>) => void;
@@ -94,11 +102,21 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   // Hotset warmer (WS) — gated by env
   private hotsetEnabled =
     String(process.env.VORTEX_HOTSET_WARMER || '').toLowerCase() === 'true';
-  private hotsetMax = Math.max(1, Number(process.env.VORTEX_HOTSET_SIZE || 800));
+  private hotsetMax = Math.max(
+    1,
+    Number(process.env.VORTEX_HOTSET_SIZE || 800),
+  );
   private hotsetRecent: Map<string, number> = new Map(); // token -> lastSeenMs
   private hotsetTimer: NodeJS.Timeout | null = null;
   // Simple circuit breaker per REST key
-  private breaker: Record<string, { state: 'closed' | 'open' | 'half_open'; failures: number; nextAttemptAt: number }> = {
+  private breaker: Record<
+    string,
+    {
+      state: 'closed' | 'open' | 'half_open';
+      failures: number;
+      nextAttemptAt: number;
+    }
+  > = {
     quotes: { state: 'closed', failures: 0, nextAttemptAt: 0 },
     ltp: { state: 'closed', failures: 0, nextAttemptAt: 0 },
     ohlc: { state: 'closed', failures: 0, nextAttemptAt: 0 },
@@ -112,7 +130,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       const status = e?.response?.status;
       const code = e?.code;
       if (status && (status >= 500 || status === 429)) return true;
-      if (code && ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(String(code))) return true;
+      if (
+        code &&
+        ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(String(code))
+      )
+        return true;
       // Axios timeout
       if (e?.message && /timeout/i.test(String(e.message))) return true;
       return false;
@@ -125,7 +147,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     const b = this.breaker[key];
     const now = Date.now();
     if (b.state === 'open' && now < b.nextAttemptAt) {
-      this.logger.warn(`[Vortex] Circuit OPEN for ${key}; short-circuiting request`);
+      this.logger.warn(
+        `[Vortex] Circuit OPEN for ${key}; short-circuiting request`,
+      );
       return false;
     }
     if (b.state === 'open' && now >= b.nextAttemptAt) {
@@ -150,11 +174,17 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     if (b.failures >= this.breakerFailureThreshold) {
       b.state = 'open';
       b.nextAttemptAt = Date.now() + this.breakerOpenMs;
-      this.logger.error(`[Vortex] Circuit OPENED for ${key} after ${b.failures} failures; cooling for ${this.breakerOpenMs}ms`);
+      this.logger.error(
+        `[Vortex] Circuit OPENED for ${key} after ${b.failures} failures; cooling for ${this.breakerOpenMs}ms`,
+      );
     }
   }
 
-  private async httpGet(url: string, key: 'quotes' | 'ltp' | 'ohlc' | 'history', timeoutOverride?: number): Promise<any | null> {
+  private async httpGet(
+    url: string,
+    key: 'quotes' | 'ltp' | 'ohlc' | 'history',
+    timeoutOverride?: number,
+  ): Promise<any | null> {
     if (!this.http) return null;
     if (!this.breakerBefore(key)) return null;
     const maxRetries = 2;
@@ -168,7 +198,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         return resp;
       } catch (e) {
         const retryable = this.isRetryableError(e);
-        this.logger.warn(`[Vortex] HTTP GET failed (${key}) attempt ${attempt + 1}/${maxRetries + 1} ${retryable ? '(retryable)' : ''}`, e as any);
+        this.logger.warn(
+          `[Vortex] HTTP GET failed (${key}) attempt ${attempt + 1}/${maxRetries + 1} ${retryable ? '(retryable)' : ''}`,
+          e as any,
+        );
         this.breakerFailure(key);
         if (attempt < maxRetries && retryable) {
           const backoff = Math.min(1500 * Math.pow(2, attempt), 5000);
@@ -182,7 +215,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     return null;
   }
 
-  private async getCachedLtpForTokens(tokens: string[], opts?: { staleWithinMs?: number }): Promise<Record<string, { last_price: number | null }>> {
+  private async getCachedLtpForTokens(
+    tokens: string[],
+    opts?: { staleWithinMs?: number },
+  ): Promise<Record<string, { last_price: number | null }>> {
     const out: Record<string, { last_price: number | null }> = {};
     try {
       // 1) In-memory cache
@@ -190,13 +226,24 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         opts?.staleWithinMs && opts.staleWithinMs > 0
           ? this.ltpCache.getManyStaleWithin(tokens, opts.staleWithinMs)
           : this.ltpCache.getMany(tokens);
-      for (const t of tokens) out[String(t)] = { last_price: mem[String(t)]?.last_price ?? null } as any;
+      for (const t of tokens)
+        out[String(t)] = {
+          last_price: mem[String(t)]?.last_price ?? null,
+        } as any;
       // 2) Redis fallback for misses
-      const misses = tokens.filter((t) => !Number.isFinite(out[String(t)]?.last_price as any));
+      const misses = tokens.filter(
+        (t) => !Number.isFinite(out[String(t)]?.last_price as any),
+      );
       for (const t of misses) {
         try {
-          const cached = await this.redisService.get<{ last_price: number }>(`ltp:${t}`);
-          if (cached && Number.isFinite((cached as any).last_price) && ((cached as any).last_price > 0)) {
+          const cached = await this.redisService.get<{ last_price: number }>(
+            `ltp:${t}`,
+          );
+          if (
+            cached &&
+            Number.isFinite((cached as any).last_price) &&
+            (cached as any).last_price > 0
+          ) {
             out[String(t)] = { last_price: (cached as any).last_price } as any;
             this.ltpCache.set(t, (cached as any).last_price);
           }
@@ -210,7 +257,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     try {
       if (Number.isFinite(price) && (price as any) > 0) {
         this.ltpCache.set(token, price as any);
-        await this.redisService.set(`ltp:${token}`, { last_price: price, ts: Date.now() }, 10);
+        await this.redisService.set(
+          `ltp:${token}`,
+          { last_price: price, ts: Date.now() },
+          10,
+        );
         this.noteHotset(token);
       }
     } catch {}
@@ -248,8 +299,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   async initialize(): Promise<void> {
     try {
       // For now, we do not fail if creds are missing; the provider stays in degraded mode
-      const apiKey = this.vortexApiKeyOverride || this.configService.get('VORTEX_API_KEY');
-      const baseUrl = this.vortexBaseUrlOverride || this.configService.get('VORTEX_BASE_URL');
+      const apiKey =
+        this.vortexApiKeyOverride || this.configService.get('VORTEX_API_KEY');
+      const baseUrl =
+        this.vortexBaseUrlOverride || this.configService.get('VORTEX_BASE_URL');
       if (!apiKey || !baseUrl) {
         this.logger.warn(
           '[Vortex] API key or base URL not configured. REST methods will return empty.',
@@ -437,8 +490,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       );
       let data: any = {};
       if (toQuery.length > 0) {
-        const resp = await this.providerQueue.execute('quotes' as any, async () =>
-          this.httpGet(url, 'quotes'),
+        const resp = await this.providerQueue.execute(
+          'quotes' as any,
+          async () => this.httpGet(url, 'quotes'),
         );
         data = (resp as any)?.data?.data || {};
       }
@@ -488,7 +542,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     }
   }
 
-  async getLTP(tokens: string[], options?: { bypassCache?: boolean; backgroundRefresh?: boolean }): Promise<Record<string, any>> {
+  async getLTP(
+    tokens: string[],
+    options?: { bypassCache?: boolean; backgroundRefresh?: boolean },
+  ): Promise<Record<string, any>> {
     try {
       await this.ensureTokenLoaded();
       if (!this.http) {
@@ -500,7 +557,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       await this.rateLimit('ltp');
       // Try cache first unless bypassCache=true
       const useCache = !(options && options.bypassCache === true);
-      const cache = useCache ? await this.getCachedLtpForTokens(tokens, { staleWithinMs: this.swrServeStaleMs }) : {};
+      const cache = useCache
+        ? await this.getCachedLtpForTokens(tokens, {
+            staleWithinMs: this.swrServeStaleMs,
+          })
+        : {};
       const missingForCache = tokens.filter((t) => {
         const lp = cache[String(t)]?.last_price;
         return !(Number.isFinite(lp as any) && (lp as any) > 0);
@@ -628,7 +689,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       const useCache = !(options && options.bypassCache === true);
       if (useCache && tokenByKey.size) {
         const cached = await this.getCachedLtpForTokens(
-          Array.from(new Set(Array.from(tokenByKey.values()).map((n) => String(n)))),
+          Array.from(
+            new Set(Array.from(tokenByKey.values()).map((n) => String(n))),
+          ),
           { staleWithinMs: this.swrServeStaleMs },
         );
         for (const [pairKey, tok] of tokenByKey.entries()) {
@@ -659,8 +722,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
           `[Vortex] getLTPByPairs request: pairs=${chunk.length}, url=${url}`,
         );
         try {
-          const resp = await this.providerQueue.execute('ltp' as any, async () =>
-            this.httpGet(url, 'ltp'),
+          const resp = await this.providerQueue.execute(
+            'ltp' as any,
+            async () => this.httpGet(url, 'ltp'),
           );
           const data = (resp as any)?.data?.data || {};
           for (const [exToken, quote] of Object.entries<any>(data)) {
@@ -670,7 +734,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
             const lp = Number.isFinite(raw) && raw > 0 ? raw : null;
             if (lp !== null) withLtp++;
             result[exToken] = { last_price: lp };
-            const tok = Number(String(exToken.split('-').pop()))
+            const tok = Number(String(exToken.split('-').pop()));
             if (Number.isFinite(tok)) await this.setCachedLtp(tok, lp);
           }
         } catch (e) {
@@ -690,13 +754,18 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       if (useCache && (options?.backgroundRefresh ?? true)) {
         const noneFetched = remainingKeys.length === 0 && tokenByKey.size > 0;
         if (noneFetched) {
-          const tokens = Array.from(new Set(Array.from(tokenByKey.values()).map((n) => String(n))));
+          const tokens = Array.from(
+            new Set(Array.from(tokenByKey.values()).map((n) => String(n))),
+          );
           this.refreshLtpInBackground(tokens);
         }
       }
       return result;
     } catch (error) {
-      this.logger.error('[Vortex] getLTPByPairs failed (non-fatal)', error as any);
+      this.logger.error(
+        '[Vortex] getLTPByPairs failed (non-fatal)',
+        error as any,
+      );
       return result;
     }
   }
@@ -712,14 +781,20 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     options?: { bypassCache?: boolean; backgroundRefresh?: boolean },
   ): Promise<Record<string, { last_price: number | null }>> {
     const keys = (pairs || [])
-      .map((p) => `${String(p?.exchange || '').toUpperCase()}-${String(p?.token ?? '').trim()}`)
+      .map(
+        (p) =>
+          `${String(p?.exchange || '').toUpperCase()}-${String(p?.token ?? '').trim()}`,
+      )
       .filter((k) => !!k && /^[A-Z_]+-\d+$/.test(k));
     if (keys.length === 0) return {};
     return new Promise((resolve, reject) => {
       try {
         this.pairAggRequests.push({ keys, resolve, reject, options });
         if (!this.pairAggTimer) {
-          this.pairAggTimer = setTimeout(() => this.flushPairAgg(), this.pairAggWindowMs);
+          this.pairAggTimer = setTimeout(
+            () => this.flushPairAgg(),
+            this.pairAggWindowMs,
+          );
         }
       } catch (e) {
         reject(e);
@@ -737,11 +812,19 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     try {
       const unionKeys = Array.from(new Set(batch.flatMap((b) => b.keys)));
       // Build pairs from keys
-      const unionPairs: Array<{ exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string | number }> = [];
+      const unionPairs: Array<{
+        exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+        token: string | number;
+      }> = [];
       for (const k of unionKeys) {
         const [ex, tok] = k.split('-');
         if (ex && tok && /^\d+$/.test(tok)) {
-          if (ex === 'NSE_EQ' || ex === 'NSE_FO' || ex === 'NSE_CUR' || ex === 'MCX_FO') {
+          if (
+            ex === 'NSE_EQ' ||
+            ex === 'NSE_FO' ||
+            ex === 'NSE_CUR' ||
+            ex === 'MCX_FO'
+          ) {
             unionPairs.push({ exchange: ex as any, token: tok });
           }
         }
@@ -874,8 +957,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       const toSec = Math.floor(new Date(to).getTime() / 1000);
       const resolution = this.mapInterval(interval);
       const url = `/data/history?exchange=${exchange}&token=${token}&to=${toSec}&from=${fromSec}&resolution=${resolution}`;
-      const resp = await this.providerQueue.execute('history' as any, async () =>
-        this.httpGet(url, 'history'),
+      const resp = await this.providerQueue.execute(
+        'history' as any,
+        async () => this.httpGet(url, 'history'),
       );
       const d = (resp as any)?.data || {};
       if (d?.s !== 'ok') return { candles: [] };
@@ -904,7 +988,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   initializeTicker(): TickerLike {
     if (this.ticker) return this.ticker;
     const streamUrl =
-      this.vortexWsUrlOverride || this.configService.get('VORTEX_WS_URL') || 'wss://wire.rupeezy.in/ws';
+      this.vortexWsUrlOverride ||
+      this.configService.get('VORTEX_WS_URL') ||
+      'wss://wire.rupeezy.in/ws';
     this.logger.log(
       `[Vortex] Using WebSocket URL: ${streamUrl.replace(/auth_token=[^&]*/, 'auth_token=***')}`,
     );
@@ -919,7 +1005,8 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       maxShards,
       maxSubscriptionsPerSocket: this.maxSubscriptionsPerSocket,
       logger: this.logger,
-      parseBinaryTicks: (buf: Buffer) => parseVortexBinaryTicks(buf, this.logger),
+      parseBinaryTicks: (buf: Buffer) =>
+        parseVortexBinaryTicks(buf, this.logger),
       getExchangesForTokens: (tokens: string[]) =>
         this.getExchangesForTokens(tokens),
       getAccessToken: () => self.accessToken,
@@ -983,7 +1070,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
 
   // Public: prime the ticker's exchange mapping so subscribe() can avoid defaults
   primeExchangeMapping(
-    pairs: Array<{ token: number; exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' }>,
+    pairs: Array<{
+      token: number;
+      exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+    }>,
   ) {
     try {
       const t = this.getTicker() as any;
@@ -1000,7 +1090,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   }
 
   private authHeaders(): Record<string, string> {
-    const apiKey = this.vortexApiKeyOverride || this.configService.get('VORTEX_API_KEY') || '';
+    const apiKey =
+      this.vortexApiKeyOverride ||
+      this.configService.get('VORTEX_API_KEY') ||
+      '';
     const bearer = this.accessToken || '';
     const h: Record<string, string> = { 'x-api-key': apiKey };
     if (bearer) h['Authorization'] = `Bearer ${bearer}`;
@@ -1048,18 +1141,24 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
    * Debug-only: Resolve exchanges for tokens with source attribution.
    * Order: vortex_instruments → instrument_mappings(provider=vortex) → instruments (legacy)
    */
-  async debugResolveExchanges(
-    tokens: string[],
-  ): Promise<
+  async debugResolveExchanges(tokens: string[]): Promise<
     Array<{
       token: string;
       exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO' | null;
-      source: 'vortex_instruments' | 'instrument_mappings' | 'instruments' | null;
+      source:
+        | 'vortex_instruments'
+        | 'instrument_mappings'
+        | 'instruments'
+        | null;
     }>
   > {
     try {
       const input = Array.from(
-        new Set(tokens.map((t) => String(t || '').trim()).filter((t) => /^\d+$/.test(t))),
+        new Set(
+          tokens
+            .map((t) => String(t || '').trim())
+            .filter((t) => /^\d+$/.test(t)),
+        ),
       );
       const nums = input.map((t) => Number(t));
       const resolved = new Map<string, { exchange: any; source: any }>();
@@ -1076,12 +1175,18 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         for (const r of viRows) {
           const ex = this.normalizeExchange(r.exchange || '');
           if (ex) {
-            resolved.set(String(r.token), { exchange: ex, source: 'vortex_instruments' });
+            resolved.set(String(r.token), {
+              exchange: ex,
+              source: 'vortex_instruments',
+            });
             viCount++;
           }
         }
       } catch (e) {
-        this.logger.warn('[Vortex] debugResolveExchanges: vi lookup failed', e as any);
+        this.logger.warn(
+          '[Vortex] debugResolveExchanges: vi lookup failed',
+          e as any,
+        );
       }
 
       // 2) instrument_mappings (provider=vortex)
@@ -1089,7 +1194,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         const remaining = nums.filter((n) => !resolved.has(String(n)));
         if (remaining.length) {
           const maps = await this.instrumentMappingRepo.find({
-            where: { provider: 'vortex', instrument_token: In(remaining) } as any,
+            where: {
+              provider: 'vortex',
+              instrument_token: In(remaining),
+            } as any,
             select: ['provider_token', 'instrument_token'] as any,
           });
           for (const m of maps) {
@@ -1106,7 +1214,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
           }
         }
       } catch (e) {
-        this.logger.warn('[Vortex] debugResolveExchanges: mapping lookup failed', e as any);
+        this.logger.warn(
+          '[Vortex] debugResolveExchanges: mapping lookup failed',
+          e as any,
+        );
       }
 
       // 3) legacy instruments
@@ -1129,24 +1240,39 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
           }
         }
       } catch (e) {
-        this.logger.warn('[Vortex] debugResolveExchanges: legacy lookup failed', e as any);
+        this.logger.warn(
+          '[Vortex] debugResolveExchanges: legacy lookup failed',
+          e as any,
+        );
       }
 
       const out = input.map((t) => {
         const r = resolved.get(t);
-        return { token: t, exchange: (r?.exchange as any) || null, source: (r?.source as any) || null };
+        return {
+          token: t,
+          exchange: (r?.exchange as any) || null,
+          source: (r?.source as any) || null,
+        };
       });
 
       this.logger.debug('[Vortex Debug] resolve summary', {
         requested: input.length,
         resolved: out.filter((x) => !!x.exchange).length,
-        via: { vortex_instruments: viCount, instrument_mappings: imCount, instruments: instCount },
+        via: {
+          vortex_instruments: viCount,
+          instrument_mappings: imCount,
+          instruments: instCount,
+        },
       });
 
       return out;
     } catch (e) {
       this.logger.warn('[Vortex] debugResolveExchanges failed', e as any);
-      return tokens.map((t) => ({ token: String(t || ''), exchange: null, source: null }));
+      return tokens.map((t) => ({
+        token: String(t || ''),
+        exchange: null,
+        source: null,
+      }));
     }
   }
 
@@ -1156,7 +1282,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
   async debugBuildQuery(
     tokens: string[],
     mode: 'ltp' | 'ohlc' | 'full' = 'ltp',
-  ): Promise<{ pairs: string[]; url: string; stats: { requested: number; included: number; unresolved: number } }> {
+  ): Promise<{
+    pairs: string[];
+    url: string;
+    stats: { requested: number; included: number; unresolved: number };
+  }> {
     const resolution = await this.debugResolveExchanges(tokens);
     const pairs = resolution
       .filter((r) => !!r.exchange)
@@ -1171,7 +1301,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     return {
       pairs,
       url,
-      stats: { requested: tokens.length, included: pairs.length, unresolved: tokens.length - pairs.length },
+      stats: {
+        requested: tokens.length,
+        included: pairs.length,
+        unresolved: tokens.length - pairs.length,
+      },
     };
   }
 
@@ -1220,11 +1354,15 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
 
       // 2) Use instrument_mappings (provider=vortex)
       const missingAfterVI = nums.filter((n) => !map.has(String(n)));
-      let imRows: Array<{ provider_token: string; instrument_token: number }> = [];
+      let imRows: Array<{ provider_token: string; instrument_token: number }> =
+        [];
       if (missingAfterVI.length) {
         try {
           imRows = await this.instrumentMappingRepo.find({
-            where: { provider: 'vortex', instrument_token: In(missingAfterVI) } as any,
+            where: {
+              provider: 'vortex',
+              instrument_token: In(missingAfterVI),
+            } as any,
             select: ['provider_token', 'instrument_token'] as any,
           });
           for (const m of imRows) {
@@ -1234,7 +1372,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
             if (ex) map.set(String(m.instrument_token), ex);
           }
         } catch (e) {
-          this.logger.warn('[Vortex] Failed instrument_mappings lookup', e as any);
+          this.logger.warn(
+            '[Vortex] Failed instrument_mappings lookup',
+            e as any,
+          );
         }
       }
 
@@ -1251,7 +1392,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
             if (ex) map.set(String(r.instrument_token), ex);
           }
         } catch (e) {
-          this.logger.warn('[Vortex] Legacy instruments lookup failed', e as any);
+          this.logger.warn(
+            '[Vortex] Legacy instruments lookup failed',
+            e as any,
+          );
         }
       }
 
@@ -1342,15 +1486,24 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       if (!pending.length) return;
       (async () => {
         try {
-          await this.getLTP(pending, { bypassCache: true, backgroundRefresh: false });
+          await this.getLTP(pending, {
+            bypassCache: true,
+            backgroundRefresh: false,
+          });
         } catch (e) {
-          this.logger.debug('[Vortex] Background LTP refresh failed (non-fatal)', e as any);
+          this.logger.debug(
+            '[Vortex] Background LTP refresh failed (non-fatal)',
+            e as any,
+          );
         } finally {
           pending.forEach((t) => this.ltpRefreshInFlight.delete(t));
         }
       })();
     } catch (e) {
-      this.logger.debug('[Vortex] refreshLtpInBackground scheduling failed', e as any);
+      this.logger.debug(
+        '[Vortex] refreshLtpInBackground scheduling failed',
+        e as any,
+      );
     }
   }
 
@@ -1362,7 +1515,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       // Soft cap map size to avoid unbounded growth
       if (this.hotsetRecent.size > this.hotsetMax * 4) {
         // Drop oldest quarter
-        const arr = Array.from(this.hotsetRecent.entries()).sort((a, b) => a[1] - b[1]);
+        const arr = Array.from(this.hotsetRecent.entries()).sort(
+          (a, b) => a[1] - b[1],
+        );
         const drop = Math.floor(arr.length / 4);
         for (let i = 0; i < drop; i++) this.hotsetRecent.delete(arr[i][0]);
       }
@@ -1378,9 +1533,14 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       try {
         (t as any)?.connect?.();
       } catch {}
-      const intervalMs = Math.max(10000, Number(process.env.VORTEX_HOTSET_INTERVAL_MS || 30000));
+      const intervalMs = Math.max(
+        10000,
+        Number(process.env.VORTEX_HOTSET_INTERVAL_MS || 30000),
+      );
       this.hotsetTimer = setInterval(() => this.warmHotsetOnce(), intervalMs);
-      this.logger.log(`[Vortex] Hotset warmer started (size=${this.hotsetMax})`);
+      this.logger.log(
+        `[Vortex] Hotset warmer started (size=${this.hotsetMax})`,
+      );
     } catch (e) {
       this.logger.warn('[Vortex] Hotset warmer failed to start', e as any);
     }
@@ -1400,7 +1560,9 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       if (!top.length) return;
       // Prime exchange mapping for better subscribe success
       try {
-        const exMap = await this.getExchangesForTokens(top.map((n) => String(n)));
+        const exMap = await this.getExchangesForTokens(
+          top.map((n) => String(n)),
+        );
         const pairs: Array<{ token: number; exchange: any }> = [];
         for (const n of top) {
           const ex = exMap.get(String(n));
@@ -1412,7 +1574,10 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       try {
         ticker.subscribe(top, 'ltp');
       } catch (e) {
-        this.logger.debug('[Vortex] Hotset subscribe failed (non-fatal)', e as any);
+        this.logger.debug(
+          '[Vortex] Hotset subscribe failed (non-fatal)',
+          e as any,
+        );
       }
     } catch (e) {
       this.logger.debug('[Vortex] warmHotsetOnce failed', e as any);
@@ -1476,20 +1641,33 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       apiKey: {
         masked: this.maskCred(this.vortexApiKeyOverride || envApiKey || null),
         hasValue: !!(this.vortexApiKeyOverride || envApiKey),
-        source: this.vortexApiKeyOverride ? 'redis' : (envApiKey ? 'env' : 'none'),
+        source: this.vortexApiKeyOverride
+          ? 'redis'
+          : envApiKey
+            ? 'env'
+            : 'none',
       },
       baseUrl: {
         value: this.vortexBaseUrlOverride || envBaseUrl || null,
-        source: this.vortexBaseUrlOverride ? 'redis' : (envBaseUrl ? 'env' : 'none'),
+        source: this.vortexBaseUrlOverride
+          ? 'redis'
+          : envBaseUrl
+            ? 'env'
+            : 'none',
       },
       wsUrl: {
-        value: this.vortexWsUrlOverride || envWsUrl || 'wss://wire.rupeezy.in/ws',
-        source: this.vortexWsUrlOverride ? 'redis' : (envWsUrl ? 'env' : 'default'),
+        value:
+          this.vortexWsUrlOverride || envWsUrl || 'wss://wire.rupeezy.in/ws',
+        source: this.vortexWsUrlOverride
+          ? 'redis'
+          : envWsUrl
+            ? 'env'
+            : 'default',
       },
       appId: {
         masked: this.maskCred(this.vortexAppIdOverride || envAppId || null),
         hasValue: !!(this.vortexAppIdOverride || envAppId),
-        source: this.vortexAppIdOverride ? 'redis' : (envAppId ? 'env' : 'none'),
+        source: this.vortexAppIdOverride ? 'redis' : envAppId ? 'env' : 'none',
       },
       initialized: !!this.http,
       hasAccessToken: !!this.accessToken,

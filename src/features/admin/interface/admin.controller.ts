@@ -141,7 +141,9 @@ export class AdminController {
       ws_mode_rps:
         typeof body.ws_mode_rps === 'number' ? body.ws_mode_rps : null,
       ws_max_instruments:
-        typeof body.ws_max_instruments === 'number' ? body.ws_max_instruments : null,
+        typeof body.ws_max_instruments === 'number'
+          ? body.ws_max_instruments
+          : null,
       metadata: Object.keys(metadata).length > 0 ? metadata : null,
     });
     const saved = await this.apiKeyRepo.save(entity);
@@ -173,7 +175,10 @@ export class AdminController {
   @ApiOperation({ summary: 'Activate API key' })
   async activate(@Body() body: { key: string }) {
     await this.apiKeyRepo.update({ key: body.key }, { is_active: true });
-    await this.redis.publish('api_key_updates', JSON.stringify({ key: body.key }));
+    await this.redis.publish(
+      'api_key_updates',
+      JSON.stringify({ key: body.key }),
+    );
     return { success: true };
   }
 
@@ -198,7 +203,11 @@ export class AdminController {
         ws_subscribe_rps: { type: 'number' },
         ws_unsubscribe_rps: { type: 'number' },
         ws_mode_rps: { type: 'number' },
-        ws_max_instruments: { type: 'number', description: 'Max instruments per WS connection (null = global default)' },
+        ws_max_instruments: {
+          type: 'number',
+          description:
+            'Max instruments per WS connection (null = global default)',
+        },
         allowed_exchanges: { type: 'array', items: { type: 'string' } },
       },
       required: ['key'],
@@ -265,9 +274,12 @@ export class AdminController {
       // This might happen if key was deleted concurrently, but we checked existence above for metadata
       // If only simple limits were updated without metadata read, we might hit this.
       if (!metadataUpdated) {
-         // Double check if we didn't just do a findOne
-         const exists = await this.apiKeyRepo.count({ where: { key: body.key } });
-         if (!exists) throw new NotFoundException(`API key not found: ${body.key}`);
+        // Double check if we didn't just do a findOne
+        const exists = await this.apiKeyRepo.count({
+          where: { key: body.key },
+        });
+        if (!exists)
+          throw new NotFoundException(`API key not found: ${body.key}`);
       }
     }
 
@@ -393,10 +405,7 @@ export class AdminController {
     @Query('pageSize') pageSize?: string,
   ) {
     const pageNum = Math.max(1, Number(page) || 1);
-    const pageSizeNum = Math.min(
-      200,
-      Math.max(1, Number(pageSize) || 50),
-    );
+    const pageSizeNum = Math.min(200, Math.max(1, Number(pageSize) || 50));
 
     const [entities, total] = await this.apiKeyRepo.findAndCount({
       order: { created_at: 'DESC' },
@@ -458,10 +467,7 @@ export class AdminController {
       }
       normalized = n;
     }
-    await this.apiKeyRepo.update(
-      { key: body.key },
-      { provider: normalized },
-    );
+    await this.apiKeyRepo.update({ key: body.key }, { provider: normalized });
     return { success: true };
   }
 
@@ -477,7 +483,15 @@ export class AdminController {
       properties: {
         provider: {
           type: 'string',
-          enum: ['kite', 'vortex', 'falcon', 'vayu', 'massive', 'polygon', 'binance'],
+          enum: [
+            'kite',
+            'vortex',
+            'falcon',
+            'vayu',
+            'massive',
+            'polygon',
+            'binance',
+          ],
           description:
             'Internal or alias: kite/falcon (Falcon), vortex/vayu (Vayu), massive/polygon (Massive), binance (Binance)',
         },
@@ -554,15 +568,17 @@ export class AdminController {
   })
   async streamStatus() {
     const status = await this.stream.getStreamingStatus();
-    const kiteSubscribedInstruments = status.providers?.['falcon']?.subscribedCount ?? null;
+    const kiteSubscribedInstruments =
+      status.providers?.['falcon']?.subscribedCount ?? null;
     const registryStats = this.instrumentRegistry.getStats();
     return {
       ...status,
       kiteSubscribedInstruments,
       kiteUpstreamLimit: 3000,
-      kiteUtilizationPct: kiteSubscribedInstruments != null
-        ? Math.round((kiteSubscribedInstruments / 3000) * 100)
-        : null,
+      kiteUtilizationPct:
+        kiteSubscribedInstruments != null
+          ? Math.round((kiteSubscribedInstruments / 3000) * 100)
+          : null,
       providerHealth: status.providers,
       registry: registryStats,
     };
@@ -575,7 +591,8 @@ export class AdminController {
     const stats = (this.gateway as any)?.getConnectionStats?.();
     const streaming = await this.stream.getStreamingStatus();
     return {
-      protocol_version: (this.gateway as any)?.constructor?.PROTOCOL_VERSION || '2.0',
+      protocol_version:
+        (this.gateway as any)?.constructor?.PROTOCOL_VERSION || '2.0',
       namespace: '/market-data',
       connections: stats?.totalConnections ?? 0,
       subscriptions: stats?.subscriptions ?? [],
@@ -586,10 +603,15 @@ export class AdminController {
   }
 
   @Get('ws/instruments/top')
-  @ApiOperation({ summary: 'Top N most-subscribed instruments by WS client ref count' })
+  @ApiOperation({
+    summary: 'Top N most-subscribed instruments by WS client ref count',
+  })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   async topInstruments(@Query('limit') limitRaw?: string) {
-    const limit = Math.max(1, Math.min(200, parseInt(String(limitRaw || '50')) || 50));
+    const limit = Math.max(
+      1,
+      Math.min(200, parseInt(String(limitRaw || '50')) || 50),
+    );
     const raw = this.wsInterest.getTopInstruments(limit);
     const data = raw.map((entry: { token: number; subscribers: number }) => ({
       ...entry,
@@ -612,7 +634,11 @@ export class AdminController {
       if (Number.isFinite(lim) && lim > 0) maxSubs = lim;
     } catch {}
     return {
-      rate_limits: { subscribe_rps: subscribeRps, unsubscribe_rps: unsubscribeRps, mode_rps: modeRps },
+      rate_limits: {
+        subscribe_rps: subscribeRps,
+        unsubscribe_rps: unsubscribeRps,
+        mode_rps: modeRps,
+      },
       maxSubscriptionsPerSocket: maxSubs,
       entitlement_defaults: ['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'],
     };
@@ -620,21 +646,56 @@ export class AdminController {
 
   // ===== WS Admin: Rate limits =====
   @Post('ws/rate-limits')
-  @ApiOperation({ summary: 'Update WebSocket event rate limits (process env scoped)' })
-  @ApiBody({ schema: { properties: { subscribe_rps: { type: 'number' }, unsubscribe_rps: { type: 'number' }, mode_rps: { type: 'number' } } } })
-  async setWsRateLimits(@Body() body: { subscribe_rps?: number; unsubscribe_rps?: number; mode_rps?: number }) {
-    if (typeof body.subscribe_rps === 'number') (process.env as any).WS_SUBSCRIBE_RPS = String(body.subscribe_rps);
-    if (typeof body.unsubscribe_rps === 'number') (process.env as any).WS_UNSUBSCRIBE_RPS = String(body.unsubscribe_rps);
-    if (typeof body.mode_rps === 'number') (process.env as any).WS_MODE_RPS = String(body.mode_rps);
+  @ApiOperation({
+    summary: 'Update WebSocket event rate limits (process env scoped)',
+  })
+  @ApiBody({
+    schema: {
+      properties: {
+        subscribe_rps: { type: 'number' },
+        unsubscribe_rps: { type: 'number' },
+        mode_rps: { type: 'number' },
+      },
+    },
+  })
+  async setWsRateLimits(
+    @Body()
+    body: {
+      subscribe_rps?: number;
+      unsubscribe_rps?: number;
+      mode_rps?: number;
+    },
+  ) {
+    if (typeof body.subscribe_rps === 'number')
+      (process.env as any).WS_SUBSCRIBE_RPS = String(body.subscribe_rps);
+    if (typeof body.unsubscribe_rps === 'number')
+      (process.env as any).WS_UNSUBSCRIBE_RPS = String(body.unsubscribe_rps);
+    if (typeof body.mode_rps === 'number')
+      (process.env as any).WS_MODE_RPS = String(body.mode_rps);
     return this.wsConfig();
   }
 
   // ===== WS Admin: Entitlements =====
   @Post('ws/entitlements')
-  @ApiOperation({ summary: 'Update API key exchange entitlements for WebSocket' })
-  @ApiBody({ schema: { properties: { apiKey: { type: 'string' }, exchanges: { type: 'array', items: { type: 'string' } } }, required: ['apiKey', 'exchanges'] } })
-  async setWsEntitlements(@Body() body: { apiKey: string; exchanges: string[] }) {
-    await this.apiKeyRepo.update({ key: body.apiKey }, { metadata: { exchanges: body.exchanges } as any });
+  @ApiOperation({
+    summary: 'Update API key exchange entitlements for WebSocket',
+  })
+  @ApiBody({
+    schema: {
+      properties: {
+        apiKey: { type: 'string' },
+        exchanges: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['apiKey', 'exchanges'],
+    },
+  })
+  async setWsEntitlements(
+    @Body() body: { apiKey: string; exchanges: string[] },
+  ) {
+    await this.apiKeyRepo.update(
+      { key: body.apiKey },
+      { metadata: { exchanges: body.exchanges } as any },
+    );
     // Notify gateways of update
     await this.apiKeyService.notifyApiKeyUpdate(body.apiKey);
     return { success: true };
@@ -642,19 +703,63 @@ export class AdminController {
 
   // ===== WS Admin: Blocklist =====
   @Post('ws/blocklist')
-  @ApiOperation({ summary: 'Add tokens/exchanges/apiKey/tenant to WS blocklist (Redis)' })
-  @ApiBody({ schema: { properties: { tokens: { type: 'array', items: { type: 'number' } }, exchanges: { type: 'array', items: { type: 'string' } }, apiKey: { type: 'string' }, tenant_id: { type: 'string' }, reason: { type: 'string' } } } })
-  async addBlock(@Body() body: { tokens?: number[]; exchanges?: string[]; apiKey?: string; tenant_id?: string; reason?: string }) {
-    if (Array.isArray(body.tokens)) await this.redis.set('ws:block:tokens', JSON.stringify(body.tokens), 24 * 3600);
-    if (Array.isArray(body.exchanges)) await this.redis.set('ws:block:exchanges', JSON.stringify(body.exchanges), 24 * 3600);
-    if (body.apiKey) await this.redis.set(`ws:block:apikey:${body.apiKey}`, '1', 24 * 3600);
-    if (body.tenant_id) await this.redis.set(`ws:block:tenant:${body.tenant_id}`, '1', 24 * 3600);
+  @ApiOperation({
+    summary: 'Add tokens/exchanges/apiKey/tenant to WS blocklist (Redis)',
+  })
+  @ApiBody({
+    schema: {
+      properties: {
+        tokens: { type: 'array', items: { type: 'number' } },
+        exchanges: { type: 'array', items: { type: 'string' } },
+        apiKey: { type: 'string' },
+        tenant_id: { type: 'string' },
+        reason: { type: 'string' },
+      },
+    },
+  })
+  async addBlock(
+    @Body()
+    body: {
+      tokens?: number[];
+      exchanges?: string[];
+      apiKey?: string;
+      tenant_id?: string;
+      reason?: string;
+    },
+  ) {
+    if (Array.isArray(body.tokens))
+      await this.redis.set(
+        'ws:block:tokens',
+        JSON.stringify(body.tokens),
+        24 * 3600,
+      );
+    if (Array.isArray(body.exchanges))
+      await this.redis.set(
+        'ws:block:exchanges',
+        JSON.stringify(body.exchanges),
+        24 * 3600,
+      );
+    if (body.apiKey)
+      await this.redis.set(`ws:block:apikey:${body.apiKey}`, '1', 24 * 3600);
+    if (body.tenant_id)
+      await this.redis.set(`ws:block:tenant:${body.tenant_id}`, '1', 24 * 3600);
     return { success: true };
   }
 
   @Post('ws/flush')
   @ApiOperation({ summary: 'Flush WS-related caches' })
-  @ApiBody({ schema: { properties: { caches: { type: 'array', items: { type: 'string' }, example: ['last_tick', 'exchange_map', 'ws_counters'] } }, required: ['caches'] } })
+  @ApiBody({
+    schema: {
+      properties: {
+        caches: {
+          type: 'array',
+          items: { type: 'string' },
+          example: ['last_tick', 'exchange_map', 'ws_counters'],
+        },
+      },
+      required: ['caches'],
+    },
+  })
   async flushCaches(@Body() body: { caches: string[] }) {
     // Best-effort demo implementation (targets may differ by Redis keys used in services)
     for (const c of body.caches || []) {
@@ -668,11 +773,23 @@ export class AdminController {
 
   @Post('ws/namespace/broadcast')
   @ApiOperation({ summary: 'Broadcast an event to WS namespace or room' })
-  @ApiBody({ schema: { properties: { event: { type: 'string' }, room: { type: 'string' }, payload: { type: 'object' } }, required: ['event', 'payload'] } })
-  async broadcast(@Body() body: { event: string; room?: string; payload: any }) {
+  @ApiBody({
+    schema: {
+      properties: {
+        event: { type: 'string' },
+        room: { type: 'string' },
+        payload: { type: 'object' },
+      },
+      required: ['event', 'payload'],
+    },
+  })
+  async broadcast(
+    @Body() body: { event: string; room?: string; payload: any },
+  ) {
     try {
       const server = (this.gateway as any)?.server;
-      if (!server) return { success: false, message: 'Gateway server not ready' };
+      if (!server)
+        return { success: false, message: 'Gateway server not ready' };
       if (body.room) server.to(body.room).emit(body.event, body.payload);
       else server.emit(body.event, body.payload);
       return { success: true };
@@ -696,13 +813,18 @@ export class AdminController {
   // ===== Provider Credential Management =====
 
   @Get('provider/kite/config')
-  @ApiOperation({ summary: 'Get Falcon (Kite) credential status — values are masked' })
+  @ApiOperation({
+    summary: 'Get Falcon (Kite) credential status — values are masked',
+  })
   async getKiteConfig() {
     return this.kiteProvider.getConfigStatus?.() || {};
   }
 
   @Post('provider/kite/credentials')
-  @ApiOperation({ summary: 'Set Falcon (Kite) API key + secret — persisted to DB, survives restart' })
+  @ApiOperation({
+    summary:
+      'Set Falcon (Kite) API key + secret — persisted to DB, survives restart',
+  })
   @ApiBody({
     schema: {
       type: 'object',
@@ -712,19 +834,26 @@ export class AdminController {
       },
     },
   })
-  async setKiteCredentials(@Body() body: { apiKey?: string; apiSecret?: string }) {
+  async setKiteCredentials(
+    @Body() body: { apiKey?: string; apiSecret?: string },
+  ) {
     await this.kiteProvider.updateApiCredentials?.(body.apiKey, body.apiSecret);
     return { success: true };
   }
 
   @Get('provider/vortex/config')
-  @ApiOperation({ summary: 'Get Vayu (Vortex) credential status — values are masked' })
+  @ApiOperation({
+    summary: 'Get Vayu (Vortex) credential status — values are masked',
+  })
   async getVortexConfig() {
     return this.vortexProvider.getConfigStatus?.() || {};
   }
 
   @Post('provider/vortex/credentials')
-  @ApiOperation({ summary: 'Set Vayu (Vortex) credentials — persisted to DB, survives restart' })
+  @ApiOperation({
+    summary:
+      'Set Vayu (Vortex) credentials — persisted to DB, survives restart',
+  })
   @ApiBody({
     schema: {
       type: 'object',
@@ -737,26 +866,40 @@ export class AdminController {
     },
   })
   async setVortexCredentials(
-    @Body() body: { apiKey?: string; appId?: string; baseUrl?: string; wsUrl?: string },
+    @Body()
+    body: {
+      apiKey?: string;
+      appId?: string;
+      baseUrl?: string;
+      wsUrl?: string;
+    },
   ) {
     await this.vortexProvider.updateApiCredentials?.(body);
     return { success: true };
   }
 
   @Get('provider/massive/config')
-  @ApiOperation({ summary: 'Get Massive (Polygon) credential status — values are masked' })
+  @ApiOperation({
+    summary: 'Get Massive (Polygon) credential status — values are masked',
+  })
   async getMassiveConfig() {
     return this.massiveProvider.getConfigStatus();
   }
 
   @Post('provider/massive/credentials')
-  @ApiOperation({ summary: 'Set Massive (Polygon) API key + options — persisted to DB, survives restart' })
+  @ApiOperation({
+    summary:
+      'Set Massive (Polygon) API key + options — persisted to DB, survives restart',
+  })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
         apiKey: { type: 'string', description: 'Polygon.io API key' },
-        realtime: { type: 'boolean', description: 'true = realtime feed, false = delayed (default)' },
+        realtime: {
+          type: 'boolean',
+          description: 'true = realtime feed, false = delayed (default)',
+        },
         assetClass: {
           type: 'string',
           enum: ['stocks', 'crypto', 'forex', 'options'],
@@ -774,14 +917,26 @@ export class AdminController {
 
   @Get('events')
   @ApiOperation({
-    summary: 'Recent admin stream events (connect, disconnect, auth_error, max_reconnect)',
-    description: 'Ring buffer of last 50 events published by KiteProviderService. Useful for the admin dashboard events feed.',
+    summary:
+      'Recent admin stream events (connect, disconnect, auth_error, max_reconnect)',
+    description:
+      'Ring buffer of last 50 events published by KiteProviderService. Useful for the admin dashboard events feed.',
   })
-  @ApiQuery({ name: 'limit', required: false, description: 'Max events to return (1–50, default 20)' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Max events to return (1–50, default 20)',
+  })
   async recentEvents(@Query('limit') limitRaw?: string) {
     const limit = Math.min(50, Math.max(1, Number(limitRaw) || 20));
     const raw = await this.redis.lrangeRaw('admin:events', 0, limit - 1);
-    const events = raw.map((s: string) => { try { return JSON.parse(s); } catch { return { raw: s }; } });
+    const events = raw.map((s: string) => {
+      try {
+        return JSON.parse(s);
+      } catch {
+        return { raw: s };
+      }
+    });
     return { success: true, data: events, total: events.length };
   }
 
@@ -796,16 +951,13 @@ export class AdminController {
       this.configService.get('AUDIT_HTTP_SAMPLE_RATE', '0.01'),
     );
     const httpAlwaysLogErrors =
-      this.configService.get('AUDIT_HTTP_ALWAYS_LOG_ERRORS', 'true') ===
-      'true';
+      this.configService.get('AUDIT_HTTP_ALWAYS_LOG_ERRORS', 'true') === 'true';
     const wsSubSampleRate = Number(
       this.configService.get('AUDIT_WS_SUB_SAMPLE_RATE', '0'),
     );
 
     return {
-      http_sample_rate: Number.isFinite(httpSampleRate)
-        ? httpSampleRate
-        : 0.01,
+      http_sample_rate: Number.isFinite(httpSampleRate) ? httpSampleRate : 0.01,
       http_always_log_errors: httpAlwaysLogErrors,
       ws_sub_sample_rate: Number.isFinite(wsSubSampleRate)
         ? wsSubSampleRate
@@ -828,10 +980,7 @@ export class AdminController {
     @Query('pageSize') pageSize?: string,
   ) {
     const pageNum = Math.max(1, Number(page) || 1);
-    const pageSizeNum = Math.min(
-      200,
-      Math.max(1, Number(pageSize) || 50),
-    );
+    const pageSizeNum = Math.min(200, Math.max(1, Number(pageSize) || 50));
 
     const where: any = {};
     if (blocked === 'true') where.blocked = true;

@@ -40,55 +40,249 @@
  * Last-updated: 2026-04-27
  */
 import { Logger } from '@nestjs/common';
-import { MassiveWebSocketClient, MassiveCanonicalTick } from './massive-websocket.client';
+import {
+  MassiveWebSocketClient,
+  MassiveCanonicalTick,
+} from './massive-websocket.client';
 import { MassiveRestClient } from './massive-rest.client';
 
 // ─── Asset-class classifier ───────────────────────────────────────────────────
 
 /** ISO 4217 3-letter currency codes actively traded as forex pairs on Massive. */
 const FOREX_CURRENCIES = new Set([
-  'AED', 'AFN', 'ALL', 'AMD', 'ANG', 'AOA', 'ARS', 'AUD', 'AWG', 'AZN',
-  'BAM', 'BBD', 'BDT', 'BGN', 'BHD', 'BND', 'BOB', 'BRL', 'BSD', 'BWP',
-  'BYN', 'BZD', 'CAD', 'CDF', 'CHF', 'CLP', 'CNH', 'CNY', 'COP', 'CRC',
-  'CZK', 'DJF', 'DKK', 'DOP', 'DZD', 'EGP', 'ETB', 'EUR', 'FJD', 'GBP',
-  'GEL', 'GHS', 'GMD', 'GTQ', 'GYD', 'HKD', 'HNL', 'HRK', 'HTG', 'HUF',
-  'IDR', 'ILS', 'INR', 'IQD', 'IRR', 'ISK', 'JMD', 'JOD', 'JPY', 'KES',
-  'KGS', 'KHR', 'KRW', 'KWD', 'KZT', 'LAK', 'LBP', 'LKR', 'LYD', 'MAD',
-  'MDL', 'MKD', 'MMK', 'MNT', 'MOP', 'MUR', 'MVR', 'MWK', 'MXN', 'MYR',
-  'MZN', 'NAD', 'NGN', 'NIO', 'NOK', 'NPR', 'NZD', 'OMR', 'PAB', 'PEN',
-  'PHP', 'PKR', 'PLN', 'PYG', 'QAR', 'RON', 'RSD', 'RUB', 'RWF', 'SAR',
-  'SCR', 'SDG', 'SEK', 'SGD', 'SLL', 'SOS', 'SRD', 'STD', 'SVC', 'SYP',
-  'SZL', 'THB', 'TJS', 'TMT', 'TND', 'TRY', 'TTD', 'TWD', 'TZS', 'UAH',
-  'UGX', 'USD', 'UYU', 'UZS', 'VEF', 'VND', 'VUV', 'WST', 'XAF', 'XCD',
-  'XOF', 'XPF', 'YER', 'ZAR', 'ZMW',
+  'AED',
+  'AFN',
+  'ALL',
+  'AMD',
+  'ANG',
+  'AOA',
+  'ARS',
+  'AUD',
+  'AWG',
+  'AZN',
+  'BAM',
+  'BBD',
+  'BDT',
+  'BGN',
+  'BHD',
+  'BND',
+  'BOB',
+  'BRL',
+  'BSD',
+  'BWP',
+  'BYN',
+  'BZD',
+  'CAD',
+  'CDF',
+  'CHF',
+  'CLP',
+  'CNH',
+  'CNY',
+  'COP',
+  'CRC',
+  'CZK',
+  'DJF',
+  'DKK',
+  'DOP',
+  'DZD',
+  'EGP',
+  'ETB',
+  'EUR',
+  'FJD',
+  'GBP',
+  'GEL',
+  'GHS',
+  'GMD',
+  'GTQ',
+  'GYD',
+  'HKD',
+  'HNL',
+  'HRK',
+  'HTG',
+  'HUF',
+  'IDR',
+  'ILS',
+  'INR',
+  'IQD',
+  'IRR',
+  'ISK',
+  'JMD',
+  'JOD',
+  'JPY',
+  'KES',
+  'KGS',
+  'KHR',
+  'KRW',
+  'KWD',
+  'KZT',
+  'LAK',
+  'LBP',
+  'LKR',
+  'LYD',
+  'MAD',
+  'MDL',
+  'MKD',
+  'MMK',
+  'MNT',
+  'MOP',
+  'MUR',
+  'MVR',
+  'MWK',
+  'MXN',
+  'MYR',
+  'MZN',
+  'NAD',
+  'NGN',
+  'NIO',
+  'NOK',
+  'NPR',
+  'NZD',
+  'OMR',
+  'PAB',
+  'PEN',
+  'PHP',
+  'PKR',
+  'PLN',
+  'PYG',
+  'QAR',
+  'RON',
+  'RSD',
+  'RUB',
+  'RWF',
+  'SAR',
+  'SCR',
+  'SDG',
+  'SEK',
+  'SGD',
+  'SLL',
+  'SOS',
+  'SRD',
+  'STD',
+  'SVC',
+  'SYP',
+  'SZL',
+  'THB',
+  'TJS',
+  'TMT',
+  'TND',
+  'TRY',
+  'TTD',
+  'TWD',
+  'TZS',
+  'UAH',
+  'UGX',
+  'USD',
+  'UYU',
+  'UZS',
+  'VEF',
+  'VND',
+  'VUV',
+  'WST',
+  'XAF',
+  'XCD',
+  'XOF',
+  'XPF',
+  'YER',
+  'ZAR',
+  'ZMW',
 ]);
 
 /** Well-known crypto base tokens traded on Massive. */
 const CRYPTO_BASES = new Set([
-  'AAVE', 'ADA', 'ALGO', 'APE', 'APT', 'ARB', 'ATOM', 'AVAX', 'AXS',
-  'BAL', 'BAT', 'BCH', 'BNB', 'BTC', 'BUSD', 'CHZ', 'COMP', 'CRV',
-  'DAI', 'DASH', 'DOGE', 'DOT', 'EOS', 'ETC', 'ETH', 'FIL', 'FTM',
-  'FLOW', 'GALA', 'GRT', 'HBAR', 'ICP', 'IMX', 'INJ', 'LINK', 'LRC',
-  'LTC', 'LUNA', 'MANA', 'MATIC', 'MKR', 'NEAR', 'NEO', 'ONE', 'OP',
-  'PEPE', 'QNT', 'RUNE', 'SAND', 'SHIB', 'SNX', 'SOL', 'STX', 'SUSHI',
-  'THETA', 'TRX', 'UNI', 'VET', 'WAVES', 'XLM', 'XMR', 'XRP', 'XTZ',
-  'YFI', 'ZEC', 'ZRX',
+  'AAVE',
+  'ADA',
+  'ALGO',
+  'APE',
+  'APT',
+  'ARB',
+  'ATOM',
+  'AVAX',
+  'AXS',
+  'BAL',
+  'BAT',
+  'BCH',
+  'BNB',
+  'BTC',
+  'BUSD',
+  'CHZ',
+  'COMP',
+  'CRV',
+  'DAI',
+  'DASH',
+  'DOGE',
+  'DOT',
+  'EOS',
+  'ETC',
+  'ETH',
+  'FIL',
+  'FTM',
+  'FLOW',
+  'GALA',
+  'GRT',
+  'HBAR',
+  'ICP',
+  'IMX',
+  'INJ',
+  'LINK',
+  'LRC',
+  'LTC',
+  'LUNA',
+  'MANA',
+  'MATIC',
+  'MKR',
+  'NEAR',
+  'NEO',
+  'ONE',
+  'OP',
+  'PEPE',
+  'QNT',
+  'RUNE',
+  'SAND',
+  'SHIB',
+  'SNX',
+  'SOL',
+  'STX',
+  'SUSHI',
+  'THETA',
+  'TRX',
+  'UNI',
+  'VET',
+  'WAVES',
+  'XLM',
+  'XMR',
+  'XRP',
+  'XTZ',
+  'YFI',
+  'ZEC',
+  'ZRX',
 ]);
 
 /** Quote currencies for crypto pairs — ordered longest-first to avoid prefix shadowing. */
-const CRYPTO_QUOTES = ['USDT', 'USDC', 'BUSD', 'USD', 'BTC', 'ETH', 'EUR', 'GBP'] as const;
+const CRYPTO_QUOTES = [
+  'USDT',
+  'USDC',
+  'BUSD',
+  'USD',
+  'BTC',
+  'ETH',
+  'EUR',
+  'GBP',
+] as const;
 
 /**
  * Classifies a Massive provider_token into its asset class.
  * Priority: forex (strict 6-char ISO test) → crypto (base+quote lookup) → stocks.
  */
-export function classifyMassiveSymbol(sym: string): 'stocks' | 'forex' | 'crypto' {
+export function classifyMassiveSymbol(
+  sym: string,
+): 'stocks' | 'forex' | 'crypto' {
   const s = sym.toUpperCase();
 
   if (s.length === 6) {
     const base = s.slice(0, 3);
     const quote = s.slice(3);
-    if (FOREX_CURRENCIES.has(base) && FOREX_CURRENCIES.has(quote)) return 'forex';
+    if (FOREX_CURRENCIES.has(base) && FOREX_CURRENCIES.has(quote))
+      return 'forex';
   }
 
   for (const q of CRYPTO_QUOTES) {
@@ -121,7 +315,9 @@ export class MassiveMultiStreamClient {
   readonly forex = new MassiveWebSocketClient();
   readonly crypto = new MassiveWebSocketClient();
 
-  private readonly subClients: ReadonlyArray<readonly [MassiveWebSocketClient, string]> = [
+  private readonly subClients: ReadonlyArray<
+    readonly [MassiveWebSocketClient, string]
+  > = [
     [this.stocks, 'stocks'],
     [this.forex, 'forex'],
     [this.crypto, 'crypto'],
@@ -134,8 +330,10 @@ export class MassiveMultiStreamClient {
   private pollTimer: NodeJS.Timeout | null = null;
   private isPollingActive = false;
   private pollInFlight = false;
-  private readonly pollIntervalMs: number =
-    parseInt(process.env.MASSIVE_POLL_INTERVAL_MS ?? '5000', 10);
+  private readonly pollIntervalMs: number = parseInt(
+    process.env.MASSIVE_POLL_INTERVAL_MS ?? '5000',
+    10,
+  );
 
   constructor() {
     for (const [client] of this.subClients) {
@@ -159,7 +357,9 @@ export class MassiveMultiStreamClient {
 
   private emit(event: TickerEvent, ...args: any[]): void {
     for (const h of this.handlers.get(event) ?? []) {
-      try { h(...args); } catch {}
+      try {
+        h(...args);
+      } catch {}
     }
   }
 
@@ -201,8 +401,14 @@ export class MassiveMultiStreamClient {
     if (b.crypto.length) this.crypto.unsubscribe(b.crypto);
   }
 
-  private bucket(tokens: (string | number)[]): Record<'stocks' | 'forex' | 'crypto', string[]> {
-    const out: Record<'stocks' | 'forex' | 'crypto', string[]> = { stocks: [], forex: [], crypto: [] };
+  private bucket(
+    tokens: (string | number)[],
+  ): Record<'stocks' | 'forex' | 'crypto', string[]> {
+    const out: Record<'stocks' | 'forex' | 'crypto', string[]> = {
+      stocks: [],
+      forex: [],
+      crypto: [],
+    };
     for (const t of tokens) {
       const s = String(t);
       if (!s || /^\d+$/.test(s)) continue;
@@ -216,14 +422,20 @@ export class MassiveMultiStreamClient {
    * Returning true during polling prevents the streaming layer's connect-retry loop.
    */
   isWsConnected(): boolean {
-    return this.isPollingActive || this.subClients.some(([c]) => c.isWsConnected());
+    return (
+      this.isPollingActive || this.subClients.some(([c]) => c.isWsConnected())
+    );
   }
 
   getSubscribedCount(): number {
     return this.subClients.reduce((n, [c]) => n + c.getSubscribedCount(), 0);
   }
 
-  getClientStatuses(): Array<{ name: string; isConnected: boolean; subscribedCount: number }> {
+  getClientStatuses(): Array<{
+    name: string;
+    isConnected: boolean;
+    subscribedCount: number;
+  }> {
     return this.subClients.map(([c, name]) => ({
       name,
       isConnected: c.isWsConnected() || this.isPollingActive,
@@ -236,17 +448,21 @@ export class MassiveMultiStreamClient {
   private maybeStartRestPolling(): void {
     if (this.isPollingActive) return;
     if (!this.rest?.isReady()) {
-      this.logger.warn('[MultiStream] REST client not ready — cannot start polling fallback');
+      this.logger.warn(
+        '[MultiStream] REST client not ready — cannot start polling fallback',
+      );
       return;
     }
     this.logger.warn(
       `[MultiStream] WS plan restriction detected — starting REST polling fallback ` +
-      `(interval=${this.pollIntervalMs}ms) for stocks + forex + crypto`,
+        `(interval=${this.pollIntervalMs}ms) for stocks + forex + crypto`,
     );
     this.isPollingActive = true;
     // Emit a synthetic connect so the streaming layer stops retrying and starts routing ticks.
     this.emit('connect');
-    this.pollTimer = setInterval(() => { void this.pollOnce(); }, this.pollIntervalMs);
+    this.pollTimer = setInterval(() => {
+      void this.pollOnce();
+    }, this.pollIntervalMs);
     // Fire immediately so first ticks arrive without waiting one full interval.
     void this.pollOnce();
   }
@@ -317,7 +533,7 @@ export class MassiveMultiStreamClient {
         token = sym.replace(/^C:/i, '');
         const bid = snap.lastQuote?.p ?? 0;
         const ask = snap.lastQuote?.P ?? 0;
-        price = bid && ask ? (bid + ask) / 2 : snap.day?.c ?? 0;
+        price = bid && ask ? (bid + ask) / 2 : (snap.day?.c ?? 0);
       } else if (assetClass === 'crypto') {
         // Strip "X:" prefix → "BTCUSD"
         token = sym.replace(/^X:/i, '');

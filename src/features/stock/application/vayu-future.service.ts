@@ -153,7 +153,7 @@ export class VayuFutureService {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
           const lp = ltpByPair?.[key]?.last_price ?? null;
           const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
-          return {
+          return this.vortexInstrumentService.enrichSingleWithUir({
             token: i.token,
             symbol: i.symbol,
             exchange: i.exchange,
@@ -164,7 +164,7 @@ export class VayuFutureService {
             lot_size: (i as any)?.lot_size,
             days_to_expiry: daysToExpiry,
             last_price: lp,
-          };
+          });
         });
         const ranked = this.rankFoInstruments(list, sortMode, undefined);
         const response = {
@@ -254,7 +254,7 @@ export class VayuFutureService {
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
-        return {
+        return this.vortexInstrumentService.enrichSingleWithUir({
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
@@ -265,11 +265,10 @@ export class VayuFutureService {
           lot_size: (i as any)?.lot_size,
           days_to_expiry: this.computeDaysToExpiry(i.expiry_date as any),
           last_price: lp,
-        };
+        });
       });
       const filtered = enriched.filter(
-        (v: any) =>
-          Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
+        (v: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
       );
       const ranked = this.rankFoInstruments(filtered, sortMode, undefined);
       const sliced = ranked.slice(0, requestedLimit);
@@ -390,7 +389,7 @@ export class VayuFutureService {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
         const daysToExpiry = this.computeDaysToExpiry(i.expiry_date as any);
-        return {
+        return this.vortexInstrumentService.enrichSingleWithUir({
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
@@ -401,13 +400,13 @@ export class VayuFutureService {
           lot_size: (i as any)?.lot_size,
           days_to_expiry: daysToExpiry,
           last_price: lp,
-        };
+        });
       });
 
       const filtered = ltpOnly
         ? contracts.filter(
             (c: any) =>
-              Number.isFinite(c?.last_price) && ((c?.last_price ?? 0) > 0),
+              Number.isFinite(c?.last_price) && (c?.last_price ?? 0) > 0,
           )
         : contracts;
 

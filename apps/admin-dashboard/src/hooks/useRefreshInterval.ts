@@ -7,12 +7,17 @@
  */
 
 import { useContext } from 'react';
-import { RefreshIntervalContext, type RefreshIntervalContextValue } from '../contexts/refresh-interval-context';
+import {
+  RefreshIntervalContext,
+  type RefreshIntervalContextValue,
+} from '../contexts/refresh-interval-context';
 
 export function useRefreshInterval(): RefreshIntervalContextValue {
   const ctx = useContext(RefreshIntervalContext);
   if (!ctx) {
-    throw new Error('useRefreshInterval must be used within RefreshIntervalProvider');
+    throw new Error(
+      'useRefreshInterval must be used within RefreshIntervalProvider',
+    );
   }
   return ctx;
 }

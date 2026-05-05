@@ -16,7 +16,7 @@ import { ObservabilityModule } from '@infra/observability/observability.module';
     forwardRef(() => StockModule),
     forwardRef(() => MarketDataModule),
     KiteConnectModule,
-    ObservabilityModule
+    ObservabilityModule,
   ],
   controllers: [HealthController],
 })

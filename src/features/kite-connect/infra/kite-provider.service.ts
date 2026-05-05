@@ -28,7 +28,10 @@ import { MetricsService } from '@infra/observability/metrics.service';
 import { FalconInstrument } from '@features/falcon/domain/falcon-instrument.entity';
 import { KiteSession } from '@features/kite-connect/domain/kite-session.entity';
 import { KiteConnect } from 'kiteconnect';
-import { KiteShardedTicker, KiteShardStatus } from '@features/kite-connect/infra/kite-sharded-ticker';
+import {
+  KiteShardedTicker,
+  KiteShardStatus,
+} from '@features/kite-connect/infra/kite-sharded-ticker';
 
 /** Kite segment → Vortex-style exchange label (used by resolveExchanges). */
 const SEGMENT_TO_EXCHANGE: Record<string, string> = {
@@ -91,7 +94,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       // Prefer DB override (set via admin endpoint), then env var
       let apiKey = this.configService.get<string>('KITE_API_KEY');
       try {
-        const dbApiKey = await this.appConfig.get(KiteProviderService.REDIS_API_KEY);
+        const dbApiKey = await this.appConfig.get(
+          KiteProviderService.REDIS_API_KEY,
+        );
         if (dbApiKey) apiKey = dbApiKey;
       } catch {}
       // Priority: Redis (freshest, set by OAuth callback) → env var (startup default) → DB session
@@ -117,7 +122,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
           });
           if (session?.access_token) {
             accessToken = session.access_token;
-            this.logger.log('[Kite] Loaded access token from kite_sessions DB table');
+            this.logger.log(
+              '[Kite] Loaded access token from kite_sessions DB table',
+            );
           }
         } catch {}
       }
@@ -155,10 +162,13 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     try {
       this.currentAccessToken = accessToken;
       if (!this.kite) {
-        let apiKey = this.currentApiKey || this.configService.get('KITE_API_KEY');
+        let apiKey =
+          this.currentApiKey || this.configService.get('KITE_API_KEY');
         // Last-resort: API key was saved to DB after initialize() ran (e.g. via admin UI)
         if (!apiKey) {
-          apiKey = await this.appConfig.get(KiteProviderService.REDIS_API_KEY).catch(() => null);
+          apiKey = await this.appConfig
+            .get(KiteProviderService.REDIS_API_KEY)
+            .catch(() => null);
         }
         if (!apiKey) throw new Error('Kite API key not configured');
         this.currentApiKey = apiKey;
@@ -368,7 +378,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     // Check Redis cache first
     for (const tok of tokens) {
       try {
-        const cached = await this.redisService.get<string>(`falcon:tok:exchange:${tok}`);
+        const cached = await this.redisService.get<string>(
+          `falcon:tok:exchange:${tok}`,
+        );
         if (cached) {
           result.set(tok, cached);
         } else {
@@ -383,7 +395,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
 
     // DB lookup for uncached tokens
     try {
-      const numericTokens = uncached.map(Number).filter((n) => Number.isFinite(n));
+      const numericTokens = uncached
+        .map(Number)
+        .filter((n) => Number.isFinite(n));
       if (numericTokens.length) {
         const rows = await this.falconInstrumentRepo.find({
           where: { instrument_token: In(numericTokens) },
@@ -435,7 +449,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       return undefined as any;
     }
 
-    const maxShards = Math.max(1, Number(this.configService.get('KITE_WS_MAX_SHARDS') || 1));
+    const maxShards = Math.max(
+      1,
+      Number(this.configService.get('KITE_WS_MAX_SHARDS') || 1),
+    );
     this.maxShards = maxShards;
 
     const shardedTicker = new KiteShardedTicker({
@@ -445,7 +462,9 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       maxReconnectAttempts: this.maxReconnectAttempts,
       logger: this.logger,
       onTick: (ticks) => {
-        this.logger.debug?.(`[Kite] Received ${ticks?.length || 0} ticks (shards=${maxShards})`);
+        this.logger.debug?.(
+          `[Kite] Received ${ticks?.length || 0} ticks (shards=${maxShards})`,
+        );
       },
       onConnect: (shardIndex) => {
         if (!this.isConnected) {
@@ -454,16 +473,26 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
           this.disableReconnect = false;
           this.metrics.marketDataStreamTickerConnected.labels('kite').set(1);
           this.publishStreamStatus('connect');
-          this.logger.log(`[Kite] Shard ${shardIndex} connected (first connection)`);
+          this.logger.log(
+            `[Kite] Shard ${shardIndex} connected (first connection)`,
+          );
         } else {
           this.logger.log(`[Kite] Shard ${shardIndex} reconnected`);
         }
-        void this.redisService.lpushTrim('admin:events', JSON.stringify({
-          type: 'connect', shardIndex, ts: Date.now(), message: `Shard ${shardIndex} connected`,
-        }));
+        void this.redisService.lpushTrim(
+          'admin:events',
+          JSON.stringify({
+            type: 'connect',
+            shardIndex,
+            ts: Date.now(),
+            message: `Shard ${shardIndex} connected`,
+          }),
+        );
       },
       onDisconnect: (shardIndex, _args) => {
-        const allDisconnected = shardedTicker.getShardStatus().every((s) => !s.isConnected);
+        const allDisconnected = shardedTicker
+          .getShardStatus()
+          .every((s) => !s.isConnected);
         if (allDisconnected) {
           this.isConnected = false;
           this.metrics.marketDataStreamTickerConnected.labels('kite').set(0);
@@ -471,10 +500,18 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         }
         this.reconnectCount++;
         this.metrics.kiteTickerReconnectTotal.labels('reconnecting').inc();
-        this.logger.warn(`[Kite] Shard ${shardIndex} disconnected (allDisconnected=${allDisconnected})`);
-        void this.redisService.lpushTrim('admin:events', JSON.stringify({
-          type: 'disconnect', shardIndex, ts: Date.now(), message: `Shard ${shardIndex} disconnected`,
-        }));
+        this.logger.warn(
+          `[Kite] Shard ${shardIndex} disconnected (allDisconnected=${allDisconnected})`,
+        );
+        void this.redisService.lpushTrim(
+          'admin:events',
+          JSON.stringify({
+            type: 'disconnect',
+            shardIndex,
+            ts: Date.now(),
+            message: `Shard ${shardIndex} disconnected`,
+          }),
+        );
       },
       onAuthError: (_shardIndex, error) => {
         const pretty = this.formatError(error);
@@ -489,17 +526,31 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
         this.metrics.kiteTickerReconnectTotal.labels('auth_error').inc();
         this.metrics.marketDataStreamTickerConnected.labels('kite').set(0);
         this.publishStreamStatus('auth_error');
-        this.logger.warn('[Kite] Disabling reconnect due to authentication error. Visit /api/auth/falcon/login to re-authenticate.');
-        void this.redisService.lpushTrim('admin:events', JSON.stringify({
-          type: 'auth_error', shardIndex: _shardIndex, ts: Date.now(), message: pretty || 'Auth error — re-authenticate',
-        }));
+        this.logger.warn(
+          '[Kite] Disabling reconnect due to authentication error. Visit /api/auth/falcon/login to re-authenticate.',
+        );
+        void this.redisService.lpushTrim(
+          'admin:events',
+          JSON.stringify({
+            type: 'auth_error',
+            shardIndex: _shardIndex,
+            ts: Date.now(),
+            message: pretty || 'Auth error — re-authenticate',
+          }),
+        );
       },
       onMaxReconnect: (_shardIndex) => {
         this.metrics.kiteTickerReconnectTotal.labels('max_attempts').inc();
         this.publishStreamStatus('provider_halted');
-        void this.redisService.lpushTrim('admin:events', JSON.stringify({
-          type: 'max_reconnect', shardIndex: _shardIndex, ts: Date.now(), message: 'Max reconnect attempts reached — provider halted',
-        }));
+        void this.redisService.lpushTrim(
+          'admin:events',
+          JSON.stringify({
+            type: 'max_reconnect',
+            shardIndex: _shardIndex,
+            ts: Date.now(),
+            message: 'Max reconnect attempts reached — provider halted',
+          }),
+        );
       },
       onError: (_shardIndex, error) => {
         const pretty = this.formatError(error);
@@ -643,16 +694,28 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
    * Persist a new API key (and optional secret) to Redis so they survive restarts.
    * Immediately re-initializes the KiteConnect client with the new key.
    */
-  async updateApiCredentials(apiKey: string, apiSecret?: string): Promise<void> {
+  async updateApiCredentials(
+    apiKey: string,
+    apiSecret?: string,
+  ): Promise<void> {
     if (!apiKey?.trim()) throw new Error('API key cannot be empty');
     try {
-      await this.appConfig.set(KiteProviderService.REDIS_API_KEY, apiKey.trim());
+      await this.appConfig.set(
+        KiteProviderService.REDIS_API_KEY,
+        apiKey.trim(),
+      );
       if (apiSecret?.trim()) {
-        await this.appConfig.set(KiteProviderService.REDIS_API_SECRET, apiSecret.trim());
+        await this.appConfig.set(
+          KiteProviderService.REDIS_API_SECRET,
+          apiSecret.trim(),
+        );
       }
       this.currentApiKey = apiKey.trim();
       if (this.currentAccessToken) {
-        this.kite = new KiteConnect({ api_key: this.currentApiKey, access_token: this.currentAccessToken });
+        this.kite = new KiteConnect({
+          api_key: this.currentApiKey,
+          access_token: this.currentAccessToken,
+        });
       } else {
         // no access token yet — leave kite undefined until OAuth completes
         this.kite = undefined;
@@ -660,7 +723,10 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       this.logger.log('[Kite] API credentials updated via admin endpoint');
       this.refreshDegradedMetric();
     } catch (error) {
-      this.logger.error('[Kite] Failed to update API credentials', error as any);
+      this.logger.error(
+        '[Kite] Failed to update API credentials',
+        error as any,
+      );
       throw error;
     }
   }
@@ -670,8 +736,12 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
     let hasDbApiKey = false;
     let hasDbApiSecret = false;
     try {
-      hasDbApiKey = !!(await this.appConfig.get(KiteProviderService.REDIS_API_KEY));
-      hasDbApiSecret = !!(await this.appConfig.get(KiteProviderService.REDIS_API_SECRET));
+      hasDbApiKey = !!(await this.appConfig.get(
+        KiteProviderService.REDIS_API_KEY,
+      ));
+      hasDbApiSecret = !!(await this.appConfig.get(
+        KiteProviderService.REDIS_API_SECRET,
+      ));
     } catch {}
     const envApiKey = this.configService.get<string>('KITE_API_KEY');
     const envApiSecret = this.configService.get<string>('KITE_API_SECRET');
@@ -679,11 +749,11 @@ export class KiteProviderService implements OnModuleInit, MarketDataProvider {
       apiKey: {
         masked: this.mask(this.currentApiKey),
         hasValue: !!this.currentApiKey,
-        source: hasDbApiKey ? 'db' : (envApiKey ? 'env' : 'none'),
+        source: hasDbApiKey ? 'db' : envApiKey ? 'env' : 'none',
       },
       apiSecret: {
         hasValue: hasDbApiSecret || !!envApiSecret,
-        source: hasDbApiSecret ? 'db' : (envApiSecret ? 'env' : 'none'),
+        source: hasDbApiSecret ? 'db' : envApiSecret ? 'env' : 'none',
       },
       accessToken: {
         masked: this.mask(this.currentAccessToken),

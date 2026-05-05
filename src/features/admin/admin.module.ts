@@ -21,14 +21,18 @@ import { StockModule } from '../stock/stock.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RequestAuditLog, UniversalInstrument, InstrumentMapping]),
+    TypeOrmModule.forFeature([
+      RequestAuditLog,
+      UniversalInstrument,
+      InstrumentMapping,
+    ]),
     ScheduleModule.forRoot(), // For cron
     ConfigModule,
     RedisModule,
     forwardRef(() => AuthModule),
     forwardRef(() => MarketDataModule),
     KiteConnectModule,
-    forwardRef(() => StockModule)
+    forwardRef(() => StockModule),
   ],
   controllers: [AdminController, AdminInstrumentsController],
   providers: [

@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateFalconInstruments1700000000003 implements MigrationInterface {
+export class CreateFalconInstruments1700000000003
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS falcon_instruments (
@@ -49,5 +51,3 @@ export class CreateFalconInstruments1700000000003 implements MigrationInterface 
     await queryRunner.query(`DROP TABLE IF EXISTS falcon_instruments`);
   }
 }
-
-

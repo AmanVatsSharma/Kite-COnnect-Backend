@@ -79,19 +79,16 @@ export class BinanceRestClient {
    * GET /api/v3/ticker/price — last price for one or many symbols.
    * Without `symbols` it returns every spot pair (~2000 rows).
    */
-  async getTickerPrices(
-    symbols?: string[],
-  ): Promise<BinanceTickerPrice[]> {
+  async getTickerPrices(symbols?: string[]): Promise<BinanceTickerPrice[]> {
     try {
       const params: Record<string, string> = {};
       if (symbols?.length) {
         // Binance expects a JSON array literal as a single query-string param.
         params.symbols = JSON.stringify(symbols.map((s) => s.toUpperCase()));
       }
-      const { data } = await this.http.get<BinanceTickerPrice | BinanceTickerPrice[]>(
-        '/api/v3/ticker/price',
-        { params },
-      );
+      const { data } = await this.http.get<
+        BinanceTickerPrice | BinanceTickerPrice[]
+      >('/api/v3/ticker/price', { params });
       return Array.isArray(data) ? data : [data];
     } catch (err) {
       this.logger.error(
@@ -111,10 +108,9 @@ export class BinanceRestClient {
       if (symbols?.length) {
         params.symbols = JSON.stringify(symbols.map((s) => s.toUpperCase()));
       }
-      const { data } = await this.http.get<BinanceTicker24hr | BinanceTicker24hr[]>(
-        '/api/v3/ticker/24hr',
-        { params },
-      );
+      const { data } = await this.http.get<
+        BinanceTicker24hr | BinanceTicker24hr[]
+      >('/api/v3/ticker/24hr', { params });
       return Array.isArray(data) ? data : [data];
     } catch (err) {
       this.logger.error(

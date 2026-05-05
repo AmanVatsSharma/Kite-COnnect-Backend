@@ -221,7 +221,11 @@ export class FnoQueryParserService {
 
   /** Check if a Y/M/D triple is a valid calendar date. */
   private isValidYmd(year: number, month: number, day: number): boolean {
-    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    if (
+      !Number.isFinite(year) ||
+      !Number.isFinite(month) ||
+      !Number.isFinite(day)
+    ) {
       return false;
     }
     if (month < 1 || month > 12) return false;
@@ -318,5 +322,3 @@ export class FnoQueryParserService {
     return aliases[s] || s;
   }
 }
-
-

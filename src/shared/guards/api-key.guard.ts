@@ -69,14 +69,11 @@ export class ApiKeyGuard implements CanActivate {
         e as any,
       );
       // eslint-disable-next-line no-console
-      console.error(
-        '[ApiKeyGuard] Abuse detection check failed – continuing',
-        {
-          apiKey,
-          tenant_id: keyRecord.tenant_id,
-          error: (e as any)?.message ?? e,
-        },
-      );
+      console.error('[ApiKeyGuard] Abuse detection check failed – continuing', {
+        apiKey,
+        tenant_id: keyRecord.tenant_id,
+        error: (e as any)?.message ?? e,
+      });
     }
 
     // Per-API-key HTTP rate limiting via ApiKeyService (Redis-backed).

@@ -49,8 +49,8 @@ import Redis from 'ioredis';
 export type StreamProviderName = 'kite' | 'vortex' | 'massive' | 'binance';
 
 export type SearchResultItem = {
-  id: number;                  // universal_instruments.id
-  canonicalSymbol: string;     // e.g. "NSE:RELIANCE"
+  id: number; // universal_instruments.id
+  canonicalSymbol: string; // e.g. "NSE:RELIANCE"
   symbol: string;
   name?: string;
   exchange?: string;
@@ -159,7 +159,10 @@ class MeiliClientPool {
       if (Date.now() < this.openUntil[i]) continue; // circuit open for this server
 
       try {
-        const resp = await this.clients[i].post(`/indexes/${index}/search`, body);
+        const resp = await this.clients[i].post(
+          `/indexes/${index}/search`,
+          body,
+        );
         this.failureCount[i] = 0; // reset on success
         return resp.data || { hits: [] };
       } catch (err: any) {
@@ -173,7 +176,9 @@ class MeiliClientPool {
         if (this.failureCount[i] >= 3) {
           this.openUntil[i] = Date.now() + 10_000;
           this.failureCount[i] = 0;
-          this.logger.warn(`Meili server[${i}] circuit opened (3 failures in a row)`);
+          this.logger.warn(
+            `Meili server[${i}] circuit opened (3 failures in a row)`,
+          );
         }
       }
     }
@@ -194,9 +199,10 @@ export class SearchService {
   private hydrationBreakerUntil = 0;
 
   constructor() {
-    const primaryHost = process.env.MEILI_HOST_PRIMARY
-      || process.env.MEILI_HOST
-      || 'http://meilisearch:7700';
+    const primaryHost =
+      process.env.MEILI_HOST_PRIMARY ||
+      process.env.MEILI_HOST ||
+      'http://meilisearch:7700';
     const secondaryHost = process.env.MEILI_HOST_SECONDARY || '';
     const meiliKey = process.env.MEILI_MASTER_KEY || '';
     const meiliTimeout = Number(process.env.MEILI_TIMEOUT_MS || 1200);
@@ -204,7 +210,8 @@ export class SearchService {
     const hosts = [primaryHost, secondaryHost].filter(Boolean);
     this.meili = new MeiliClientPool(hosts, meiliKey, meiliTimeout);
 
-    const hydrateBase = process.env.HYDRATION_BASE_URL || 'http://trading-app:3000';
+    const hydrateBase =
+      process.env.HYDRATION_BASE_URL || 'http://trading-app:3000';
     const hydrateApiKey = process.env.HYDRATION_API_KEY || '';
     const hydratorHeaders: Record<string, string> = {};
     if (hydrateApiKey) hydratorHeaders['x-api-key'] = hydrateApiKey;
@@ -236,11 +243,27 @@ export class SearchService {
    * expose to a given response.
    */
   private static readonly DEFAULT_ATTRS_TO_RETRIEVE: readonly string[] = [
-    'id', 'canonicalSymbol', 'symbol', 'name', 'exchange', 'segment',
-    'instrumentType', 'assetClass', 'optionType', 'expiry', 'strike',
-    'lotSize', 'tickSize', 'isDerivative', 'underlyingSymbol',
-    'kiteToken', 'vortexToken', 'vortexExchange',
-    'massiveToken', 'binanceToken', 'streamProvider',
+    'id',
+    'canonicalSymbol',
+    'symbol',
+    'name',
+    'exchange',
+    'segment',
+    'instrumentType',
+    'assetClass',
+    'optionType',
+    'expiry',
+    'strike',
+    'lotSize',
+    'tickSize',
+    'isDerivative',
+    'underlyingSymbol',
+    'kiteToken',
+    'vortexToken',
+    'vortexExchange',
+    'massiveToken',
+    'binanceToken',
+    'streamProvider',
   ];
 
   async searchInstruments(
@@ -269,13 +292,20 @@ export class SearchService {
     attributesToRetrieve?: readonly string[],
   ): Promise<SearchResultItem[]> {
     const index = process.env.MEILI_INDEX || 'instruments_v1';
-    const attrs = attributesToRetrieve && attributesToRetrieve.length > 0
-      ? Array.from(attributesToRetrieve)
-      : Array.from(SearchService.DEFAULT_ATTRS_TO_RETRIEVE);
+    const attrs =
+      attributesToRetrieve && attributesToRetrieve.length > 0
+        ? Array.from(attributesToRetrieve)
+        : Array.from(SearchService.DEFAULT_ATTRS_TO_RETRIEVE);
     const filterExpr = this.buildFilter(filters);
 
     // Broker-style sort: equity first → futures → options; NSE before BSE; then expiry → strike → CE/PE
-    const brokerSort = ['rankOrder:asc', 'exchangeRank:asc', 'expiry:asc', 'strike:asc', 'optionType:asc'];
+    const brokerSort = [
+      'rankOrder:asc',
+      'exchangeRank:asc',
+      'expiry:asc',
+      'strike:asc',
+      'optionType:asc',
+    ];
 
     // Primary: all-words matching (precise, higher quality)
     const precise = await this.meili.search(index, {
@@ -303,21 +333,33 @@ export class SearchService {
     return this.dedupeById([...primary, ...(broad.hits || [])]).slice(0, limit);
   }
 
-  async facetCounts(filters: Record<string, string | undefined> = {}): Promise<Record<string, any>> {
+  async facetCounts(
+    filters: Record<string, string | undefined> = {},
+  ): Promise<Record<string, any>> {
     const index = process.env.MEILI_INDEX || 'instruments_v1';
     const filterExpr = this.buildFilter(filters);
     const resp = await this.meili.search(index, {
       q: '',
       limit: 0,
       filter: filterExpr,
-      facets: ['exchange', 'segment', 'instrumentType', 'optionType', 'assetClass', 'streamProvider'],
+      facets: [
+        'exchange',
+        'segment',
+        'instrumentType',
+        'optionType',
+        'assetClass',
+        'streamProvider',
+      ],
     });
     return (resp as any)?.facetDistribution || {};
   }
 
   // ── LTP hydration ─────────────────────────────────────────────────────────
 
-  async hydrateQuotes(tokens: number[], mode: 'ltp' | 'ohlc' | 'full' = 'ltp'): Promise<Record<string, any>> {
+  async hydrateQuotes(
+    tokens: number[],
+    mode: 'ltp' | 'ohlc' | 'full' = 'ltp',
+  ): Promise<Record<string, any>> {
     if (!tokens.length) return {};
     if (Date.now() < this.hydrationBreakerUntil) return {};
 
@@ -339,14 +381,21 @@ export class SearchService {
     if (!toFetch.length) return result;
 
     try {
-      const url = mode === 'ltp' ? '/api/stock/vayu/ltp' : `/api/stock/quotes?mode=${mode}&ltp_only=true`;
+      const url =
+        mode === 'ltp'
+          ? '/api/stock/vayu/ltp'
+          : `/api/stock/quotes?mode=${mode}&ltp_only=true`;
       const resp = await this.hydrator.post(url, { instruments: toFetch });
       const data = resp.data?.data || {};
       Object.assign(result, data);
       if (this.redis) {
         const ttlSec = Math.ceil(cacheTTL / 1000);
         for (const [k, v] of Object.entries(data)) {
-          await this.redis.setex(cacheKey(Number(k)), ttlSec, JSON.stringify(v));
+          await this.redis.setex(
+            cacheKey(Number(k)),
+            ttlSec,
+            JSON.stringify(v),
+          );
         }
       }
       this.hydrationFailures = 0;
@@ -369,7 +418,9 @@ export class SearchService {
    * Pair-based LTP hydration using vortexToken + vortexExchange from the Meili document.
    * Falls back to kiteToken for instruments without a vortex mapping.
    */
-  async hydrateLtpByItems(items: SearchResultItem[]): Promise<Record<string, any>> {
+  async hydrateLtpByItems(
+    items: SearchResultItem[],
+  ): Promise<Record<string, any>> {
     if (!items.length) return {};
     if (Date.now() < this.hydrationBreakerUntil) return {};
 
@@ -394,12 +445,18 @@ export class SearchService {
 
     // Single call — trading-app resolves vortex vs kite internally by universal id
     try {
-      const resp = await this.hydrator.post('/api/stock/universal/ltp', { ids: toFetch });
+      const resp = await this.hydrator.post('/api/stock/universal/ltp', {
+        ids: toFetch,
+      });
       const data: Record<string, any> = resp.data?.data || {};
       Object.assign(result, data);
       if (this.redis) {
         for (const [k, v] of Object.entries(data)) {
-          await this.redis.setex(cacheKey(Number(k)), ttlSec, JSON.stringify(v));
+          await this.redis.setex(
+            cacheKey(Number(k)),
+            ttlSec,
+            JSON.stringify(v),
+          );
         }
       }
       this.hydrationFailures = 0;
@@ -420,17 +477,27 @@ export class SearchService {
 
   // ── Synonym telemetry ─────────────────────────────────────────────────────
 
-  async logSelectionTelemetry(q: string, symbol: string, universalId?: number): Promise<void> {
+  async logSelectionTelemetry(
+    q: string,
+    symbol: string,
+    universalId?: number,
+  ): Promise<void> {
     try {
       if (!this.redis) return;
-      const normQ = String(q || '').trim().toLowerCase();
-      const normSym = String(symbol || '').trim().toUpperCase();
+      const normQ = String(q || '')
+        .trim()
+        .toLowerCase();
+      const normSym = String(symbol || '')
+        .trim()
+        .toUpperCase();
       if (!normQ || !normSym) return;
       const ttlSec = Number(process.env.SYNONYMS_TTL_DAYS || 14) * 86400;
       const keys = [
         `syn:q:${normQ}:sym:${normSym}`,
         `syn:sym:${normSym}`,
-        ...(Number.isFinite(universalId) ? [`syn:uid:${universalId}:q:${normQ}`] : []),
+        ...(Number.isFinite(universalId)
+          ? [`syn:uid:${universalId}:q:${normQ}`]
+          : []),
       ];
       for (const k of keys) {
         await this.redis.incrby(k, 1);
@@ -447,20 +514,32 @@ export class SearchService {
     const parts: string[] = [];
     if (!filters) return undefined;
 
-    if (filters.exchange) parts.push(`exchange = ${JSON.stringify(filters.exchange)}`);
-    if (filters.segment) parts.push(`segment = ${JSON.stringify(filters.segment)}`);
-    if (filters.instrumentType) parts.push(`instrumentType = ${JSON.stringify(filters.instrumentType)}`);
-    if (filters.vortexExchange) parts.push(`vortexExchange = ${JSON.stringify(filters.vortexExchange)}`);
-    if (filters.optionType) parts.push(`optionType = ${JSON.stringify(filters.optionType)}`);
-    if (filters.assetClass) parts.push(`assetClass = ${JSON.stringify(filters.assetClass)}`);
-    if (filters.streamProvider) parts.push(`streamProvider = ${JSON.stringify(filters.streamProvider)}`);
-    if (filters.isDerivative !== undefined) parts.push(`isDerivative = ${!!filters.isDerivative}`);
+    if (filters.exchange)
+      parts.push(`exchange = ${JSON.stringify(filters.exchange)}`);
+    if (filters.segment)
+      parts.push(`segment = ${JSON.stringify(filters.segment)}`);
+    if (filters.instrumentType)
+      parts.push(`instrumentType = ${JSON.stringify(filters.instrumentType)}`);
+    if (filters.vortexExchange)
+      parts.push(`vortexExchange = ${JSON.stringify(filters.vortexExchange)}`);
+    if (filters.optionType)
+      parts.push(`optionType = ${JSON.stringify(filters.optionType)}`);
+    if (filters.assetClass)
+      parts.push(`assetClass = ${JSON.stringify(filters.assetClass)}`);
+    if (filters.streamProvider)
+      parts.push(`streamProvider = ${JSON.stringify(filters.streamProvider)}`);
+    if (filters.isDerivative !== undefined)
+      parts.push(`isDerivative = ${!!filters.isDerivative}`);
 
-    if (filters.expiry_from) parts.push(`expiry >= ${JSON.stringify(filters.expiry_from)}`);
-    if (filters.expiry_to) parts.push(`expiry <= ${JSON.stringify(filters.expiry_to)}`);
+    if (filters.expiry_from)
+      parts.push(`expiry >= ${JSON.stringify(filters.expiry_from)}`);
+    if (filters.expiry_to)
+      parts.push(`expiry <= ${JSON.stringify(filters.expiry_to)}`);
 
-    if (Number.isFinite(Number(filters.strike_min))) parts.push(`strike >= ${Number(filters.strike_min)}`);
-    if (Number.isFinite(Number(filters.strike_max))) parts.push(`strike <= ${Number(filters.strike_max)}`);
+    if (Number.isFinite(Number(filters.strike_min)))
+      parts.push(`strike >= ${Number(filters.strike_min)}`);
+    if (Number.isFinite(Number(filters.strike_max)))
+      parts.push(`strike <= ${Number(filters.strike_max)}`);
 
     return parts.length ? parts.join(' AND ') : undefined;
   }

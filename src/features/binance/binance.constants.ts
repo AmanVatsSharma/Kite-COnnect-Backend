@@ -21,7 +21,13 @@ export const BINANCE_MAX_STREAMS_PER_CONNECTION = 1024;
  * Override via env `BINANCE_QUOTES` (comma-separated).
  * Yields ~800 liquid pairs out of Binance's ~2000 total.
  */
-export const BINANCE_DEFAULT_QUOTE_FILTER = ['USDT', 'USDC', 'BUSD', 'BTC', 'ETH'] as const;
+export const BINANCE_DEFAULT_QUOTE_FILTER = [
+  'USDT',
+  'USDC',
+  'BUSD',
+  'BTC',
+  'ETH',
+] as const;
 
 /** Canonical exchange code used in `universal_instruments.exchange` for Binance pairs. */
 export const BINANCE_CANONICAL_EXCHANGE = 'BINANCE';

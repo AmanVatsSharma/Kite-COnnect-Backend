@@ -1,7 +1,10 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
-import { AuthController, VortexAuthController } from './interface/auth.controller';
+import {
+  AuthController,
+  VortexAuthController,
+} from './interface/auth.controller';
 import { ApiKeyService } from './application/api-key.service';
 import { AbuseDetectionService } from './application/abuse-detection.service';
 import { ApiKey } from './domain/api-key.entity';

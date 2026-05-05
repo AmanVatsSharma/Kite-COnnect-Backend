@@ -32,7 +32,9 @@ describe('VayuController vayu/ltp (unit)', () => {
         for (const t of tokens) out[t] = { last_price: 123.45 };
         return out;
       }),
-      getLTPByPairs: jest.fn(async () => ({ 'NSE_EQ-26000': { last_price: 17624.05 } })),
+      getLTPByPairs: jest.fn(async () => ({
+        'NSE_EQ-26000': { last_price: 17624.05 },
+      })),
     };
 
     vortexInstrument = {
@@ -48,19 +50,34 @@ describe('VayuController vayu/ltp (unit)', () => {
     const vayuMarketData = {
       getVortexLtp: jest.fn(async (body: any, q?: string) => {
         if (q) {
-          const ltpData = await vortexProvider.getLTPByPairs([{ exchange: 'NSE_EQ', token: '26000' }]);
-          return { success: true, data: { 'NSE_EQ:26000': { instrument_token: 26000, last_price: 17624.05 } } };
+          const ltpData = await vortexProvider.getLTPByPairs([
+            { exchange: 'NSE_EQ', token: '26000' },
+          ]);
+          return {
+            success: true,
+            data: {
+              'NSE_EQ:26000': { instrument_token: 26000, last_price: 17624.05 },
+            },
+          };
         }
         const instruments = body?.instruments;
-        if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
+        if (
+          !instruments ||
+          !Array.isArray(instruments) ||
+          instruments.length === 0
+        ) {
           throw new HttpException(
-            { success: false, message: 'Instruments array or q parameter is required' },
+            {
+              success: false,
+              message: 'Instruments array or q parameter is required',
+            },
             HttpStatus.BAD_REQUEST,
           );
         }
         const nums = instruments
           .map((x: any) => {
-            const n = typeof x === 'number' ? x : parseInt(String(x).trim(), 10);
+            const n =
+              typeof x === 'number' ? x : parseInt(String(x).trim(), 10);
             return Number.isFinite(n) ? n : NaN;
           })
           .filter((n: number) => Number.isFinite(n));
@@ -93,7 +110,9 @@ describe('VayuController vayu/ltp (unit)', () => {
       ],
     });
 
-    builder.overrideGuard(ApiKeyGuard).useValue({ canActivate: jest.fn().mockResolvedValue(true) });
+    builder
+      .overrideGuard(ApiKeyGuard)
+      .useValue({ canActivate: jest.fn().mockResolvedValue(true) });
     const module: TestingModule = await builder.compile();
 
     controller = module.get<VayuController>(VayuController);

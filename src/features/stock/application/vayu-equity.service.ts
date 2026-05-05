@@ -23,7 +23,8 @@ export class VayuEquityService {
       const requestedLimit = limit ? parseInt(limit.toString()) : 50;
       const startOffset = offset ? parseInt(offset.toString()) : 0;
       const ltpOnly =
-        String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+        String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+        ltpOnlyRaw === true;
 
       if (!ltpOnly) {
         const result =
@@ -46,13 +47,13 @@ export class VayuEquityService {
         const list = result.instruments.map((i) => {
           const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
           const lp = ltpByPair?.[key]?.last_price ?? null;
-          return {
+          return this.vortexInstrumentService.enrichSingleWithUir({
             token: i.token,
             symbol: i.symbol,
             exchange: i.exchange,
             description: (i as any)?.description || null,
             last_price: lp,
-          };
+          });
         });
         return {
           success: true,
@@ -94,17 +95,16 @@ export class VayuEquityService {
       const enriched = page.instruments.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = ltpByPair?.[key]?.last_price ?? null;
-        return {
+        return this.vortexInstrumentService.enrichSingleWithUir({
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
           description: (i as any)?.description || null,
           last_price: lp,
-        };
+        });
       });
       const filtered = enriched.filter(
-        (v: any) =>
-          Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
+        (v: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
       );
       const sliced = filtered.slice(0, requestedLimit);
 

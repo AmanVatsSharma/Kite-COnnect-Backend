@@ -32,8 +32,7 @@ export class ApiKeyService {
     const bucketKey = this.buildMinuteBucketKey('http', key);
 
     try {
-      const current =
-        (await this.redisService.get<number>(bucketKey)) || 0;
+      const current = (await this.redisService.get<number>(bucketKey)) || 0;
 
       if (current >= limitPerMinute) {
         // Console for easy later debugging
@@ -191,9 +190,14 @@ export class ApiKeyService {
    */
   async notifyApiKeyUpdate(key: string): Promise<void> {
     try {
-      await this.redisService.publish('api_key_updates', JSON.stringify({ key }));
+      await this.redisService.publish(
+        'api_key_updates',
+        JSON.stringify({ key }),
+      );
       // eslint-disable-next-line no-console
-      console.log(`[ApiKeyService] Published update notification for key=${key}`);
+      console.log(
+        `[ApiKeyService] Published update notification for key=${key}`,
+      );
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(

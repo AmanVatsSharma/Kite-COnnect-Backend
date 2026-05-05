@@ -149,7 +149,15 @@ export interface FalconQuote {
 }
 
 /** [date, open, high, low, close, volume, oi?] */
-export type FalconCandle = [string, number, number, number, number, number, number?];
+export type FalconCandle = [
+  string,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number?,
+];
 
 export interface KiteProfile {
   user_id: string;

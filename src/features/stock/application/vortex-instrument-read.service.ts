@@ -26,7 +26,9 @@ export class VortexInstrumentReadService {
     private readonly ltpService: VortexInstrumentLtpService,
   ) {}
 
-  async getVortexInstrumentByToken(token: number): Promise<VortexInstrument | null> {
+  async getVortexInstrumentByToken(
+    token: number,
+  ): Promise<VortexInstrument | null> {
     try {
       return await this.vortexInstrumentRepo.findOne({ where: { token } });
     } catch (error) {
@@ -54,10 +56,13 @@ export class VortexInstrumentReadService {
         .groupBy('instrument.exchange')
         .getRawMany();
 
-      const byExchange = exchangeStats.reduce((acc, stat) => {
-        acc[stat.exchange] = parseInt(stat.count, 10);
-        return acc;
-      }, {} as Record<string, number>);
+      const byExchange = exchangeStats.reduce(
+        (acc, stat) => {
+          acc[stat.exchange] = parseInt(stat.count, 10);
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
 
       const typeStats = await this.vortexInstrumentRepo
         .createQueryBuilder('instrument')
@@ -66,10 +71,13 @@ export class VortexInstrumentReadService {
         .groupBy('instrument.instrument_name')
         .getRawMany();
 
-      const byInstrumentType = typeStats.reduce((acc, stat) => {
-        acc[stat.instrument_name] = parseInt(stat.count, 10);
-        return acc;
-      }, {} as Record<string, number>);
+      const byInstrumentType = typeStats.reduce(
+        (acc, stat) => {
+          acc[stat.instrument_name] = parseInt(stat.count, 10);
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
 
       const lastSync = await this.vortexInstrumentRepo
         .createQueryBuilder('instrument')
@@ -91,13 +99,16 @@ export class VortexInstrumentReadService {
     }
   }
 
-  buildPairsFromInstruments(
-    instruments: VortexInstrument[],
-  ): Array<{ exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string }> {
+  buildPairsFromInstruments(instruments: VortexInstrument[]): Array<{
+    exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+    token: string;
+  }> {
     try {
       const allowed = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
-      const pairs: Array<{ exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string }> =
-        [];
+      const pairs: Array<{
+        exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+        token: string;
+      }> = [];
       for (const i of instruments || []) {
         const ex = String(i?.exchange || '').toUpperCase();
         const tok = String(i?.token ?? '').trim();
@@ -107,19 +118,31 @@ export class VortexInstrumentReadService {
       }
       return pairs;
     } catch (e) {
-      this.logger.warn('[VortexInstrumentReadService] buildPairsFromInstruments failed', e as Error);
+      this.logger.warn(
+        '[VortexInstrumentReadService] buildPairsFromInstruments failed',
+        e as Error,
+      );
       return [];
     }
   }
 
   async hydrateLtpByPairs(
-    pairs: Array<{ exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string | number }>,
+    pairs: Array<{
+      exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+      token: string | number;
+    }>,
   ): Promise<Record<string, { last_price: number | null }>> {
     try {
       if (!pairs || pairs.length === 0) return {};
-      return await this.requestBatchingService.getLtpByPairs(pairs as any, this.vortexProvider);
+      return await this.requestBatchingService.getLtpByPairs(
+        pairs as any,
+        this.vortexProvider,
+      );
     } catch (e) {
-      this.logger.warn('[VortexInstrumentReadService] hydrateLtpByPairs failed', e as Error);
+      this.logger.warn(
+        '[VortexInstrumentReadService] hydrateLtpByPairs failed',
+        e as Error,
+      );
       return {};
     }
   }
@@ -147,10 +170,16 @@ export class VortexInstrumentReadService {
         .getMany();
 
       const expiries = [
-        ...new Set(options.map((o) => o.expiry_date).filter(Boolean) as string[]),
+        ...new Set(
+          options.map((o) => o.expiry_date).filter(Boolean) as string[],
+        ),
       ].sort();
       const strikes = [
-        ...new Set(options.map((o) => o.strike_price).filter((p) => p && p > 0) as number[]),
+        ...new Set(
+          options
+            .map((o) => o.strike_price)
+            .filter((p) => p && p > 0) as number[],
+        ),
       ].sort((a, b) => a - b);
 
       const optionsChain: Record<
@@ -186,7 +215,10 @@ export class VortexInstrumentReadService {
         queryTime,
       };
     } catch (error) {
-      this.logger.error('[VortexInstrumentReadService] Error getting options chain', error);
+      this.logger.error(
+        '[VortexInstrumentReadService] Error getting options chain',
+        error,
+      );
       throw error;
     }
   }
@@ -245,12 +277,17 @@ export class VortexInstrumentReadService {
         queryTime,
       };
     } catch (error) {
-      this.logger.error('[VortexInstrumentReadService] Error in batch lookup', error);
+      this.logger.error(
+        '[VortexInstrumentReadService] Error in batch lookup',
+        error,
+      );
       throw error;
     }
   }
 
-  async getVortexInstrumentDetails(tokens: number[]): Promise<Record<number, VortexInstrument>> {
+  async getVortexInstrumentDetails(
+    tokens: number[],
+  ): Promise<Record<number, VortexInstrument>> {
     const result: Record<number, VortexInstrument> = {};
     try {
       if (!Array.isArray(tokens) || tokens.length === 0) return result;
@@ -282,7 +319,10 @@ export class VortexInstrumentReadService {
 
       return result;
     } catch (error) {
-      this.logger.error('[VortexInstrumentReadService] getVortexInstrumentDetails failed', error);
+      this.logger.error(
+        '[VortexInstrumentReadService] getVortexInstrumentDetails failed',
+        error,
+      );
       throw error;
     }
   }

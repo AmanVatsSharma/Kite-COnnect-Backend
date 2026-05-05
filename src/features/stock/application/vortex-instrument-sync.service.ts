@@ -55,7 +55,10 @@ export class VortexInstrumentSyncService {
       this.logger.log(
         `[VortexInstrumentSyncService] Starting Vortex instrument sync for exchange=${exchange || 'all'}`,
       );
-      onProgress?.({ phase: 'init', lastMessage: 'Starting Vortex instrument sync' });
+      onProgress?.({
+        phase: 'init',
+        lastMessage: 'Starting Vortex instrument sync',
+      });
 
       const instruments = await this.vortexProvider.getInstruments(exchange, {
         csvUrl,
@@ -111,7 +114,8 @@ export class VortexInstrumentSyncService {
             where: { token: vortexInstrument.token },
           });
 
-          const description = generateVortexInstrumentDescription(vortexInstrument);
+          const description =
+            generateVortexInstrumentDescription(vortexInstrument);
 
           if (existingInstrument) {
             await this.vortexInstrumentRepo.update(
@@ -184,9 +188,14 @@ export class VortexInstrumentSyncService {
       try {
         await this.crossLinkProviderMappings();
         await this.instrumentRegistry.refresh();
-        this.logger.log('[VortexInstrumentSyncService] Cross-link complete, InstrumentRegistry refreshed');
+        this.logger.log(
+          '[VortexInstrumentSyncService] Cross-link complete, InstrumentRegistry refreshed',
+        );
       } catch (refreshErr) {
-        this.logger.warn('[VortexInstrumentSyncService] Cross-link/refresh failed (non-fatal)', refreshErr);
+        this.logger.warn(
+          '[VortexInstrumentSyncService] Cross-link/refresh failed (non-fatal)',
+          refreshErr,
+        );
       }
 
       onProgress?.({
@@ -200,7 +209,10 @@ export class VortexInstrumentSyncService {
       });
       return { synced, updated, total: instruments.length };
     } catch (error) {
-      this.logger.error('[VortexInstrumentSyncService] Error syncing Vortex instruments', error);
+      this.logger.error(
+        '[VortexInstrumentSyncService] Error syncing Vortex instruments',
+        error,
+      );
       onProgress?.({
         phase: 'complete',
         total: 0,
@@ -239,7 +251,10 @@ export class VortexInstrumentSyncService {
         `),
       ]);
     } catch (e) {
-      this.logger.warn('[VortexInstrumentSyncService] Cross-link pass failed (non-fatal)', e as Error);
+      this.logger.warn(
+        '[VortexInstrumentSyncService] Cross-link pass failed (non-fatal)',
+        e as Error,
+      );
     }
   }
 
@@ -301,7 +316,10 @@ export class VortexInstrumentSyncService {
     lot_size?: number;
   }): Promise<void> {
     try {
-      const normalizedExchange = normalizeExchange(vortexInstrument.exchange || '', 'vortex');
+      const normalizedExchange = normalizeExchange(
+        vortexInstrument.exchange || '',
+        'vortex',
+      );
       const underlying = (vortexInstrument.symbol || '').toUpperCase().trim();
       if (!underlying) return;
 
@@ -310,13 +328,18 @@ export class VortexInstrumentSyncService {
       let instrumentType = 'EQ';
       const iName = (vortexInstrument.instrument_name || '').toUpperCase();
       if (iName.startsWith('FUT')) instrumentType = 'FUT';
-      else if (iName.startsWith('OPT') && vortexInstrument.option_type === 'CE') instrumentType = 'CE';
-      else if (iName.startsWith('OPT') && vortexInstrument.option_type === 'PE') instrumentType = 'PE';
+      else if (iName.startsWith('OPT') && vortexInstrument.option_type === 'CE')
+        instrumentType = 'CE';
+      else if (iName.startsWith('OPT') && vortexInstrument.option_type === 'PE')
+        instrumentType = 'PE';
       else if (iName === 'EQ') instrumentType = 'EQ';
 
       // Parse expiry from YYYYMMDD string
       let expiry: Date | null = null;
-      if (vortexInstrument.expiry_date && vortexInstrument.expiry_date.length === 8) {
+      if (
+        vortexInstrument.expiry_date &&
+        vortexInstrument.expiry_date.length === 8
+      ) {
         const y = vortexInstrument.expiry_date.slice(0, 4);
         const m = vortexInstrument.expiry_date.slice(4, 6);
         const d = vortexInstrument.expiry_date.slice(6, 8);
@@ -325,7 +348,10 @@ export class VortexInstrumentSyncService {
       }
 
       const strike = Number(vortexInstrument.strike_price) || null;
-      const optionType = (instrumentType === 'CE' || instrumentType === 'PE') ? instrumentType : null;
+      const optionType =
+        instrumentType === 'CE' || instrumentType === 'PE'
+          ? instrumentType
+          : null;
 
       const canonicalSymbol = computeCanonicalSymbol({
         exchange: normalizedExchange,
@@ -336,27 +362,37 @@ export class VortexInstrumentSyncService {
         option_type: optionType,
       });
 
-      await this.uirRepo.upsert({
-        canonical_symbol: canonicalSymbol,
-        exchange: normalizedExchange,
-        underlying,
-        instrument_type: instrumentType,
-        expiry,
-        strike: strike || 0,
-        option_type: optionType,
-        lot_size: vortexInstrument.lot_size || 1,
-        tick_size: Number(vortexInstrument.tick) || 0.05,
-        name: underlying,
-        segment: normalizedExchange,
-        is_active: true,
-        asset_class: normalizedExchange === 'MCX' ? 'commodity' : (normalizedExchange === 'CDS' ? 'currency' : 'equity'),
-      }, {
-        conflictPaths: ['canonical_symbol'],
-        skipUpdateIfNoValuesChanged: false,
-      });
+      await this.uirRepo.upsert(
+        {
+          canonical_symbol: canonicalSymbol,
+          exchange: normalizedExchange,
+          underlying,
+          instrument_type: instrumentType,
+          expiry,
+          strike: strike || 0,
+          option_type: optionType,
+          lot_size: vortexInstrument.lot_size || 1,
+          tick_size: Number(vortexInstrument.tick) || 0.05,
+          name: underlying,
+          segment: normalizedExchange,
+          is_active: true,
+          asset_class:
+            normalizedExchange === 'MCX'
+              ? 'commodity'
+              : normalizedExchange === 'CDS'
+                ? 'currency'
+                : 'equity',
+        },
+        {
+          conflictPaths: ['canonical_symbol'],
+          skipUpdateIfNoValuesChanged: false,
+        },
+      );
 
       // Link mapping to UIR
-      const uirRow = await this.uirRepo.findOne({ where: { canonical_symbol: canonicalSymbol } });
+      const uirRow = await this.uirRepo.findOne({
+        where: { canonical_symbol: canonicalSymbol },
+      });
       if (uirRow) {
         const providerToken = `${vortexInstrument.exchange}-${vortexInstrument.token}`;
         await this.mappingRepo.update(
@@ -365,20 +401,27 @@ export class VortexInstrumentSyncService {
         );
       }
     } catch (err) {
-      this.logger.debug(`[VortexInstrumentSyncService] UIR upsert failed for token=${vortexInstrument.token}: ${(err as Error)?.message}`);
+      this.logger.debug(
+        `[VortexInstrumentSyncService] UIR upsert failed for token=${vortexInstrument.token}: ${(err as Error)?.message}`,
+      );
     }
   }
 
   @Cron('30 8 * * *')
   async syncVortexInstrumentsDaily(): Promise<void> {
     try {
-      this.logger.log('[VortexInstrumentSyncService] Starting daily Vortex instrument sync');
+      this.logger.log(
+        '[VortexInstrumentSyncService] Starting daily Vortex instrument sync',
+      );
       const result = await this.syncVortexInstruments();
       this.logger.log(
         `[VortexInstrumentSyncService] Daily sync completed: ${result.synced} synced, ${result.updated} updated`,
       );
     } catch (error) {
-      this.logger.error('[VortexInstrumentSyncService] Error in daily Vortex instrument sync', error);
+      this.logger.error(
+        '[VortexInstrumentSyncService] Error in daily Vortex instrument sync',
+        error,
+      );
     }
   }
 }

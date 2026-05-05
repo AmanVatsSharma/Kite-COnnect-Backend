@@ -325,7 +325,7 @@ export class VortexWebSocketShard {
           break;
         }
         const tokenMode = this.modeByToken.get(t) || mode;
-        let ex =
+        const ex =
           this.exchangeByToken.get(t) ||
           (exMapRaw.get(String(t)) as
             | 'NSE_EQ'

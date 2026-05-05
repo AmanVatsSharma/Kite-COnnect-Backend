@@ -24,11 +24,19 @@ import { UniversalInstrument } from '@features/market-data/domain/universal-inst
   imports: [
     ConfigModule,
     ScheduleModule,
-    TypeOrmModule.forFeature([MassiveInstrument, InstrumentMapping, UniversalInstrument]),
+    TypeOrmModule.forFeature([
+      MassiveInstrument,
+      InstrumentMapping,
+      UniversalInstrument,
+    ]),
     forwardRef(() => MarketDataModule),
   ],
   controllers: [AdminMassiveController],
-  providers: [MassiveRestClient, MassiveProviderService, MassiveInstrumentSyncService],
+  providers: [
+    MassiveRestClient,
+    MassiveProviderService,
+    MassiveInstrumentSyncService,
+  ],
   exports: [MassiveProviderService, MassiveInstrumentSyncService],
 })
 export class MassiveModule {}

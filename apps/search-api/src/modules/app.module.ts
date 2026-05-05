@@ -14,5 +14,3 @@ import { HealthModule } from './health/health.module';
   imports: [SearchModule, HealthModule],
 })
 export class AppModule {}
-
-

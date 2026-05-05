@@ -2,6 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { VortexProviderService } from '@features/stock/infra/vortex-provider.service';
 import { VortexInstrumentService } from '@features/stock/application/vortex-instrument.service';
 import { RequestBatchingService } from '@features/market-data/application/request-batching.service';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { LtpRequestDto } from '@features/stock/interface/dto/ltp.dto';
 
 @Injectable()
@@ -10,7 +11,24 @@ export class VayuMarketDataService {
     private readonly vortexProvider: VortexProviderService,
     private readonly vortexInstrumentService: VortexInstrumentService,
     private readonly requestBatchingService: RequestBatchingService,
+    private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
+
+  /**
+   * Enrich Vayu (Vortex) items with UIR fields.
+   */
+  private enrichWithUir(item: any, token: string | number) {
+    const uirId = this.instrumentRegistry.resolveProviderToken('vortex', token);
+    const canonical_symbol =
+      uirId != null
+        ? (this.instrumentRegistry.getCanonicalSymbol(uirId) ?? null)
+        : null;
+    return {
+      ...item,
+      uir_id: uirId ?? null,
+      canonical_symbol,
+    };
+  }
 
   async getVortexHealth() {
     try {
@@ -79,24 +97,27 @@ export class VayuMarketDataService {
           const tokenNum = parseInt(p.token);
           const meta = !isNaN(tokenNum) ? metaMap[tokenNum] : null;
 
-          flat[key] = {
-            instrument_token: Number(p.token),
-            last_price: data.last_price,
-            // Add metadata if available
-            ...(meta
-              ? {
-                  description: meta.description,
-                  symbol: meta.symbol,
-                  exchange: meta.exchange,
-                  instrument_name: meta.instrument_name,
-                  expiry_date: meta.expiry_date,
-                  option_type: meta.option_type,
-                  strike_price: meta.strike_price,
-                  tick: meta.tick,
-                  lot_size: meta.lot_size,
-                }
-              : {}),
-          };
+          flat[key] = this.enrichWithUir(
+            {
+              instrument_token: Number(p.token),
+              last_price: data.last_price,
+              // Add metadata if available
+              ...(meta
+                ? {
+                    description: meta.description,
+                    symbol: meta.symbol,
+                    exchange: meta.exchange,
+                    instrument_name: meta.instrument_name,
+                    expiry_date: meta.expiry_date,
+                    option_type: meta.option_type,
+                    strike_price: meta.strike_price,
+                    tick: meta.tick,
+                    lot_size: meta.lot_size,
+                  }
+                : {}),
+            },
+            p.token,
+          );
         }
 
         return {
@@ -108,9 +129,17 @@ export class VayuMarketDataService {
       // Handle explicit exchange-token pairs (used by search-api vortex LTP hydration)
       if (body.pairs?.length) {
         const ltpData = await this.vortexProvider.getLTPByPairs(
-          body.pairs.map((p) => ({ exchange: p.exchange, token: String(p.token) })),
+          body.pairs.map((p) => ({
+            exchange: p.exchange,
+            token: String(p.token),
+          })),
         );
-        return { success: true, data: ltpData };
+        const enriched: Record<string, any> = {};
+        for (const [key, val] of Object.entries(ltpData)) {
+          // key is EXCHANGE-TOKEN (e.g. NSE_EQ-22)
+          enriched[key] = this.enrichWithUir(val, key);
+        }
+        return { success: true, data: enriched };
       }
 
       // Handle body instruments array (Vayu specific format)
@@ -131,9 +160,14 @@ export class VayuMarketDataService {
       const tokens = body.instruments;
       const ltp = await this.vortexInstrumentService.getVortexLTP(tokens);
 
+      const enriched: Record<number, any> = {};
+      for (const [token, val] of Object.entries(ltp)) {
+        enriched[Number(token)] = this.enrichWithUir(val, token);
+      }
+
       return {
         success: true,
-        data: ltp,
+        data: enriched,
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
@@ -185,9 +219,7 @@ export class VayuMarketDataService {
     const pairs = this.vortexInstrumentService.buildPairsFromInstruments(
       Object.values(result.instruments),
     );
-    const qParams = pairs
-      .map((p) => `q=${p.exchange}-${p.token}`)
-      .join('&');
+    const qParams = pairs.map((p) => `q=${p.exchange}-${p.token}`).join('&');
     return {
       success: true,
       pairs: pairs.map((p) => `${p.exchange}-${p.token}`),
@@ -204,4 +236,3 @@ export class VayuMarketDataService {
     return this.requestBatchingService.getBatchStats();
   }
 }
-

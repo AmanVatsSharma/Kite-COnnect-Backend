@@ -23,14 +23,27 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AdminGuard } from '@features/admin/guards/admin.guard';
 import { FalconInstrumentService } from '@features/falcon/application/falcon-instrument.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
 import { RedisService } from '@infra/redis/redis.service';
-import { FalconTokensDto, FalconHistoricalQueryDto, FalconBatchHistoricalDto, FalconCacheFlushDto } from './dto/falcon-market-data.dto';
+import {
+  FalconTokensDto,
+  FalconHistoricalQueryDto,
+  FalconBatchHistoricalDto,
+  FalconCacheFlushDto,
+} from './dto/falcon-market-data.dto';
 
 @ApiTags('admin-falcon')
 @ApiSecurity('admin')
@@ -48,32 +61,55 @@ export class AdminFalconController {
   // ─── Config ───────────────────────────────────────────────────────────────
 
   @Get('config')
-  @ApiOperation({ summary: 'View current Falcon (Kite) API credential status (masked)' })
+  @ApiOperation({
+    summary: 'View current Falcon (Kite) API credential status (masked)',
+  })
   async getConfig() {
     try {
       const data = await this.kiteProvider.getConfigStatus();
       return { success: true, data };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to read Falcon config', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to read Falcon config',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Patch('config')
-  @ApiOperation({ summary: 'Update Falcon (Kite) API key / secret — persists in Redis, survives restarts' })
+  @ApiOperation({
+    summary:
+      'Update Falcon (Kite) API key / secret — persists in Redis, survives restarts',
+  })
   async updateConfig(@Body() body: { apiKey?: string; apiSecret?: string }) {
     const { apiKey, apiSecret } = body || {};
     if (!apiKey?.trim()) {
-      throw new HttpException({ success: false, message: 'apiKey is required' }, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        { success: false, message: 'apiKey is required' },
+        HttpStatus.BAD_REQUEST,
+      );
     }
     try {
-      await this.kiteProvider.updateApiCredentials(apiKey.trim(), apiSecret?.trim());
-      return { success: true, message: 'Falcon API key updated. Re-authenticate at /api/auth/falcon/login to generate a new access token.' };
+      await this.kiteProvider.updateApiCredentials(
+        apiKey.trim(),
+        apiSecret?.trim(),
+      );
+      return {
+        success: true,
+        message:
+          'Falcon API key updated. Re-authenticate at /api/auth/falcon/login to generate a new access token.',
+      };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to update Falcon config', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to update Falcon config',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -82,21 +118,30 @@ export class AdminFalconController {
   // ─── Ticker Control ───────────────────────────────────────────────────────
 
   @Post('ticker/restart')
-  @ApiOperation({ summary: 'Restart Kite WebSocket ticker (resets reconnect counter)' })
+  @ApiOperation({
+    summary: 'Restart Kite WebSocket ticker (resets reconnect counter)',
+  })
   async restartTicker() {
     try {
       await this.kiteProvider.restartTicker();
       return { success: true, message: 'Kite ticker restarted successfully' };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to restart Kite ticker', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to restart Kite ticker',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('ticker/status')
-  @ApiOperation({ summary: 'Kite ticker health: connection state, reconnect count, upstream subscription utilization' })
+  @ApiOperation({
+    summary:
+      'Kite ticker health: connection state, reconnect count, upstream subscription utilization',
+  })
   async tickerStatus() {
     try {
       const debug = this.kiteProvider.getDebugStatus();
@@ -113,7 +158,11 @@ export class AdminFalconController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to fetch ticker status', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch ticker status',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -129,7 +178,11 @@ export class AdminFalconController {
       return { success: true, data };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to fetch Kite profile', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch Kite profile',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -140,12 +193,17 @@ export class AdminFalconController {
   @ApiQuery({ name: 'segment', required: false, enum: ['equity', 'commodity'] })
   async margins(@Query('segment') segment?: 'equity' | 'commodity') {
     try {
-      const seg = segment === 'equity' || segment === 'commodity' ? segment : undefined;
+      const seg =
+        segment === 'equity' || segment === 'commodity' ? segment : undefined;
       const data = await this.adapter.getMargins(seg);
       return { success: true, data };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to fetch Kite margins', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch Kite margins',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -161,7 +219,11 @@ export class AdminFalconController {
       return { success: true, data };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Falcon stats failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon stats failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -188,15 +250,29 @@ export class AdminFalconController {
         String(is_active_raw || '').toLowerCase() === 'true'
           ? true
           : String(is_active_raw || '').toLowerCase() === 'false'
-          ? false
-          : undefined;
-      const limit = Math.max(1, Math.min(1000, parseInt(String(limitRaw || '50')) || 50));
+            ? false
+            : undefined;
+      const limit = Math.max(
+        1,
+        Math.min(1000, parseInt(String(limitRaw || '50')) || 50),
+      );
       const offset = Math.max(0, parseInt(String(offsetRaw || '0')) || 0);
-      const result = await this.instruments.getFalconInstruments({ exchange, instrument_type, segment, is_active, limit, offset });
+      const result = await this.instruments.getFalconInstruments({
+        exchange,
+        instrument_type,
+        segment,
+        is_active,
+        limit,
+        offset,
+      });
       return { success: true, ...result };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to list instruments', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to list instruments',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -206,24 +282,40 @@ export class AdminFalconController {
   @ApiOperation({ summary: 'Full-text search Falcon instruments' })
   @ApiQuery({ name: 'q', required: true })
   @ApiQuery({ name: 'limit', required: false })
-  async searchInstruments(@Query('q') q?: string, @Query('limit') limitRaw?: string) {
+  async searchInstruments(
+    @Query('q') q?: string,
+    @Query('limit') limitRaw?: string,
+  ) {
     if (!q) {
-      throw new HttpException({ success: false, message: 'q is required' }, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        { success: false, message: 'q is required' },
+        HttpStatus.BAD_REQUEST,
+      );
     }
     try {
-      const limit = Math.max(1, Math.min(200, parseInt(String(limitRaw || '20')) || 20));
+      const limit = Math.max(
+        1,
+        Math.min(200, parseInt(String(limitRaw || '20')) || 20),
+      );
       const data = await this.instruments.searchFalconInstruments(q, limit);
       return { success: true, data };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Search failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Search failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('instruments/export')
-  @ApiOperation({ summary: 'Stream all Falcon instruments as NDJSON (chunked transfer encoding)' })
+  @ApiOperation({
+    summary:
+      'Stream all Falcon instruments as NDJSON (chunked transfer encoding)',
+  })
   @ApiQuery({ name: 'exchange', required: false })
   @ApiQuery({ name: 'instrument_type', required: false })
   @ApiQuery({ name: 'segment', required: false })
@@ -244,8 +336,8 @@ export class AdminFalconController {
       String(is_active_raw || '').toLowerCase() === 'true'
         ? true
         : String(is_active_raw || '').toLowerCase() === 'false'
-        ? false
-        : undefined;
+          ? false
+          : undefined;
     try {
       for (;;) {
         const { instruments } = await this.instruments.getFalconInstruments({
@@ -265,7 +357,10 @@ export class AdminFalconController {
       }
     } catch (e: any) {
       try {
-        res.write(JSON.stringify({ error: true, message: e?.message || 'unknown' }) + '\n');
+        res.write(
+          JSON.stringify({ error: true, message: e?.message || 'unknown' }) +
+            '\n',
+        );
       } catch {}
     } finally {
       res.end();
@@ -273,23 +368,38 @@ export class AdminFalconController {
   }
 
   @Get('instruments/resolve')
-  @ApiOperation({ summary: 'Resolve trading symbols to Falcon instrument tokens' })
+  @ApiOperation({
+    summary: 'Resolve trading symbols to Falcon instrument tokens',
+  })
   @ApiQuery({ name: 'symbols', required: true, example: 'RELIANCE,NIFTY' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
-  async resolveSymbols(@Query('symbols') symbolsRaw?: string, @Query('exchange') exchange?: string) {
+  async resolveSymbols(
+    @Query('symbols') symbolsRaw?: string,
+    @Query('exchange') exchange?: string,
+  ) {
     const symbols = String(symbolsRaw || '')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
     if (!symbols.length) {
-      throw new HttpException({ success: false, message: 'symbols is required' }, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        { success: false, message: 'symbols is required' },
+        HttpStatus.BAD_REQUEST,
+      );
     }
     try {
-      const data = await this.instruments.resolveSymbolsToTokens(symbols, exchange);
+      const data = await this.instruments.resolveSymbolsToTokens(
+        symbols,
+        exchange,
+      );
       return { success: true, data };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Symbol resolution failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Symbol resolution failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -299,11 +409,17 @@ export class AdminFalconController {
   @ApiOperation({ summary: 'Trigger Falcon instrument sync (blocking)' })
   async syncInstruments(@Body() body: { exchange?: string } = {}) {
     try {
-      const result = await this.instruments.syncFalconInstruments(body?.exchange);
+      const result = await this.instruments.syncFalconInstruments(
+        body?.exchange,
+      );
       return { success: true, ...result };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Sync failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Sync failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -314,14 +430,21 @@ export class AdminFalconController {
   @ApiQuery({ name: 'jobId', required: true })
   async syncStatus(@Query('jobId') jobId?: string) {
     if (!jobId) {
-      throw new HttpException({ success: false, message: 'jobId is required' }, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        { success: false, message: 'jobId is required' },
+        HttpStatus.BAD_REQUEST,
+      );
     }
     try {
       const v = await this.redis.get<any>(`falcon:sync:job:${jobId}`);
       return { success: true, jobId, status: v || null };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to read sync status', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to read sync status',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -335,33 +458,49 @@ export class AdminFalconController {
     try {
       const tokens = (body?.tokens || []).map(String).filter(Boolean);
       if (!tokens.length) {
-        throw new HttpException({ success: false, message: 'tokens array is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'tokens array is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const data = await this.adapter.getLTP(tokens);
       return { success: true, data, timestamp: new Date().toISOString() };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'LTP failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'LTP failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Post('quote')
-  @ApiOperation({ summary: 'Full quote (OHLC, depth, OI, Greeks) for instrument tokens' })
+  @ApiOperation({
+    summary: 'Full quote (OHLC, depth, OI, Greeks) for instrument tokens',
+  })
   async quote(@Body() body: FalconTokensDto) {
     try {
       const tokens = (body?.tokens || []).map(String).filter(Boolean);
       if (!tokens.length) {
-        throw new HttpException({ success: false, message: 'tokens array is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'tokens array is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const data = await this.adapter.getQuote(tokens);
       return { success: true, data, timestamp: new Date().toISOString() };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Quote failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Quote failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -373,35 +512,63 @@ export class AdminFalconController {
     try {
       const tokens = (body?.tokens || []).map(String).filter(Boolean);
       if (!tokens.length) {
-        throw new HttpException({ success: false, message: 'tokens array is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'tokens array is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const data = await this.adapter.getOHLC(tokens);
       return { success: true, data, timestamp: new Date().toISOString() };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'OHLC failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'OHLC failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Post('historical/batch')
-  @ApiOperation({ summary: 'Batch historical candles for up to 10 tokens in a single call' })
-  @ApiBody({ type: FalconBatchHistoricalDto, description: 'Array of up to 10 historical data requests' })
-  @ApiResponse({ status: 200, description: 'Map of token → candle data (or error per token if one failed)' })
+  @ApiOperation({
+    summary: 'Batch historical candles for up to 10 tokens in a single call',
+  })
+  @ApiBody({
+    type: FalconBatchHistoricalDto,
+    description: 'Array of up to 10 historical data requests',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Map of token → candle data (or error per token if one failed)',
+  })
   async adminHistoricalBatch(@Body() body: FalconBatchHistoricalDto) {
     try {
       const requests = (body?.requests || []).slice(0, 10);
       if (!requests.length) {
-        throw new HttpException({ success: false, message: 'requests array is required (max 10)' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'requests array is required (max 10)' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const data = await this.adapter.getBatchHistoricalData(requests);
-      return { success: true, data, count: Object.keys(data).length, timestamp: new Date().toISOString() };
+      return {
+        success: true,
+        data,
+        count: Object.keys(data).length,
+        timestamp: new Date().toISOString(),
+      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Batch historical failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Batch historical failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -411,26 +578,59 @@ export class AdminFalconController {
   @ApiOperation({ summary: 'Historical candles for a single instrument token' })
   @ApiQuery({ name: 'from', required: true, example: '2026-04-01' })
   @ApiQuery({ name: 'to', required: true, example: '2026-04-11' })
-  @ApiQuery({ name: 'interval', required: true, enum: ['minute','3minute','5minute','10minute','15minute','30minute','60minute','day'] })
+  @ApiQuery({
+    name: 'interval',
+    required: true,
+    enum: [
+      'minute',
+      '3minute',
+      '5minute',
+      '10minute',
+      '15minute',
+      '30minute',
+      '60minute',
+      'day',
+    ],
+  })
   @ApiQuery({ name: 'continuous', required: false })
   @ApiQuery({ name: 'oi', required: false })
-  async historical(@Param('token') tokenRaw: string, @Query() q: FalconHistoricalQueryDto) {
+  async historical(
+    @Param('token') tokenRaw: string,
+    @Query() q: FalconHistoricalQueryDto,
+  ) {
     try {
       const token = Number(tokenRaw);
       if (!Number.isFinite(token)) {
-        throw new HttpException({ success: false, message: 'Invalid token' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'Invalid token' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       if (!q.from || !q.to || !q.interval) {
-        throw new HttpException({ success: false, message: 'from, to, and interval are required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'from, to, and interval are required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const continuous = String(q.continuous || '').toLowerCase() === 'true';
       const oi = String(q.oi || '').toLowerCase() === 'true';
-      const data = await this.adapter.getHistoricalData(token, q.from, q.to, q.interval, continuous, oi);
+      const data = await this.adapter.getHistoricalData(
+        token,
+        q.from,
+        q.to,
+        q.interval,
+        continuous,
+        oi,
+      );
       return { success: true, data, timestamp: new Date().toISOString() };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Historical data failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Historical data failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -440,8 +640,10 @@ export class AdminFalconController {
 
   @Get('session')
   @ApiOperation({
-    summary: 'Kite session health: token age, Redis TTL, connection state, last error',
-    description: 'Use to drive the auth wizard status card. ttlSeconds < 0 means the key is missing (-2) or has no expiry (-1).',
+    summary:
+      'Kite session health: token age, Redis TTL, connection state, last error',
+    description:
+      'Use to drive the auth wizard status card. ttlSeconds < 0 means the key is missing (-2) or has no expiry (-1).',
   })
   @ApiResponse({
     status: 200,
@@ -449,8 +651,13 @@ export class AdminFalconController {
       example: {
         success: true,
         data: {
-          hasToken: true, maskedToken: 'ab••••xy', createdAt: 1713000000000,
-          ttlSeconds: 72000, connected: true, degraded: false, lastError: null,
+          hasToken: true,
+          maskedToken: 'ab••••xy',
+          createdAt: 1713000000000,
+          ttlSeconds: 72000,
+          connected: true,
+          degraded: false,
+          lastError: null,
         },
       },
     },
@@ -459,7 +666,9 @@ export class AdminFalconController {
     try {
       const cfg = await this.kiteProvider.getConfigStatus();
       const debug = this.kiteProvider.getDebugStatus();
-      const createdAtRaw = await this.redis.get<string>('kite:access_token_created_at');
+      const createdAtRaw = await this.redis.get<string>(
+        'kite:access_token_created_at',
+      );
       const pttlMs = await this.redis.pttl('kite:access_token');
       const ttlSeconds = pttlMs > 0 ? Math.floor(pttlMs / 1000) : pttlMs;
       return {
@@ -476,7 +685,11 @@ export class AdminFalconController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to fetch session health', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch session health',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -484,19 +697,36 @@ export class AdminFalconController {
 
   @Delete('session')
   @ApiOperation({
-    summary: 'Revoke Kite access token — clears Redis cache and restarts ticker in degraded mode',
-    description: 'Use the "Revoke" button in the admin auth wizard. The ticker will halt until a new token is obtained via /auth/falcon/login.',
+    summary:
+      'Revoke Kite access token — clears Redis cache and restarts ticker in degraded mode',
+    description:
+      'Use the "Revoke" button in the admin auth wizard. The ticker will halt until a new token is obtained via /auth/falcon/login.',
   })
-  @ApiResponse({ status: 200, schema: { example: { success: true, message: 'Kite session revoked. Re-authenticate to restore.' } } })
+  @ApiResponse({
+    status: 200,
+    schema: {
+      example: {
+        success: true,
+        message: 'Kite session revoked. Re-authenticate to restore.',
+      },
+    },
+  })
   async revokeSession() {
     try {
       await this.redis.del('kite:access_token');
       await this.redis.del('kite:access_token_created_at');
       await this.kiteProvider.restartTicker();
-      return { success: true, message: 'Kite session revoked. Re-authenticate to restore.' };
+      return {
+        success: true,
+        message: 'Kite session revoked. Re-authenticate to restore.',
+      };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Session revoke failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Session revoke failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -507,7 +737,8 @@ export class AdminFalconController {
   @Get('ticker/shards')
   @ApiOperation({
     summary: 'Per-shard Kite WebSocket status and total capacity',
-    description: 'Returns per-shard connection state, subscribed token counts, and aggregate capacity utilization. Meaningful only when KITE_WS_MAX_SHARDS > 1; returns a single shard entry when default (1).',
+    description:
+      'Returns per-shard connection state, subscribed token counts, and aggregate capacity utilization. Meaningful only when KITE_WS_MAX_SHARDS > 1; returns a single shard entry when default (1).',
   })
   @ApiResponse({
     status: 200,
@@ -516,8 +747,20 @@ export class AdminFalconController {
       example: {
         success: true,
         data: {
-          shards: [{ index: 0, isConnected: true, subscribedCount: 1500, reconnectAttempts: 0, reconnectCount: 2, disableReconnect: false }],
-          totalCapacity: 3000, used: 1500, remaining: 1500, utilizationPct: 50,
+          shards: [
+            {
+              index: 0,
+              isConnected: true,
+              subscribedCount: 1500,
+              reconnectAttempts: 0,
+              reconnectCount: 2,
+              disableReconnect: false,
+            },
+          ],
+          totalCapacity: 3000,
+          used: 1500,
+          remaining: 1500,
+          utilizationPct: 50,
         },
       },
     },
@@ -539,7 +782,11 @@ export class AdminFalconController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to fetch shard status', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch shard status',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -549,26 +796,48 @@ export class AdminFalconController {
 
   @Get('options/chain/:symbol')
   @ApiOperation({
-    summary: 'Options chain for an underlying symbol (admin view, with Redis cache)',
-    description: 'Returns call/put strikes grouped by expiry. Cached in Redis: 60s during market hours (9:15–15:30 IST), 300s otherwise. Use DELETE /cache/flush { type: "options", symbol } to invalidate.',
+    summary:
+      'Options chain for an underlying symbol (admin view, with Redis cache)',
+    description:
+      'Returns call/put strikes grouped by expiry. Cached in Redis: 60s during market hours (9:15–15:30 IST), 300s otherwise. Use DELETE /cache/flush { type: "options", symbol } to invalidate.',
   })
-  @ApiParam({ name: 'symbol', required: true, example: 'NIFTY', description: 'Underlying symbol (case-insensitive)' })
-  @ApiQuery({ name: 'ltp_only', required: false, description: 'If true, only CE/PE LTPs are populated (faster); no full quote data' })
-  @ApiResponse({ status: 200, description: 'Options chain with expiries, strikes, CE/PE tokens and LTPs' })
+  @ApiParam({
+    name: 'symbol',
+    required: true,
+    example: 'NIFTY',
+    description: 'Underlying symbol (case-insensitive)',
+  })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    description:
+      'If true, only CE/PE LTPs are populated (faster); no full quote data',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Options chain with expiries, strikes, CE/PE tokens and LTPs',
+  })
   async adminOptionsChain(
     @Param('symbol') symbol: string,
     @Query('ltp_only') ltpOnlyRaw?: string,
   ) {
     try {
       if (!symbol) {
-        throw new HttpException({ success: false, message: 'symbol is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'symbol is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true';
       return await this.instruments.getOptionsChain(symbol, ltpOnly);
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Options chain failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Options chain failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -579,22 +848,40 @@ export class AdminFalconController {
   @Delete('cache/flush')
   @ApiOperation({
     summary: 'Flush Falcon Redis caches: options, ltp, or historical by token',
-    description: 'type=options requires symbol; type=ltp or type=historical requires token. Uses Redis SCAN+DEL for wildcard patterns.',
+    description:
+      'type=options requires symbol; type=ltp or type=historical requires token. Uses Redis SCAN+DEL for wildcard patterns.',
   })
   @ApiBody({ type: FalconCacheFlushDto })
-  @ApiResponse({ status: 200, description: 'Number of keys deleted', schema: { example: { success: true, deleted: 4, type: 'options', symbol: 'NIFTY' } } })
-  async flushCache(
-    @Body() body: FalconCacheFlushDto,
-  ) {
+  @ApiResponse({
+    status: 200,
+    description: 'Number of keys deleted',
+    schema: {
+      example: { success: true, deleted: 4, type: 'options', symbol: 'NIFTY' },
+    },
+  })
+  async flushCache(@Body() body: FalconCacheFlushDto) {
     try {
       const { type, symbol, token } = body || {};
       if (!type) {
-        throw new HttpException({ success: false, message: 'type is required (options|ltp|historical)' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          {
+            success: false,
+            message: 'type is required (options|ltp|historical)',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       let deleted = 0;
       if (type === 'options') {
         const sym = String(symbol || '').toUpperCase();
-        if (!sym) throw new HttpException({ success: false, message: 'symbol required for options cache flush' }, HttpStatus.BAD_REQUEST);
+        if (!sym)
+          throw new HttpException(
+            {
+              success: false,
+              message: 'symbol required for options cache flush',
+            },
+            HttpStatus.BAD_REQUEST,
+          );
         deleted += await this.redis.scanDelete(`falcon:options:chain:${sym}*`);
       } else if (type === 'ltp' && token) {
         await this.redis.del(`ltp:${token}`);
@@ -602,13 +889,23 @@ export class AdminFalconController {
       } else if (type === 'historical' && token) {
         deleted += await this.redis.scanDelete(`falcon:hist:${token}:*`);
       } else {
-        throw new HttpException({ success: false, message: 'Provide symbol (options) or token (ltp|historical)' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          {
+            success: false,
+            message: 'Provide symbol (options) or token (ltp|historical)',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       return { success: true, deleted, type, symbol, token };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Cache flush failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Cache flush failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

@@ -126,9 +126,8 @@ export class VayuController {
     @Body() body: ValidateInstrumentsDto,
     @Request() req?: any,
   ) {
-    const result = await this.vayuManagementService.validateInstrumentsExport(
-      body,
-    );
+    const result =
+      await this.vayuManagementService.validateInstrumentsExport(body);
     const csv =
       'token,exchange,symbol,instrument_name,reason,desc\n' +
       result.rows
@@ -189,7 +188,11 @@ export class VayuController {
   @ApiQuery({ name: 'is_active', required: false, example: true })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
-  @ApiQuery({ name: 'q', required: false, description: 'Fuzzy symbol/name search' })
+  @ApiQuery({
+    name: 'q',
+    required: false,
+    description: 'Fuzzy symbol/name search',
+  })
   @ApiQuery({
     name: 'ltp_only',
     required: false,
@@ -238,7 +241,11 @@ export class VayuController {
   @ApiQuery({ name: 'q', required: true, example: 'RELIANCE' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE_EQ' })
   @ApiQuery({ name: 'instrument_type', required: false, example: 'EQUITIES' })
-  @ApiQuery({ name: 'symbol', required: false, description: 'Exact symbol match' })
+  @ApiQuery({
+    name: 'symbol',
+    required: false,
+    description: 'Exact symbol match',
+  })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiQuery({ name: 'offset', required: false, example: 0 })
   @ApiQuery({
@@ -252,7 +259,8 @@ export class VayuController {
     name: 'ltp_only',
     required: false,
     example: false,
-    description: 'If true, only instruments with a valid last_price are returned',
+    description:
+      'If true, only instruments with a valid last_price are returned',
   })
   async searchVortexInstruments(
     @Query('q') q: string,
@@ -325,11 +333,7 @@ export class VayuController {
     @Query('csv_url') csvUrl?: string,
     @Query('async') asyncRaw?: string | boolean,
   ) {
-    return this.vayuManagementService.startVayuSync(
-      exchange,
-      csvUrl,
-      asyncRaw,
-    );
+    return this.vayuManagementService.startVayuSync(exchange, csvUrl, asyncRaw);
   }
 
   @Post('instruments/sync/start')
@@ -490,8 +494,7 @@ export class VayuController {
 
   @Get('futures')
   @ApiOperation({
-    summary:
-      'Get Vayu futures (FUTSTK, FUTIDX) with filters and smart sorting',
+    summary: 'Get Vayu futures (FUTSTK, FUTIDX) with filters and smart sorting',
   })
   @ApiQuery({ name: 'q', required: false, description: 'Search query' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE_FO' })
@@ -705,7 +708,8 @@ export class VayuController {
     name: 'ltp_only',
     required: false,
     example: false,
-    description: 'If true, only instruments with a valid last_price are returned',
+    description:
+      'If true, only instruments with a valid last_price are returned',
   })
   @ApiQuery({
     name: 'include_ltp',
@@ -769,4 +773,3 @@ export class VayuController {
     return this.vayuManagementService.clearVortexCache(body);
   }
 }
-

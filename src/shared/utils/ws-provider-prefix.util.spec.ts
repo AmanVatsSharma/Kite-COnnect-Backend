@@ -21,10 +21,13 @@ describe('parseProviderPrefix', () => {
       ['polygon:BTC-USD', 'massive', 'BTC-USD'],
       ['Binance:BTCUSDT', 'binance', 'BTCUSDT'],
       ['BINANCE:btcusdt', 'binance', 'btcusdt'],
-    ])('parses %s → provider=%s, identifier=%s', (input, provider, identifier) => {
-      const result = parseProviderPrefix(input);
-      expect(result).toEqual({ provider, identifier, raw: input.trim() });
-    });
+    ])(
+      'parses %s → provider=%s, identifier=%s',
+      (input, provider, identifier) => {
+        const result = parseProviderPrefix(input);
+        expect(result).toEqual({ provider, identifier, raw: input.trim() });
+      },
+    );
 
     it('splits on FIRST colon only — preserves nested canonical', () => {
       expect(parseProviderPrefix('Falcon:NSE:RELIANCE')).toEqual({

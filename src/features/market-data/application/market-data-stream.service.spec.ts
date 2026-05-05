@@ -92,7 +92,9 @@ describe('MarketDataStreamService', () => {
         {
           provide: InstrumentRegistryService,
           useValue: {
-            resolveProviderToken: jest.fn((provider: string, token: number) => token),
+            resolveProviderToken: jest.fn(
+              (provider: string, token: number) => token,
+            ),
             getCanonicalSymbol: jest.fn((uirId: number) => `NSE:MOCK_${uirId}`),
             getProviderToken: jest.fn((uirId: number) => String(uirId)),
             // Default to no routing target so the 500ms batch processor noops in tests that
@@ -121,7 +123,9 @@ describe('MarketDataStreamService', () => {
   afterEach(async () => {
     // subscribeToInstruments() starts a 500ms batch interval; tear it down so the
     // process can exit cleanly. onModuleDestroy() clears all timers and tickers.
-    try { await service.onModuleDestroy(); } catch {}
+    try {
+      await service.onModuleDestroy();
+    } catch {}
   });
 
   it('handleTicks calls forwardRealtimeTick before enqueuePersistMarketData', async () => {
@@ -184,12 +188,16 @@ describe('MarketDataStreamService', () => {
     });
 
     it('first-writer wins on conflicting pin (warns, keeps original)', async () => {
-      const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+      const warnSpy = jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => undefined);
       await service.subscribeToInstruments([100], 'ltp', 'cli-1', 'kite');
       await service.subscribeToInstruments([100], 'ltp', 'cli-2', 'vortex');
       const map = (service as any).forcedProviderByUir as Map<number, string>;
       expect(map.get(100)).toBe('kite');
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('already pinned to kite'));
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('already pinned to kite'),
+      );
       warnSpy.mockRestore();
     });
 

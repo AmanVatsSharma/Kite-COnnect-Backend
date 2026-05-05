@@ -23,7 +23,12 @@ export type FlexResolveResult =
 
 /** Result of a provider-scoped symbol resolution attempt. */
 export type ProviderScopedResolveResult =
-  | { status: 'resolved'; uirId: number; canonical: string; providerToken: string }
+  | {
+      status: 'resolved';
+      uirId: number;
+      canonical: string;
+      providerToken: string;
+    }
   | { status: 'ambiguous'; candidates: string[] }
   | { status: 'not_found' };
 
@@ -78,7 +83,12 @@ export class InstrumentRegistryService implements OnModuleInit {
       if (row.underlying) {
         const underlyingKey = row.underlying.toUpperCase();
         const existing = this.underlyingToEntries.get(underlyingKey) ?? [];
-        existing.push({ uirId: id, exchange: row.exchange, instrument_type: row.instrument_type, canonical: row.canonical_symbol });
+        existing.push({
+          uirId: id,
+          exchange: row.exchange,
+          instrument_type: row.instrument_type,
+          canonical: row.canonical_symbol,
+        });
         this.underlyingToEntries.set(underlyingKey, existing);
       }
     }
@@ -145,7 +155,12 @@ export class InstrumentRegistryService implements OnModuleInit {
   resolveTokenAcrossProviders(
     providerToken: string | number,
   ): number | undefined {
-    const providers: InternalProviderName[] = ['kite', 'vortex', 'massive', 'binance'];
+    const providers: InternalProviderName[] = [
+      'kite',
+      'vortex',
+      'massive',
+      'binance',
+    ];
     for (const p of providers) {
       const id = this.providerTokenToUirId.get(`${p}:${providerToken}`);
       if (id !== undefined) return id;
@@ -181,7 +196,8 @@ export class InstrumentRegistryService implements OnModuleInit {
   resolveFlexSymbol(symbol: string): FlexResolveResult {
     // Fast path: exact canonical match (e.g. "NSE:RELIANCE")
     const exactId = this.canonicalToUirId.get(symbol);
-    if (exactId != null) return { status: 'resolved', uirId: exactId, canonical: symbol };
+    if (exactId != null)
+      return { status: 'resolved', uirId: exactId, canonical: symbol };
 
     // Underlying fallback: case-insensitive lookup (e.g. "RELIANCE", "reliance")
     const key = symbol.trim().toUpperCase();
@@ -189,22 +205,31 @@ export class InstrumentRegistryService implements OnModuleInit {
     if (!entries || entries.length === 0) return { status: 'not_found' };
 
     // Prefer EQ, then IDX. Never auto-resolve FUT/CE/PE (expiry makes them ambiguous).
-    const eq = entries.filter(e => e.instrument_type === 'EQ');
-    const pool = eq.length > 0 ? eq : entries.filter(e => e.instrument_type === 'IDX');
+    const eq = entries.filter((e) => e.instrument_type === 'EQ');
+    const pool =
+      eq.length > 0 ? eq : entries.filter((e) => e.instrument_type === 'IDX');
 
     if (pool.length === 0) {
-      return { status: 'ambiguous', candidates: entries.map(e => e.canonical) };
+      return {
+        status: 'ambiguous',
+        candidates: entries.map((e) => e.canonical),
+      };
     }
 
     if (pool.length === 1) {
-      return { status: 'resolved', uirId: pool[0].uirId, canonical: pool[0].canonical };
+      return {
+        status: 'resolved',
+        uirId: pool[0].uirId,
+        canonical: pool[0].canonical,
+      };
     }
 
     // Multiple EQ entries (e.g. NSE + BSE): prefer NSE as primary Indian exchange.
-    const nse = pool.find(e => e.exchange === 'NSE');
-    if (nse) return { status: 'resolved', uirId: nse.uirId, canonical: nse.canonical };
+    const nse = pool.find((e) => e.exchange === 'NSE');
+    if (nse)
+      return { status: 'resolved', uirId: nse.uirId, canonical: nse.canonical };
 
-    return { status: 'ambiguous', candidates: pool.map(e => e.canonical) };
+    return { status: 'ambiguous', candidates: pool.map((e) => e.canonical) };
   }
 
   /**
@@ -236,7 +261,9 @@ export class InstrumentRegistryService implements OnModuleInit {
     const direct = this.providerTokenToUirId.get(`${provider}:${identifier}`);
     if (direct != null) {
       const canonical = this.uirIdToCanonical.get(direct);
-      const providerToken = this.uirIdToProviderTokens.get(direct)?.get(provider);
+      const providerToken = this.uirIdToProviderTokens
+        .get(direct)
+        ?.get(provider);
       if (canonical && providerToken) {
         return { status: 'resolved', uirId: direct, canonical, providerToken };
       }
@@ -248,20 +275,36 @@ export class InstrumentRegistryService implements OnModuleInit {
       const upperHit = this.providerTokenToUirId.get(`${provider}:${upperId}`);
       if (upperHit != null) {
         const canonical = this.uirIdToCanonical.get(upperHit);
-        const providerToken = this.uirIdToProviderTokens.get(upperHit)?.get(provider);
+        const providerToken = this.uirIdToProviderTokens
+          .get(upperHit)
+          ?.get(provider);
         if (canonical && providerToken) {
-          return { status: 'resolved', uirId: upperHit, canonical, providerToken };
+          return {
+            status: 'resolved',
+            uirId: upperHit,
+            canonical,
+            providerToken,
+          };
         }
       }
     }
 
     // 2. Exact canonical match — must have a token in the requested provider.
-    const exactCanon = this.canonicalToUirId.get(identifier) ?? this.canonicalToUirId.get(upperId);
+    const exactCanon =
+      this.canonicalToUirId.get(identifier) ??
+      this.canonicalToUirId.get(upperId);
     if (exactCanon != null) {
-      const providerToken = this.uirIdToProviderTokens.get(exactCanon)?.get(provider);
+      const providerToken = this.uirIdToProviderTokens
+        .get(exactCanon)
+        ?.get(provider);
       if (providerToken) {
         const canonical = this.uirIdToCanonical.get(exactCanon)!;
-        return { status: 'resolved', uirId: exactCanon, canonical, providerToken };
+        return {
+          status: 'resolved',
+          uirId: exactCanon,
+          canonical,
+          providerToken,
+        };
       }
       // Canonical exists but the requested provider has no mapping for it — not_found in this provider's catalog.
       return { status: 'not_found' };
@@ -278,13 +321,21 @@ export class InstrumentRegistryService implements OnModuleInit {
     if (inProvider.length === 0) return { status: 'not_found' };
 
     const eq = inProvider.filter((e) => e.instrument_type === 'EQ');
-    const pool = eq.length > 0 ? eq : inProvider.filter((e) => e.instrument_type === 'IDX');
+    const pool =
+      eq.length > 0
+        ? eq
+        : inProvider.filter((e) => e.instrument_type === 'IDX');
 
     if (pool.length === 0) {
-      return { status: 'ambiguous', candidates: inProvider.map((e) => e.canonical) };
+      return {
+        status: 'ambiguous',
+        candidates: inProvider.map((e) => e.canonical),
+      };
     }
     if (pool.length === 1) {
-      const providerToken = this.uirIdToProviderTokens.get(pool[0].uirId)!.get(provider)!;
+      const providerToken = this.uirIdToProviderTokens
+        .get(pool[0].uirId)!
+        .get(provider)!;
       return {
         status: 'resolved',
         uirId: pool[0].uirId,
@@ -296,8 +347,15 @@ export class InstrumentRegistryService implements OnModuleInit {
     // Multiple EQ entries (e.g. NSE + BSE within same provider): prefer NSE.
     const nse = pool.find((e) => e.exchange === 'NSE');
     if (nse) {
-      const providerToken = this.uirIdToProviderTokens.get(nse.uirId)!.get(provider)!;
-      return { status: 'resolved', uirId: nse.uirId, canonical: nse.canonical, providerToken };
+      const providerToken = this.uirIdToProviderTokens
+        .get(nse.uirId)!
+        .get(provider)!;
+      return {
+        status: 'resolved',
+        uirId: nse.uirId,
+        canonical: nse.canonical,
+        providerToken,
+      };
     }
 
     return { status: 'ambiguous', candidates: pool.map((e) => e.canonical) };
@@ -327,7 +385,8 @@ export class InstrumentRegistryService implements OnModuleInit {
 
     if (providerMap?.size) {
       const indian = new Set(['NSE', 'BSE', 'NFO', 'BFO', 'MCX', 'CDS', 'BCD']);
-      if (exchange && indian.has(exchange) && providerMap.has('vortex')) return 'vortex';
+      if (exchange && indian.has(exchange) && providerMap.has('vortex'))
+        return 'vortex';
       if (providerMap.has('kite')) return 'kite';
       if (providerMap.has('massive')) return 'massive';
       if (providerMap.has('binance')) return 'binance';

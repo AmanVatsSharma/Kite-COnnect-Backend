@@ -15,21 +15,21 @@ import {
   HttpStatus,
   UseGuards,
   Request,
-} from "@nestjs/common";
-import { StockService } from "@features/stock/application/stock.service";
+} from '@nestjs/common';
+import { StockService } from '@features/stock/application/stock.service';
 import {
   ApiTags,
   ApiOperation,
   ApiQuery,
   ApiSecurity,
   ApiHeader,
-} from "@nestjs/swagger";
-import { ApiKeyGuard } from "@shared/guards/api-key.guard";
+} from '@nestjs/swagger';
+import { ApiKeyGuard } from '@shared/guards/api-key.guard';
 
-@Controller("stock")
+@Controller('stock')
 @UseGuards(ApiKeyGuard)
-@ApiTags("stock")
-@ApiSecurity("apiKey")
+@ApiTags('stock')
+@ApiSecurity('apiKey')
 export class StockInstrumentsController {
   constructor(private readonly stockService: StockService) {}
 

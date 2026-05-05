@@ -24,9 +24,23 @@ import { FalconInstrumentService } from '@features/falcon/application/falcon-ins
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
 import { RedisService } from '@infra/redis/redis.service';
 import { randomUUID } from 'crypto';
-import { ApiBadRequestResponse, ApiBody, ApiHeader, ApiOkResponse, ApiOperation, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiBody,
+  ApiHeader,
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ApiKeyGuard } from '@shared/guards/api-key.guard';
-import { FalconTokensDto, FalconHistoricalQueryDto, FalconBatchHistoricalDto } from './dto/falcon-market-data.dto';
+import {
+  FalconTokensDto,
+  FalconHistoricalQueryDto,
+  FalconBatchHistoricalDto,
+} from './dto/falcon-market-data.dto';
 
 @ApiTags('falcon')
 @UseGuards(ApiKeyGuard)
@@ -64,19 +78,23 @@ export class FalconController {
   }
 
   @Post('instruments/sync')
-  @ApiOperation({ summary: 'Sync Falcon (Kite) instruments into falcon_instruments' })
+  @ApiOperation({
+    summary: 'Sync Falcon (Kite) instruments into falcon_instruments',
+  })
   @ApiQuery({ name: 'exchange', required: false })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
-  async syncInstruments(
-    @Query('exchange') exchange?: string,
-  ) {
+  async syncInstruments(@Query('exchange') exchange?: string) {
     try {
       const res = await this.falconInstruments.syncFalconInstruments(exchange);
       return { success: true, ...res };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon sync failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon sync failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -92,8 +110,16 @@ export class FalconController {
     @Query('offset') offsetRaw?: string,
   ) {
     try {
-      const is_active = String(is_active_raw || '').toLowerCase() === 'true' ? true : String(is_active_raw || '').toLowerCase() === 'false' ? false : undefined;
-      const limit = Math.max(1, Math.min(1000, parseInt(String(limitRaw || '100')) || 100));
+      const is_active =
+        String(is_active_raw || '').toLowerCase() === 'true'
+          ? true
+          : String(is_active_raw || '').toLowerCase() === 'false'
+            ? false
+            : undefined;
+      const limit = Math.max(
+        1,
+        Math.min(1000, parseInt(String(limitRaw || '100')) || 100),
+      );
       const offset = Math.max(0, parseInt(String(offsetRaw || '0')) || 0);
       const result = await this.falconInstruments.getFalconInstruments({
         exchange,
@@ -107,14 +133,21 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to fetch Falcon instruments', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch Falcon instruments',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('instruments/export')
-  @ApiOperation({ summary: 'Stream all Falcon instruments as NDJSON (chunked transfer encoding)' })
+  @ApiOperation({
+    summary:
+      'Stream all Falcon instruments as NDJSON (chunked transfer encoding)',
+  })
   @ApiQuery({ name: 'exchange', required: false })
   @ApiQuery({ name: 'instrument_type', required: false })
   @ApiQuery({ name: 'segment', required: false })
@@ -136,18 +169,19 @@ export class FalconController {
       String(is_active_raw || '').toLowerCase() === 'true'
         ? true
         : String(is_active_raw || '').toLowerCase() === 'false'
-        ? false
-        : undefined;
+          ? false
+          : undefined;
     try {
       for (;;) {
-        const { instruments } = await this.falconInstruments.getFalconInstruments({
-          exchange,
-          instrument_type,
-          segment,
-          is_active,
-          limit: PAGE,
-          offset,
-        });
+        const { instruments } =
+          await this.falconInstruments.getFalconInstruments({
+            exchange,
+            instrument_type,
+            segment,
+            is_active,
+            limit: PAGE,
+            offset,
+          });
         if (!instruments.length) break;
         for (const inst of instruments) {
           res.write(JSON.stringify(inst) + '\n');
@@ -158,7 +192,10 @@ export class FalconController {
     } catch (e: any) {
       // Best-effort: write error as final NDJSON line then close
       try {
-        res.write(JSON.stringify({ error: true, message: e?.message || 'unknown' }) + '\n');
+        res.write(
+          JSON.stringify({ error: true, message: e?.message || 'unknown' }) +
+            '\n',
+        );
       } catch {}
     } finally {
       res.end();
@@ -166,7 +203,9 @@ export class FalconController {
   }
 
   @Get('instruments/resolve')
-  @ApiOperation({ summary: 'Resolve trading symbols to Falcon instrument tokens' })
+  @ApiOperation({
+    summary: 'Resolve trading symbols to Falcon instrument tokens',
+  })
   @ApiQuery({ name: 'symbols', required: true, example: 'RELIANCE,NIFTY,SBIN' })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
@@ -180,17 +219,27 @@ export class FalconController {
       .filter(Boolean);
     if (!symbols.length) {
       throw new HttpException(
-        { success: false, message: 'symbols query param is required (comma-separated)' },
+        {
+          success: false,
+          message: 'symbols query param is required (comma-separated)',
+        },
         HttpStatus.BAD_REQUEST,
       );
     }
     try {
-      const data = await this.falconInstruments.resolveSymbolsToTokens(symbols, exchange);
+      const data = await this.falconInstruments.resolveSymbolsToTokens(
+        symbols,
+        exchange,
+      );
       return { success: true, data };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Symbol resolution failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Symbol resolution failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -201,17 +250,28 @@ export class FalconController {
     try {
       const token = Number(tokenRaw);
       if (!Number.isFinite(token)) {
-        throw new HttpException({ success: false, message: 'Invalid token' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'Invalid token' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
-      const instrument = await this.falconInstruments.getFalconInstrumentByToken(token);
+      const instrument =
+        await this.falconInstruments.getFalconInstrumentByToken(token);
       if (!instrument) {
-        throw new HttpException({ success: false, message: 'Instrument not found' }, HttpStatus.NOT_FOUND);
+        throw new HttpException(
+          { success: false, message: 'Instrument not found' },
+          HttpStatus.NOT_FOUND,
+        );
       }
       return { success: true, data: instrument };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to fetch Falcon instrument', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch Falcon instrument',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -221,15 +281,28 @@ export class FalconController {
   async search(@Query('q') q?: string, @Query('limit') limitRaw?: string) {
     try {
       if (!q) {
-        throw new HttpException({ success: false, message: 'q is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'q is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
-      const limit = Math.max(1, Math.min(200, parseInt(String(limitRaw || '20')) || 20));
-      const data = await this.falconInstruments.searchFalconInstruments(q, limit);
+      const limit = Math.max(
+        1,
+        Math.min(200, parseInt(String(limitRaw || '20')) || 20),
+      );
+      const data = await this.falconInstruments.searchFalconInstruments(
+        q,
+        limit,
+      );
       return { success: true, data };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon search failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon search failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -243,14 +316,20 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon stats failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon stats failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Post('instruments/sync/stream')
-  @ApiOperation({ summary: 'Stream live status while syncing Falcon instruments (SSE)' })
+  @ApiOperation({
+    summary: 'Stream live status while syncing Falcon instruments (SSE)',
+  })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async syncInstrumentsStream(
     @Res() res: Response,
@@ -267,26 +346,55 @@ export class FalconController {
         res.write(`data: ${JSON.stringify(data)}\n\n`);
       } catch {}
     };
-    write({ event: 'started', jobId, exchange: exchange || 'all', ts: Date.now() });
+    write({
+      event: 'started',
+      jobId,
+      exchange: exchange || 'all',
+      ts: Date.now(),
+    });
     setImmediate(async () => {
       try {
         await this.redis.set(key, { status: 'started', ts: Date.now() }, 3600);
       } catch {}
       try {
-        const summary = await this.falconInstruments.syncFalconInstruments(exchange, undefined, async (p) => {
-          write({ event: 'progress', ...p, ts: Date.now() });
-          try {
-            await this.redis.set(key, { status: 'running', progress: p, ts: Date.now() }, 3600);
-          } catch {}
-        });
+        const summary = await this.falconInstruments.syncFalconInstruments(
+          exchange,
+          undefined,
+          async (p) => {
+            write({ event: 'progress', ...p, ts: Date.now() });
+            try {
+              await this.redis.set(
+                key,
+                { status: 'running', progress: p, ts: Date.now() },
+                3600,
+              );
+            } catch {}
+          },
+        );
         write({ event: 'completed', summary, ts: Date.now() });
         try {
-          await this.redis.set(key, { status: 'completed', summary, ts: Date.now() }, 3600);
+          await this.redis.set(
+            key,
+            { status: 'completed', summary, ts: Date.now() },
+            3600,
+          );
         } catch {}
       } catch (e: any) {
-        write({ event: 'error', message: e?.message || 'unknown', ts: Date.now() });
+        write({
+          event: 'error',
+          message: e?.message || 'unknown',
+          ts: Date.now(),
+        });
         try {
-          await this.redis.set(key, { status: 'failed', error: e?.message || 'unknown', ts: Date.now() }, 3600);
+          await this.redis.set(
+            key,
+            {
+              status: 'failed',
+              error: e?.message || 'unknown',
+              ts: Date.now(),
+            },
+            3600,
+          );
         } catch {}
       } finally {
         try {
@@ -302,7 +410,10 @@ export class FalconController {
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async syncStatus(@Query('jobId') jobId?: string) {
     if (!jobId) {
-      throw new HttpException({ success: false, message: 'jobId is required' }, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        { success: false, message: 'jobId is required' },
+        HttpStatus.BAD_REQUEST,
+      );
     }
     try {
       const key = `falcon:sync:job:${jobId}`;
@@ -311,7 +422,11 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to read sync status', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to read sync status',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -331,18 +446,29 @@ export class FalconController {
         );
       }
       const ltp = await this.falconAdapter.getLTP(tokens);
-      return { success: true, data: ltp, timestamp: new Date().toISOString() };
+      const enriched = this.falconInstruments.enrichMarketDataRecord(ltp);
+      return {
+        success: true,
+        data: enriched,
+        timestamp: new Date().toISOString(),
+      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon LTP failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon LTP failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('ltp')
-  @ApiOperation({ summary: 'Get Falcon LTP for instrument tokens (comma-separated)' })
+  @ApiOperation({
+    summary: 'Get Falcon LTP for instrument tokens (comma-separated)',
+  })
   @ApiQuery({ name: 'tokens', required: true, example: '738561,5633' })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async getLtp(@Query('tokens') tokensRaw?: string) {
@@ -353,16 +479,29 @@ export class FalconController {
         .filter((s) => /^\d+$/.test(s));
       if (!tokens.length) {
         throw new HttpException(
-          { success: false, message: 'tokens query is required (comma-separated numeric tokens)' },
+          {
+            success: false,
+            message:
+              'tokens query is required (comma-separated numeric tokens)',
+          },
           HttpStatus.BAD_REQUEST,
         );
       }
       const ltp = await this.falconAdapter.getLTP(tokens);
-      return { success: true, data: ltp, timestamp: new Date().toISOString() };
+      const enriched = this.falconInstruments.enrichMarketDataRecord(ltp);
+      return {
+        success: true,
+        data: enriched,
+        timestamp: new Date().toISOString(),
+      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon LTP failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon LTP failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -373,28 +512,46 @@ export class FalconController {
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async batch(@Body() body: { tokens: number[] }) {
     try {
-      const tokens = Array.isArray(body?.tokens) ? body.tokens.map((n) => Number(n)).filter((n) => Number.isFinite(n)) : [];
+      const tokens = Array.isArray(body?.tokens)
+        ? body.tokens.map((n) => Number(n)).filter((n) => Number.isFinite(n))
+        : [];
       if (!tokens.length) {
         throw new HttpException(
           { success: false, message: 'tokens array is required' },
           HttpStatus.BAD_REQUEST,
         );
       }
-      const data = await this.falconInstruments.getFalconInstrumentsBatch(tokens);
+      const data =
+        await this.falconInstruments.getFalconInstrumentsBatch(tokens);
       return { success: true, data };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon batch failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon batch failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Post('validate-instruments')
-  @ApiOperation({ summary: 'Validate Falcon instruments via live LTP, optional cleanup' })
+  @ApiOperation({
+    summary: 'Validate Falcon instruments via live LTP, optional cleanup',
+  })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
-  async validate(@Body() body: { limit?: number; offset?: number; batchSize?: number; dry_run?: boolean; auto_cleanup?: boolean }) {
+  async validate(
+    @Body()
+    body: {
+      limit?: number;
+      offset?: number;
+      batchSize?: number;
+      dry_run?: boolean;
+      auto_cleanup?: boolean;
+    },
+  ) {
     try {
       const result = await this.falconInstruments.validateFalconInstruments({
         limit: body?.limit,
@@ -407,7 +564,11 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon validate failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon validate failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -415,7 +576,9 @@ export class FalconController {
 
   // ===== Filtered lists =====
   @Get('equities')
-  @ApiOperation({ summary: 'List Falcon equities with filters and optional LTP-only' })
+  @ApiOperation({
+    summary: 'List Falcon equities with filters and optional LTP-only',
+  })
   @ApiQuery({ name: 'exchange', required: false })
   @ApiQuery({ name: 'q', required: false })
   @ApiQuery({ name: 'is_active', required: false, example: true })
@@ -432,23 +595,41 @@ export class FalconController {
     @Query('offset') offsetRaw?: string,
   ) {
     try {
-      const is_active = String(isActiveRaw || '').toLowerCase() === 'true' ? true : String(isActiveRaw || '').toLowerCase() === 'false' ? false : undefined;
+      const is_active =
+        String(isActiveRaw || '').toLowerCase() === 'true'
+          ? true
+          : String(isActiveRaw || '').toLowerCase() === 'false'
+            ? false
+            : undefined;
       const ltp_only = String(ltpOnlyRaw || '').toLowerCase() === 'true';
       const limit = parseInt(String(limitRaw || '100')) || 100;
       const offset = parseInt(String(offsetRaw || '0')) || 0;
-      const result = await this.falconInstruments.getEquities({ exchange, q, is_active, ltp_only, limit, offset });
+      const result = await this.falconInstruments.getEquities({
+        exchange,
+        q,
+        is_active,
+        ltp_only,
+        limit,
+        offset,
+      });
       return { success: true, ...result };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to fetch Falcon equities', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch Falcon equities',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('futures')
-  @ApiOperation({ summary: 'List Falcon futures with filters and optional LTP-only' })
+  @ApiOperation({
+    summary: 'List Falcon futures with filters and optional LTP-only',
+  })
   @ApiQuery({ name: 'symbol', required: false })
   @ApiQuery({ name: 'exchange', required: false })
   @ApiQuery({ name: 'expiry_from', required: false, example: '2025-01-01' })
@@ -469,30 +650,50 @@ export class FalconController {
     @Query('offset') offsetRaw?: string,
   ) {
     try {
-      const is_active = String(isActiveRaw || '').toLowerCase() === 'true' ? true : String(isActiveRaw || '').toLowerCase() === 'false' ? false : undefined;
+      const is_active =
+        String(isActiveRaw || '').toLowerCase() === 'true'
+          ? true
+          : String(isActiveRaw || '').toLowerCase() === 'false'
+            ? false
+            : undefined;
       const ltp_only = String(ltpOnlyRaw || '').toLowerCase() === 'true';
       const limit = parseInt(String(limitRaw || '100')) || 100;
       const offset = parseInt(String(offsetRaw || '0')) || 0;
-      const result = await this.falconInstruments.getFutures({ symbol, exchange, expiry_from, expiry_to, is_active, ltp_only, limit, offset });
+      const result = await this.falconInstruments.getFutures({
+        symbol,
+        exchange,
+        expiry_from,
+        expiry_to,
+        is_active,
+        ltp_only,
+        limit,
+        offset,
+      });
       return { success: true, ...result };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to fetch Falcon futures', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch Falcon futures',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('options')
-  @ApiOperation({ summary: 'List Falcon options with filters and optional LTP-only' })
+  @ApiOperation({
+    summary: 'List Falcon options with filters and optional LTP-only',
+  })
   @ApiQuery({ name: 'symbol', required: false })
   @ApiQuery({ name: 'exchange', required: false })
   @ApiQuery({ name: 'expiry_from', required: false, example: '2025-01-01' })
   @ApiQuery({ name: 'expiry_to', required: false, example: '2025-12-31' })
   @ApiQuery({ name: 'strike_min', required: false })
   @ApiQuery({ name: 'strike_max', required: false })
-  @ApiQuery({ name: 'option_type', required: false, enum: ['CE','PE'] })
+  @ApiQuery({ name: 'option_type', required: false, enum: ['CE', 'PE'] })
   @ApiQuery({ name: 'is_active', required: false, example: true })
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
   @ApiQuery({ name: 'limit', required: false, example: 100 })
@@ -512,26 +713,56 @@ export class FalconController {
     @Query('offset') offsetRaw?: string,
   ) {
     try {
-      const is_active = String(isActiveRaw || '').toLowerCase() === 'true' ? true : String(isActiveRaw || '').toLowerCase() === 'false' ? false : undefined;
+      const is_active =
+        String(isActiveRaw || '').toLowerCase() === 'true'
+          ? true
+          : String(isActiveRaw || '').toLowerCase() === 'false'
+            ? false
+            : undefined;
       const ltp_only = String(ltpOnlyRaw || '').toLowerCase() === 'true';
-      const strike_min = strike_min_raw ? Number(strokeSafeNumber(strike_min_raw)) : undefined;
-      const strike_max = strike_max_raw ? Number(strokeSafeNumber(strike_max_raw)) : undefined;
-      const option_type = option_type_raw === 'CE' || option_type_raw === 'PE' ? option_type_raw : undefined;
+      const strike_min = strike_min_raw
+        ? Number(strokeSafeNumber(strike_min_raw))
+        : undefined;
+      const strike_max = strike_max_raw
+        ? Number(strokeSafeNumber(strike_max_raw))
+        : undefined;
+      const option_type =
+        option_type_raw === 'CE' || option_type_raw === 'PE'
+          ? option_type_raw
+          : undefined;
       const limit = parseInt(String(limitRaw || '100')) || 100;
       const offset = parseInt(String(offsetRaw || '0')) || 0;
-      const result = await this.falconInstruments.getOptions({ symbol, exchange, expiry_from, expiry_to, strike_min, strike_max, option_type, is_active, ltp_only, limit, offset });
+      const result = await this.falconInstruments.getOptions({
+        symbol,
+        exchange,
+        expiry_from,
+        expiry_to,
+        strike_min,
+        strike_max,
+        option_type,
+        is_active,
+        ltp_only,
+        limit,
+        offset,
+      });
       return { success: true, ...result };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to fetch Falcon options', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch Falcon options',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('commodities')
-  @ApiOperation({ summary: 'List Falcon commodities (MCX) with filters and optional LTP-only' })
+  @ApiOperation({
+    summary: 'List Falcon commodities (MCX) with filters and optional LTP-only',
+  })
   @ApiQuery({ name: 'symbol', required: false })
   @ApiQuery({ name: 'exchange', required: false, example: 'MCX' })
   @ApiQuery({ name: 'instrument_type', required: false })
@@ -550,16 +781,33 @@ export class FalconController {
     @Query('offset') offsetRaw?: string,
   ) {
     try {
-      const is_active = String(isActiveRaw || '').toLowerCase() === 'true' ? true : String(isActiveRaw || '').toLowerCase() === 'false' ? false : undefined;
+      const is_active =
+        String(isActiveRaw || '').toLowerCase() === 'true'
+          ? true
+          : String(isActiveRaw || '').toLowerCase() === 'false'
+            ? false
+            : undefined;
       const ltp_only = String(ltpOnlyRaw || '').toLowerCase() === 'true';
       const limit = parseInt(String(limitRaw || '100')) || 100;
       const offset = parseInt(String(offsetRaw || '0')) || 0;
-      const result = await this.falconInstruments.getCommodities({ symbol, exchange, instrument_type, is_active, ltp_only, limit, offset });
+      const result = await this.falconInstruments.getCommodities({
+        symbol,
+        exchange,
+        instrument_type,
+        is_active,
+        ltp_only,
+        limit,
+        offset,
+      });
       return { success: true, ...result };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to fetch Falcon commodities', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to fetch Falcon commodities',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -567,7 +815,9 @@ export class FalconController {
 
   // ===== Human-friendly tickers =====
   @Get('tickers/search')
-  @ApiOperation({ summary: 'Search Falcon tickers and return live price + metadata' })
+  @ApiOperation({
+    summary: 'Search Falcon tickers and return live price + metadata',
+  })
   @ApiQuery({ name: 'q', required: true, example: 'NSE:SBIN or SBIN' })
   @ApiQuery({ name: 'limit', required: false, example: 20 })
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
@@ -579,16 +829,27 @@ export class FalconController {
   ) {
     try {
       if (!q) {
-        throw new HttpException({ success: false, message: 'q is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'q is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const limit = parseInt(String(limitRaw || '20')) || 20;
       const ltp_only = String(ltpOnlyRaw || '').toLowerCase() === 'true';
-      const data = await this.falconInstruments.searchTickers(q, limit, ltp_only);
+      const data = await this.falconInstruments.searchTickers(
+        q,
+        limit,
+        ltp_only,
+      );
       return { success: true, data };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon ticker search failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon ticker search failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -601,13 +862,20 @@ export class FalconController {
     try {
       const data = await this.falconInstruments.getTickerBySymbol(symbol);
       if (!data) {
-        throw new HttpException({ success: false, message: 'Symbol not found' }, HttpStatus.NOT_FOUND);
+        throw new HttpException(
+          { success: false, message: 'Symbol not found' },
+          HttpStatus.NOT_FOUND,
+        );
       }
       return { success: true, data };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon get ticker failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon get ticker failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -616,20 +884,34 @@ export class FalconController {
   // ===== Market Data: Quote / OHLC / Historical =====
 
   @Post('quote')
-  @ApiOperation({ summary: 'Full quote for instrument tokens (OHLC, depth, OI, Greeks)' })
+  @ApiOperation({
+    summary: 'Full quote for instrument tokens (OHLC, depth, OI, Greeks)',
+  })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async quote(@Body() body: FalconTokensDto) {
     try {
       const tokens = (body?.tokens || []).map(String).filter(Boolean);
       if (!tokens.length) {
-        throw new HttpException({ success: false, message: 'tokens array is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'tokens array is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const data = await this.falconAdapter.getQuote(tokens);
-      return { success: true, data, timestamp: new Date().toISOString() };
+      const enriched = this.falconInstruments.enrichMarketDataRecord(data);
+      return {
+        success: true,
+        data: enriched,
+        timestamp: new Date().toISOString(),
+      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon quote failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon quote failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -642,14 +924,26 @@ export class FalconController {
     try {
       const tokens = (body?.tokens || []).map(String).filter(Boolean);
       if (!tokens.length) {
-        throw new HttpException({ success: false, message: 'tokens array is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'tokens array is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const data = await this.falconAdapter.getOHLC(tokens);
-      return { success: true, data, timestamp: new Date().toISOString() };
+      const enriched = this.falconInstruments.enrichMarketDataRecord(data);
+      return {
+        success: true,
+        data: enriched,
+        timestamp: new Date().toISOString(),
+      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon OHLC failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon OHLC failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -658,24 +952,44 @@ export class FalconController {
   @Post('historical/batch')
   @ApiOperation({
     summary: 'Batch historical candles for up to 10 tokens in a single call',
-    description: 'Fetches OHLCV candle data for multiple tokens in one request (max 10). Each token uses its own from/to/interval. Concurrency-limited to 3 parallel requests (~3 RPS). Uses per-token Redis cache with smart TTL (60s for 1-min today → 86400s for day interval past dates).',
+    description:
+      'Fetches OHLCV candle data for multiple tokens in one request (max 10). Each token uses its own from/to/interval. Concurrency-limited to 3 parallel requests (~3 RPS). Uses per-token Redis cache with smart TTL (60s for 1-min today → 86400s for day interval past dates).',
   })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
-  @ApiBody({ type: FalconBatchHistoricalDto, description: 'Up to 10 token historical requests' })
-  @ApiOkResponse({ description: 'Map of instrument_token → candle data. Individual tokens may contain { error } if that token failed.' })
+  @ApiBody({
+    type: FalconBatchHistoricalDto,
+    description: 'Up to 10 token historical requests',
+  })
+  @ApiOkResponse({
+    description:
+      'Map of instrument_token → candle data. Individual tokens may contain { error } if that token failed.',
+  })
   @ApiBadRequestResponse({ description: 'requests array missing or empty' })
   async historicalBatch(@Body() body: FalconBatchHistoricalDto) {
     try {
       const requests = (body?.requests || []).slice(0, 10);
       if (!requests.length) {
-        throw new HttpException({ success: false, message: 'requests array is required (max 10)' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'requests array is required (max 10)' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const data = await this.falconAdapter.getBatchHistoricalData(requests);
-      return { success: true, data, count: Object.keys(data).length, timestamp: new Date().toISOString() };
+      const enriched = this.falconInstruments.enrichMarketDataRecord(data);
+      return {
+        success: true,
+        data: enriched,
+        count: Object.keys(enriched).length,
+        timestamp: new Date().toISOString(),
+      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Batch historical failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Batch historical failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -685,27 +999,60 @@ export class FalconController {
   @ApiOperation({ summary: 'Historical candles for a single instrument token' })
   @ApiQuery({ name: 'from', required: true, example: '2026-04-01' })
   @ApiQuery({ name: 'to', required: true, example: '2026-04-11' })
-  @ApiQuery({ name: 'interval', required: true, enum: ['minute','3minute','5minute','10minute','15minute','30minute','60minute','day'] })
+  @ApiQuery({
+    name: 'interval',
+    required: true,
+    enum: [
+      'minute',
+      '3minute',
+      '5minute',
+      '10minute',
+      '15minute',
+      '30minute',
+      '60minute',
+      'day',
+    ],
+  })
   @ApiQuery({ name: 'continuous', required: false, example: false })
   @ApiQuery({ name: 'oi', required: false, example: false })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
-  async historical(@Param('token') tokenRaw: string, @Query() q: FalconHistoricalQueryDto) {
+  async historical(
+    @Param('token') tokenRaw: string,
+    @Query() q: FalconHistoricalQueryDto,
+  ) {
     try {
       const token = Number(tokenRaw);
       if (!Number.isFinite(token)) {
-        throw new HttpException({ success: false, message: 'Invalid token' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'Invalid token' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       if (!q.from || !q.to || !q.interval) {
-        throw new HttpException({ success: false, message: 'from, to, and interval are required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'from, to, and interval are required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const continuous = String(q.continuous || '').toLowerCase() === 'true';
       const oi = String(q.oi || '').toLowerCase() === 'true';
-      const data = await this.falconAdapter.getHistoricalData(token, q.from, q.to, q.interval, continuous, oi);
+      const data = await this.falconAdapter.getHistoricalData(
+        token,
+        q.from,
+        q.to,
+        q.interval,
+        continuous,
+        oi,
+      );
       return { success: true, data, timestamp: new Date().toISOString() };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon historical data failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon historical data failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -715,7 +1062,10 @@ export class FalconController {
   // =========================================================================
 
   @Get('options/chain/:symbol')
-  @ApiOperation({ summary: 'Falcon options chain for an underlying symbol (grouped by expiry/strike)' })
+  @ApiOperation({
+    summary:
+      'Falcon options chain for an underlying symbol (grouped by expiry/strike)',
+  })
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async optionsChain(
@@ -728,14 +1078,20 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon options chain failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon options chain failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('underlyings/:symbol/futures')
-  @ApiOperation({ summary: 'All active futures for a specific Falcon underlying symbol' })
+  @ApiOperation({
+    summary: 'All active futures for a specific Falcon underlying symbol',
+  })
   @ApiQuery({ name: 'exchange', required: false, example: 'NFO' })
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
   @ApiQuery({ name: 'limit', required: false })
@@ -752,19 +1108,32 @@ export class FalconController {
       const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true';
       const limit = parseInt(String(limitRaw || '100')) || 100;
       const offset = parseInt(String(offsetRaw || '0')) || 0;
-      const result = await this.falconInstruments.getUnderlyingFutures(symbol, exchange, limit, offset, ltpOnly);
+      const result = await this.falconInstruments.getUnderlyingFutures(
+        symbol,
+        exchange,
+        limit,
+        offset,
+        ltpOnly,
+      );
       return { success: true, ...result };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon underlying futures failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon underlying futures failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('underlyings/:symbol/options')
-  @ApiOperation({ summary: 'Options chain for a Falcon underlying symbol (alias for options/chain/:symbol)' })
+  @ApiOperation({
+    summary:
+      'Options chain for a Falcon underlying symbol (alias for options/chain/:symbol)',
+  })
   @ApiQuery({ name: 'ltp_only', required: false, example: false })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async underlyingOptions(
@@ -777,14 +1146,21 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon underlying options failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon underlying options failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('fno/autocomplete')
-  @ApiOperation({ summary: 'F&O underlying symbol autocomplete (only symbols with active derivatives)' })
+  @ApiOperation({
+    summary:
+      'F&O underlying symbol autocomplete (only symbols with active derivatives)',
+  })
   @ApiQuery({ name: 'q', required: true, example: 'NIF' })
   @ApiQuery({ name: 'scope', required: false, enum: ['nse', 'mcx', 'all'] })
   @ApiQuery({ name: 'limit', required: false, example: 10 })
@@ -796,21 +1172,30 @@ export class FalconController {
   ) {
     try {
       if (!q) {
-        throw new HttpException({ success: false, message: 'q is required' }, HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          { success: false, message: 'q is required' },
+          HttpStatus.BAD_REQUEST,
+        );
       }
       const limit = parseInt(String(limitRaw || '10')) || 10;
       return await this.falconInstruments.autocompleteFno(q, scope, limit);
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon F&O autocomplete failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon F&O autocomplete failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('mcx-options')
-  @ApiOperation({ summary: 'MCX options with filters and optional LTP enrichment' })
+  @ApiOperation({
+    summary: 'MCX options with filters and optional LTP enrichment',
+  })
   @ApiQuery({ name: 'symbol', required: false })
   @ApiQuery({ name: 'option_type', required: false, enum: ['CE', 'PE'] })
   @ApiQuery({ name: 'expiry_from', required: false })
@@ -835,28 +1220,55 @@ export class FalconController {
     @Query('offset') offsetRaw?: string,
   ) {
     try {
-      const is_active = String(isActiveRaw || '').toLowerCase() === 'true' ? true : String(isActiveRaw || '').toLowerCase() === 'false' ? false : undefined;
+      const is_active =
+        String(isActiveRaw || '').toLowerCase() === 'true'
+          ? true
+          : String(isActiveRaw || '').toLowerCase() === 'false'
+            ? false
+            : undefined;
       const ltp_only = String(ltpOnlyRaw || '').toLowerCase() === 'true';
-      const option_type = optionTypeRaw === 'CE' || optionTypeRaw === 'PE' ? optionTypeRaw : undefined;
-      const strike_min = strikeMinRaw ? strokeSafeNumber(strikeMinRaw) : undefined;
-      const strike_max = strikeMaxRaw ? strokeSafeNumber(strikeMaxRaw) : undefined;
+      const option_type =
+        optionTypeRaw === 'CE' || optionTypeRaw === 'PE'
+          ? optionTypeRaw
+          : undefined;
+      const strike_min = strikeMinRaw
+        ? strokeSafeNumber(strikeMinRaw)
+        : undefined;
+      const strike_max = strikeMaxRaw
+        ? strokeSafeNumber(strikeMaxRaw)
+        : undefined;
       const limit = parseInt(String(limitRaw || '100')) || 100;
       const offset = parseInt(String(offsetRaw || '0')) || 0;
       const result = await this.falconInstruments.getMcxOptions({
-        symbol, option_type, expiry_from, expiry_to, strike_min, strike_max, is_active, ltp_only, limit, offset,
+        symbol,
+        option_type,
+        expiry_from,
+        expiry_to,
+        strike_min,
+        strike_max,
+        is_active,
+        ltp_only,
+        limit,
+        offset,
       });
       return { success: true, ...result };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon MCX options failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon MCX options failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('instruments/popular')
-  @ApiOperation({ summary: 'Popular Falcon instruments (hardcoded list + live LTP)' })
+  @ApiOperation({
+    summary: 'Popular Falcon instruments (hardcoded list + live LTP)',
+  })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async popularInstruments(@Query('limit') limitRaw?: string) {
@@ -867,14 +1279,20 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon popular instruments failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon popular instruments failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Get('instruments/cached-stats')
-  @ApiOperation({ summary: 'Falcon instrument stats (Redis-cached, faster than /stats)' })
+  @ApiOperation({
+    summary: 'Falcon instrument stats (Redis-cached, faster than /stats)',
+  })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async cachedStats() {
     try {
@@ -883,14 +1301,20 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Falcon cached stats failed', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Falcon cached stats failed',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Post('instruments/sync/start')
-  @ApiOperation({ summary: 'Start Falcon instrument sync in the background (always async)' })
+  @ApiOperation({
+    summary: 'Start Falcon instrument sync in the background (always async)',
+  })
   @ApiQuery({ name: 'exchange', required: false })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async syncStart(@Query('exchange') exchange?: string) {
@@ -899,30 +1323,48 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to start sync job', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to start sync job',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Delete('instruments/inactive')
-  @ApiOperation({ summary: 'Permanently delete all inactive Falcon instruments (is_active=false)' })
+  @ApiOperation({
+    summary:
+      'Permanently delete all inactive Falcon instruments (is_active=false)',
+  })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async deleteInactiveInstruments() {
     try {
       const result = await this.falconInstruments.deleteInactiveInstruments();
-      return { success: true, message: 'Inactive instruments deleted', ...result };
+      return {
+        success: true,
+        message: 'Inactive instruments deleted',
+        ...result,
+      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to delete inactive instruments', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to delete inactive instruments',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Delete('instruments')
-  @ApiOperation({ summary: 'Permanently delete Falcon instruments by exchange and/or instrument_type filter' })
+  @ApiOperation({
+    summary:
+      'Permanently delete Falcon instruments by exchange and/or instrument_type filter',
+  })
   @ApiQuery({ name: 'exchange', required: false, example: 'NFO' })
   @ApiQuery({ name: 'instrument_type', required: false, example: 'PE' })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
@@ -932,24 +1374,41 @@ export class FalconController {
   ) {
     if (!exchange && !instrument_type) {
       throw new HttpException(
-        { success: false, message: 'At least one filter required: exchange or instrument_type' },
+        {
+          success: false,
+          message: 'At least one filter required: exchange or instrument_type',
+        },
         HttpStatus.BAD_REQUEST,
       );
     }
     try {
-      const result = await this.falconInstruments.deleteByFilter(exchange, instrument_type);
-      return { success: true, message: 'Delete completed', ...result, filters: { exchange, instrument_type } };
+      const result = await this.falconInstruments.deleteByFilter(
+        exchange,
+        instrument_type,
+      );
+      return {
+        success: true,
+        message: 'Delete completed',
+        ...result,
+        filters: { exchange, instrument_type },
+      };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to delete instruments', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to delete instruments',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Post('cache/clear')
-  @ApiOperation({ summary: 'Clear Falcon Redis cache (profile, margins, stats keys)' })
+  @ApiOperation({
+    summary: 'Clear Falcon Redis cache (profile, margins, stats keys)',
+  })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async clearCache() {
     try {
@@ -958,7 +1417,11 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to clear Falcon cache', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to clear Falcon cache',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -970,7 +1433,10 @@ export class FalconController {
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async validateStatus(@Query('jobId') jobId?: string) {
     if (!jobId) {
-      throw new HttpException({ success: false, message: 'jobId is required' }, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        { success: false, message: 'jobId is required' },
+        HttpStatus.BAD_REQUEST,
+      );
     }
     try {
       const key = `falcon:validate:job:${jobId}`;
@@ -979,18 +1445,31 @@ export class FalconController {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new HttpException(
-        { success: false, message: 'Failed to read validation status', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to read validation status',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
   @Post('validate-instruments/stream')
-  @ApiOperation({ summary: 'Stream live validation progress (SSE) for Falcon instruments' })
+  @ApiOperation({
+    summary: 'Stream live validation progress (SSE) for Falcon instruments',
+  })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async validateStream(
     @Res() res: Response,
-    @Body() body?: { limit?: number; offset?: number; batchSize?: number; dry_run?: boolean; auto_cleanup?: boolean },
+    @Body()
+    body?: {
+      limit?: number;
+      offset?: number;
+      batchSize?: number;
+      dry_run?: boolean;
+      auto_cleanup?: boolean;
+    },
   ) {
     (res as any).setHeader('Content-Type', 'text/event-stream');
     (res as any).setHeader('Cache-Control', 'no-cache');
@@ -999,13 +1478,19 @@ export class FalconController {
     const jobId = randomUUID();
     const key = `falcon:validate:job:${jobId}`;
     const write = (data: any) => {
-      try { (res as any).write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* noop */ }
+      try {
+        (res as any).write(`data: ${JSON.stringify(data)}\n\n`);
+      } catch {
+        /* noop */
+      }
     };
     write({ event: 'started', jobId, ts: Date.now() });
     setImmediate(async () => {
       try {
         await this.redis.set(key, { status: 'running', ts: Date.now() }, 3600);
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       try {
         const result = await this.falconInstruments.validateFalconInstruments({
           limit: body?.limit,
@@ -1015,12 +1500,40 @@ export class FalconController {
           auto_cleanup: body?.auto_cleanup,
         });
         write({ event: 'completed', result, ts: Date.now() });
-        try { await this.redis.set(key, { status: 'completed', result, ts: Date.now() }, 3600); } catch { /* noop */ }
+        try {
+          await this.redis.set(
+            key,
+            { status: 'completed', result, ts: Date.now() },
+            3600,
+          );
+        } catch {
+          /* noop */
+        }
       } catch (e: any) {
-        write({ event: 'error', message: e?.message || 'unknown', ts: Date.now() });
-        try { await this.redis.set(key, { status: 'failed', error: e?.message || 'unknown', ts: Date.now() }, 3600); } catch { /* noop */ }
+        write({
+          event: 'error',
+          message: e?.message || 'unknown',
+          ts: Date.now(),
+        });
+        try {
+          await this.redis.set(
+            key,
+            {
+              status: 'failed',
+              error: e?.message || 'unknown',
+              ts: Date.now(),
+            },
+            3600,
+          );
+        } catch {
+          /* noop */
+        }
       } finally {
-        try { (res as any).end(); } catch { /* noop */ }
+        try {
+          (res as any).end();
+        } catch {
+          /* noop */
+        }
       }
     });
   }
@@ -1044,12 +1557,19 @@ export class FalconController {
         'token,reason\n' +
         result.invalid_instruments.map((t) => `${t},invalid_ltp`).join('\n');
       (res as any).setHeader('Content-Type', 'text/csv');
-      (res as any).setHeader('Content-Disposition', 'attachment; filename="invalid_falcon_instruments.csv"');
+      (res as any).setHeader(
+        'Content-Disposition',
+        'attachment; filename="invalid_falcon_instruments.csv"',
+      );
       (res as any).send(csv);
     } catch (error) {
-      if (!((res as any).headersSent)) {
+      if (!(res as any).headersSent) {
         throw new HttpException(
-          { success: false, message: 'Falcon validate export failed', error: (error as any)?.message || 'unknown' },
+          {
+            success: false,
+            message: 'Falcon validate export failed',
+            error: (error as any)?.message || 'unknown',
+          },
           HttpStatus.INTERNAL_SERVER_ERROR,
         );
       }
@@ -1065,4 +1585,3 @@ function strokeSafeNumber(v: string): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
-

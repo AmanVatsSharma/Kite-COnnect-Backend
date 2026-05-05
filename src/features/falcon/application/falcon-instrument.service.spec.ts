@@ -53,12 +53,18 @@ describe('FalconInstrumentService', () => {
       addCronJob: jest.fn(),
     } as unknown as SchedulerRegistry;
     const falconAdapter = {} as FalconProviderAdapter;
-    const redisService = { get: jest.fn(), set: jest.fn(), del: jest.fn() } as any;
+    const redisService = {
+      get: jest.fn(),
+      set: jest.fn(),
+      del: jest.fn(),
+    } as any;
     const uirRepo = {
       upsert: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn().mockResolvedValue(null),
     } as any;
-    const instrumentRegistry = { refresh: jest.fn().mockResolvedValue(undefined) } as any;
+    const instrumentRegistry = {
+      refresh: jest.fn().mockResolvedValue(undefined),
+    } as any;
     service = new FalconInstrumentService(
       falconRepo as unknown as Repository<FalconInstrument>,
       mappingRepo as unknown as Repository<InstrumentMapping>,
@@ -114,9 +120,14 @@ describe('FalconInstrumentService', () => {
       execute: jest.fn().mockResolvedValue(undefined),
     });
 
-    const res = await service.syncFalconInstruments(undefined, undefined, undefined, {
-      reconcile: false,
-    });
+    const res = await service.syncFalconInstruments(
+      undefined,
+      undefined,
+      undefined,
+      {
+        reconcile: false,
+      },
+    );
     expect(res.skipped).toBeUndefined();
     expect(falconRepo.upsert).toHaveBeenCalled();
     expect(mappingRepo.upsert).toHaveBeenCalled();

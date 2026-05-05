@@ -87,5 +87,3 @@ export class AddRequestAuditLogs1764547200001 implements MigrationInterface {
     await queryRunner.dropTable('request_audit_logs');
   }
 }
-
-

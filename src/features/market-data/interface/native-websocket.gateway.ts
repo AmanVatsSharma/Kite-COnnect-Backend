@@ -32,7 +32,10 @@ import {
   MarketTickEmitOptions,
 } from '@features/market-data/application/tick-shape.util';
 import { validateSetModePayload } from '@shared/utils/ws-validation';
-import { normalizeProviderAlias, InternalProviderName } from '@shared/utils/provider-label.util';
+import {
+  normalizeProviderAlias,
+  InternalProviderName,
+} from '@shared/utils/provider-label.util';
 import { ApiKey } from '@features/auth/domain/api-key.entity';
 
 interface ClientSubscription {
@@ -275,10 +278,17 @@ export class NativeWebSocketGateway
     this.logger.debug(
       `[NativeWebSocketGateway] Subscribing client ${clientId} count=${instruments.length} mode=${mode}`,
     );
-    const lockedProvider = normalizeProviderAlias(client.apiKeyRecord?.provider ?? null) ?? undefined;
-    await this.subscribeToInstruments(instruments, mode, clientId, lockedProvider);
+    const lockedProvider =
+      normalizeProviderAlias(client.apiKeyRecord?.provider ?? null) ??
+      undefined;
+    await this.subscribeToInstruments(
+      instruments,
+      mode,
+      clientId,
+      lockedProvider,
+    );
 
-    let limits: Record<string, unknown> = {
+    const limits: Record<string, unknown> = {
       maxUpstreamInstruments: 1000,
       maxSubscriptionsPerSocket: 1000,
     };

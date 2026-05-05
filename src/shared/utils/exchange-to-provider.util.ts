@@ -16,7 +16,9 @@ import { InternalProviderName } from './provider-label.util';
  * Binance crypto pairs (BTCUSDT, ETHUSDT, ...) live under exchange=BINANCE and stream from
  * Binance combined-stream WS — distinct from the generic CRYPTO exchange used by Massive.
  */
-export const EXCHANGE_TO_PROVIDER: Readonly<Record<string, InternalProviderName>> = {
+export const EXCHANGE_TO_PROVIDER: Readonly<
+  Record<string, InternalProviderName>
+> = {
   NSE: 'kite',
   BSE: 'kite',
   NFO: 'kite',
@@ -31,6 +33,8 @@ export const EXCHANGE_TO_PROVIDER: Readonly<Record<string, InternalProviderName>
   BINANCE: 'binance',
 } as const;
 
-export function getProviderForExchange(exchange: string): InternalProviderName | undefined {
+export function getProviderForExchange(
+  exchange: string,
+): InternalProviderName | undefined {
   return EXCHANGE_TO_PROVIDER[exchange];
 }

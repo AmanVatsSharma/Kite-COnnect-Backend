@@ -13,7 +13,12 @@ export const MASSIVE_WS_DELAYED_BASE = 'wss://delayed.socket.massive.com';
 export const MASSIVE_FILES_BASE = 'https://files.massive.com';
 
 /** Supported WebSocket asset classes. */
-export type MassiveAssetClass = 'stocks' | 'forex' | 'crypto' | 'options' | 'indices';
+export type MassiveAssetClass =
+  | 'stocks'
+  | 'forex'
+  | 'crypto'
+  | 'options'
+  | 'indices';
 
 /** WebSocket event types emitted by Massive. */
 export const MASSIVE_WS_EVENTS = {
@@ -30,7 +35,10 @@ export const MASSIVE_WS_EVENTS = {
 } as const;
 
 /** Intervals supported by the aggregates REST endpoint. */
-export const MASSIVE_INTERVALS: Record<string, { multiplier: number; timespan: string }> = {
+export const MASSIVE_INTERVALS: Record<
+  string,
+  { multiplier: number; timespan: string }
+> = {
   minute: { multiplier: 1, timespan: 'minute' },
   '5minute': { multiplier: 5, timespan: 'minute' },
   '15minute': { multiplier: 15, timespan: 'minute' },

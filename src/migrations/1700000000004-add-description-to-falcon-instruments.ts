@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddDescriptionToFalconInstruments1700000000004 implements MigrationInterface {
+export class AddDescriptionToFalconInstruments1700000000004
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE falcon_instruments
@@ -16,6 +18,3 @@ export class AddDescriptionToFalconInstruments1700000000004 implements Migration
     `);
   }
 }
-
-
-

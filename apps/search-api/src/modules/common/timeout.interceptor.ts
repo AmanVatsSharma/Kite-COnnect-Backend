@@ -5,7 +5,13 @@ import {
   CallHandler,
   RequestTimeoutException,
 } from '@nestjs/common';
-import { Observable, TimeoutError, catchError, throwError, timeout } from 'rxjs';
+import {
+  Observable,
+  TimeoutError,
+  catchError,
+  throwError,
+  timeout,
+} from 'rxjs';
 
 @Injectable()
 export class TimeoutInterceptor implements NestInterceptor {
@@ -16,12 +22,13 @@ export class TimeoutInterceptor implements NestInterceptor {
       timeout({ each: ms }),
       catchError((err) => {
         if (err instanceof TimeoutError) {
-          return throwError(() => new RequestTimeoutException(`Request timed out after ${ms}ms`));
+          return throwError(
+            () =>
+              new RequestTimeoutException(`Request timed out after ${ms}ms`),
+          );
         }
         return throwError(() => err);
       }),
     );
   }
 }
-
-

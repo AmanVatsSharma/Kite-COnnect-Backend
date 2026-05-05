@@ -115,7 +115,8 @@ export class BinanceWebSocketClient {
     if (symbols.length === 0) return;
 
     const overflow =
-      this.subscribedSymbols.size + symbols.length -
+      this.subscribedSymbols.size +
+      symbols.length -
       BINANCE_MAX_STREAMS_PER_CONNECTION;
     if (overflow > 0) {
       this.logger.warn(
@@ -184,7 +185,10 @@ export class BinanceWebSocketClient {
     try {
       socket = new WebSocket(BINANCE_WS_BASE);
     } catch (err) {
-      this.logger.error('[Binance WS] Failed to construct WebSocket', err as any);
+      this.logger.error(
+        '[Binance WS] Failed to construct WebSocket',
+        err as any,
+      );
       this.scheduleReconnect();
       return;
     }

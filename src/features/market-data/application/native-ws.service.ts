@@ -319,7 +319,11 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
-    const { instruments: rawInstruments = [], symbols = [], mode = 'ltp' } = data || {};
+    const {
+      instruments: rawInstruments = [],
+      symbols = [],
+      mode = 'ltp',
+    } = data || {};
 
     // ── Provider-prefix syntax (Falcon:reliance, Vayu:26000, Massive:AAPL, Binance:BTCUSDT) ──
     // Pinned UIRs are routed to their specified provider, bypassing best-provider routing
@@ -332,7 +336,9 @@ export class NativeWsService implements OnModuleDestroy {
       canonical: string;
     }> = [];
     const unresolvedSymbols: string[] = [];
-    const enabledProviders = new Set(this.providerResolver.getEnabledProviders());
+    const enabledProviders = new Set(
+      this.providerResolver.getEnabledProviders(),
+    );
 
     const consumePrefixed = (items: unknown[]): unknown[] => {
       const remaining: unknown[] = [];
@@ -355,7 +361,9 @@ export class NativeWsService implements OnModuleDestroy {
           prefixed.identifier,
         );
         if (result.status === 'not_found') {
-          unresolvedSymbols.push(`${prefixed.raw} (not found in ${internalToClientProviderName(prefixed.provider)} catalog)`);
+          unresolvedSymbols.push(
+            `${prefixed.raw} (not found in ${internalToClientProviderName(prefixed.provider)} catalog)`,
+          );
           continue;
         }
         if (result.status === 'ambiguous') {
@@ -364,7 +372,8 @@ export class NativeWsService implements OnModuleDestroy {
           );
           continue;
         }
-        if (!forcedByProvider.has(prefixed.provider)) forcedByProvider.set(prefixed.provider, []);
+        if (!forcedByProvider.has(prefixed.provider))
+          forcedByProvider.set(prefixed.provider, []);
         forcedByProvider.get(prefixed.provider)!.push(result.uirId);
         forcedConfirm.push({
           symbol: prefixed.raw,
@@ -379,17 +388,25 @@ export class NativeWsService implements OnModuleDestroy {
     const cleanedRawInstruments = Array.isArray(rawInstruments)
       ? consumePrefixed(rawInstruments)
       : [];
-    const cleanedSymbols = Array.isArray(symbols) ? consumePrefixed(symbols) : [];
+    const cleanedSymbols = Array.isArray(symbols)
+      ? consumePrefixed(symbols)
+      : [];
 
     // Parse instruments: accept both numeric tokens and Vortex EXCHANGE-TOKEN strings (e.g. "NSE_EQ-213123").
     const vortexPairs: Array<{ token: number; exchange: string }> = [];
     const numericInstruments: number[] = [];
     for (const item of cleanedRawInstruments as any[]) {
       if (typeof item === 'string') {
-        const m = String(item).trim().toUpperCase().match(/^([A-Z_]+)-(\d+)$/);
+        const m = String(item)
+          .trim()
+          .toUpperCase()
+          .match(/^([A-Z_]+)-(\d+)$/);
         if (m && ['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'].includes(m[1])) {
           const tok = Number(m[2]);
-          if (Number.isFinite(tok)) { vortexPairs.push({ token: tok, exchange: m[1] }); continue; }
+          if (Number.isFinite(tok)) {
+            vortexPairs.push({ token: tok, exchange: m[1] });
+            continue;
+          }
         }
       }
       const n = Number(item);
@@ -403,9 +420,14 @@ export class NativeWsService implements OnModuleDestroy {
     if (Array.isArray(cleanedSymbols) && cleanedSymbols.length > 0) {
       for (const sym of cleanedSymbols as string[]) {
         const flexResult = this.instrumentRegistry.resolveFlexSymbol(sym);
-        if (flexResult.status === 'not_found') { unresolvedSymbols.push(sym); continue; }
+        if (flexResult.status === 'not_found') {
+          unresolvedSymbols.push(sym);
+          continue;
+        }
         if (flexResult.status === 'ambiguous') {
-          unresolvedSymbols.push(`${sym} (ambiguous — try: ${flexResult.candidates.join(', ')})`);
+          unresolvedSymbols.push(
+            `${sym} (ambiguous — try: ${flexResult.candidates.join(', ')})`,
+          );
           continue;
         }
         resolvedSymbolUirIds.push(flexResult.uirId);
@@ -413,9 +435,16 @@ export class NativeWsService implements OnModuleDestroy {
     }
 
     const totalInputCount = vortexPairs.length + numericInstruments.length;
-    const forcedTotal = Array.from(forcedByProvider.values()).reduce((n, ids) => n + ids.length, 0);
+    const forcedTotal = Array.from(forcedByProvider.values()).reduce(
+      (n, ids) => n + ids.length,
+      0,
+    );
 
-    if (totalInputCount === 0 && (!Array.isArray(symbols) || symbols.length === 0) && forcedTotal === 0) {
+    if (
+      totalInputCount === 0 &&
+      (!Array.isArray(symbols) || symbols.length === 0) &&
+      forcedTotal === 0
+    ) {
       this.sendError(
         client,
         'WS_INVALID_INSTRUMENTS',
@@ -424,7 +453,11 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
-    if (totalInputCount === 0 && resolvedSymbolUirIds.length === 0 && forcedTotal === 0) {
+    if (
+      totalInputCount === 0 &&
+      resolvedSymbolUirIds.length === 0 &&
+      forcedTotal === 0
+    ) {
       this.sendError(
         client,
         'WS_INVALID_INSTRUMENTS',
@@ -444,13 +477,19 @@ export class NativeWsService implements OnModuleDestroy {
 
     // Pure forced-only subscriptions skip auto-start — the batch processor lazy-inits
     // the requested provider's ticker on first subscription.
-    const isPureForced = totalInputCount === 0 && resolvedSymbolUirIds.length === 0 && forcedTotal > 0;
+    const isPureForced =
+      totalInputCount === 0 &&
+      resolvedSymbolUirIds.length === 0 &&
+      forcedTotal > 0;
     if (!isPureForced) {
       try {
         // Ensure streaming is active; auto-start on first subscriber if needed
         const status = await this.streamService.getStreamingStatus();
         if (!status?.isStreaming) {
-          this.sendToClient(client, 'stream_starting', { message: 'Streaming not active — auto-starting provider ticker…', ts: Date.now() });
+          this.sendToClient(client, 'stream_starting', {
+            message: 'Streaming not active — auto-starting provider ticker…',
+            ts: Date.now(),
+          });
           const started = await this.streamService.autoStartIfNeeded();
           if (!started) {
             this.sendError(
@@ -462,7 +501,10 @@ export class NativeWsService implements OnModuleDestroy {
           }
         }
       } catch (e) {
-        this.logger.warn('Failed to read/auto-start streaming status', e as any);
+        this.logger.warn(
+          'Failed to read/auto-start streaming status',
+          e as any,
+        );
       }
     }
 
@@ -471,7 +513,9 @@ export class NativeWsService implements OnModuleDestroy {
     // and the batch processor in MarketDataStreamService routes per-instrument via
     // getBestProviderForUirId. No "active provider" assumption anywhere on this path.
     const totalInputs =
-      numericInstruments.length + vortexPairs.length + resolvedSymbolUirIds.length;
+      numericInstruments.length +
+      vortexPairs.length +
+      resolvedSymbolUirIds.length;
     const uirIds: number[] = [];
 
     // Vortex EXCHANGE-TOKEN pairs: try the full Vortex key first (e.g. "vortex:NSE_EQ-213123"),
@@ -494,7 +538,9 @@ export class NativeWsService implements OnModuleDestroy {
 
     // Forced provider-prefixed UIR IDs go to the same in-memory subscription view but
     // dispatch separately to pin routing in the stream service.
-    const forcedUirIdsAll: number[] = Array.from(forcedByProvider.values()).flat();
+    const forcedUirIdsAll: number[] = Array.from(
+      forcedByProvider.values(),
+    ).flat();
 
     const prior = new Set(subscription.instruments);
     // Update subscription with UIR IDs (including forced)
@@ -517,10 +563,15 @@ export class NativeWsService implements OnModuleDestroy {
       await this.subscribeToInstruments(uirIds, mode, clientId);
     }
     for (const [provider, ids] of forcedByProvider) {
-      await this.subscribeToInstrumentsForcedProvider(ids, mode, clientId, provider);
+      await this.subscribeToInstrumentsForcedProvider(
+        ids,
+        mode,
+        clientId,
+        provider,
+      );
     }
 
-    let limits: Record<string, unknown> = {
+    const limits: Record<string, unknown> = {
       maxUpstreamInstruments: 1000,
       maxSubscriptionsPerSocket: 1000,
     };
@@ -577,7 +628,6 @@ export class NativeWsService implements OnModuleDestroy {
     // Resolve incoming inputs to UIR IDs. Accepts numeric tokens (resolved against the
     // active provider), Vortex EXCHANGE-TOKEN strings, and Provider:identifier prefix
     // strings (Falcon:reliance, Vayu:26000, Massive:AAPL, Binance:BTCUSDT).
-    const providerName = this.streamService.activeProviderName;
     const requestedUirIds: number[] = [];
     for (const item of instruments as Array<unknown>) {
       const prefixed = parseProviderPrefix(item);
@@ -591,7 +641,9 @@ export class NativeWsService implements OnModuleDestroy {
       }
       const n = Number(item);
       if (Number.isFinite(n)) {
-        const uirId = this.instrumentRegistry.resolveProviderToken(providerName, n);
+        // Resolve across all providers (agnostic), just like handleSubscribe.
+        // This ensures unsubscription works even if providerName doesn't match the original source.
+        const uirId = this.instrumentRegistry.resolveTokenAcrossProviders(n);
         requestedUirIds.push(uirId != null ? uirId : n);
       }
     }
@@ -660,7 +712,10 @@ export class NativeWsService implements OnModuleDestroy {
     const providerName = this.streamService.activeProviderName;
     const uirIds: number[] = [];
     for (const token of tokens) {
-      const uirId = this.instrumentRegistry.resolveProviderToken(providerName, token);
+      const uirId = this.instrumentRegistry.resolveProviderToken(
+        providerName,
+        token,
+      );
       uirIds.push(uirId != null ? uirId : token);
     }
     const subscribedSet = new Set(subscription.instruments);
@@ -681,7 +736,11 @@ export class NativeWsService implements OnModuleDestroy {
     try {
       const { instruments, ltp_only } = data || {};
 
-      if (!instruments || !Array.isArray(instruments) || instruments.length === 0) {
+      if (
+        !instruments ||
+        !Array.isArray(instruments) ||
+        instruments.length === 0
+      ) {
         this.sendError(
           client,
           'WS_INVALID_INSTRUMENTS',
@@ -774,10 +833,16 @@ export class NativeWsService implements OnModuleDestroy {
     try {
       const status = await this.streamService.getStreamingStatus();
       if (!status?.isStreaming) {
-        this.logger.warn('subscribeToInstruments ignored: streaming not active');
+        this.logger.warn(
+          'subscribeToInstruments ignored: streaming not active',
+        );
         return;
       }
-      await this.streamService.subscribeToInstruments(instruments, mode, clientId);
+      await this.streamService.subscribeToInstruments(
+        instruments,
+        mode,
+        clientId,
+      );
       this.logger.log(
         `[NativeWS] Queued subscription for ${instruments.length} instruments with mode=${mode} for client=${clientId}`,
       );
@@ -801,12 +866,20 @@ export class NativeWsService implements OnModuleDestroy {
     provider: InternalProviderName,
   ) {
     try {
-      await this.streamService.subscribeToInstruments(instruments, mode, clientId, provider);
+      await this.streamService.subscribeToInstruments(
+        instruments,
+        mode,
+        clientId,
+        provider,
+      );
       this.logger.log(
         `[NativeWS] Queued forced subscription provider=${provider} count=${instruments.length} mode=${mode} client=${clientId}`,
       );
     } catch (error) {
-      this.logger.error('Error queuing forced-provider subscription', error as any);
+      this.logger.error(
+        'Error queuing forced-provider subscription',
+        error as any,
+      );
     }
   }
 
@@ -817,15 +890,23 @@ export class NativeWsService implements OnModuleDestroy {
     try {
       const status = await this.streamService.getStreamingStatus();
       if (!status?.isStreaming) {
-        this.logger.warn('unsubscribeFromInstruments ignored: streaming not active');
+        this.logger.warn(
+          'unsubscribeFromInstruments ignored: streaming not active',
+        );
         return;
       }
-      await this.streamService.unsubscribeFromInstruments(instruments, clientId);
+      await this.streamService.unsubscribeFromInstruments(
+        instruments,
+        clientId,
+      );
       this.logger.log(
         `[NativeWS] Queued unsubscription for ${instruments.length} instruments for client=${clientId}`,
       );
     } catch (error) {
-      this.logger.error('Error queuing instrument unsubscriptions', error as any);
+      this.logger.error(
+        'Error queuing instrument unsubscriptions',
+        error as any,
+      );
     }
   }
 
@@ -844,9 +925,9 @@ export class NativeWsService implements OnModuleDestroy {
         return;
       }
 
-      const subscribedClients = Array.from(this.clientSubscriptions.values()).filter(
-        (sub) => sub.instruments.includes(identifier),
-      );
+      const subscribedClients = Array.from(
+        this.clientSubscriptions.values(),
+      ).filter((sub) => sub.instruments.includes(identifier));
 
       if (subscribedClients.length > 0) {
         // Broadcast to all clients in this service
@@ -878,7 +959,10 @@ export class NativeWsService implements OnModuleDestroy {
         );
       }
     } catch (error) {
-      this.logger.error('[NativeWS] Error broadcasting market data', error as any);
+      this.logger.error(
+        '[NativeWS] Error broadcasting market data',
+        error as any,
+      );
     }
   }
 
@@ -886,8 +970,13 @@ export class NativeWsService implements OnModuleDestroy {
     try {
       if (client.readyState !== WebSocket.OPEN) return;
       // Backpressure guard (~16MB)
-      if ((client as any).bufferedAmount && (client as any).bufferedAmount > 16 * 1024 * 1024) {
-        this.logger.warn('Skipping send due to backpressure (bufferedAmount too high)');
+      if (
+        (client as any).bufferedAmount &&
+        (client as any).bufferedAmount > 16 * 1024 * 1024
+      ) {
+        this.logger.warn(
+          'Skipping send due to backpressure (bufferedAmount too high)',
+        );
         return;
       }
       client.send(JSON.stringify({ event, ...data }));
@@ -903,13 +992,13 @@ export class NativeWsService implements OnModuleDestroy {
   getConnectionStats() {
     return {
       totalConnections: this.clientSubscriptions.size,
-      subscriptions: Array.from(this.clientSubscriptions.values()).map((sub) => ({
-        userId: sub.userId,
-        instrumentCount: sub.instruments.length,
-        subscriptionType: sub.subscriptionType,
-      })),
+      subscriptions: Array.from(this.clientSubscriptions.values()).map(
+        (sub) => ({
+          userId: sub.userId,
+          instrumentCount: sub.instruments.length,
+          subscriptionType: sub.subscriptionType,
+        }),
+      ),
     };
   }
 }
-
-

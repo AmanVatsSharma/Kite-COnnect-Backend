@@ -1,9 +1,4 @@
-import {
-  MigrationInterface,
-  QueryRunner,
-  Table,
-  TableIndex,
-} from 'typeorm';
+import { MigrationInterface, QueryRunner, Table, TableIndex } from 'typeorm';
 
 // Migration name must include a JS timestamp for this project.
 export class AddApiKeyAbuseFlags1764547200002 implements MigrationInterface {
@@ -91,5 +86,3 @@ export class AddApiKeyAbuseFlags1764547200002 implements MigrationInterface {
     await queryRunner.dropTable('api_key_abuse_flags');
   }
 }
-
-

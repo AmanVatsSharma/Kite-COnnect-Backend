@@ -87,7 +87,9 @@ describe('canonical-symbol', () => {
         expiry: new Date(2025, 3, 24),
         strike: 22000.5,
       };
-      expect(computeCanonicalSymbol(input)).toBe('NFO:BANKNIFTY:CE:20250424:22000.5');
+      expect(computeCanonicalSymbol(input)).toBe(
+        'NFO:BANKNIFTY:CE:20250424:22000.5',
+      );
     });
 
     it('handles null expiry for equity', () => {

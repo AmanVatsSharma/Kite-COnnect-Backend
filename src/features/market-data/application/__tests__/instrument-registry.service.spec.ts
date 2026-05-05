@@ -14,14 +14,39 @@ import { UniversalInstrument } from '../../domain/universal-instrument.entity';
 import { InstrumentMapping } from '../../domain/instrument-mapping.entity';
 
 const mockUirRows = [
-  { id: '42', canonical_symbol: 'NSE:RELIANCE', exchange: 'NSE', is_active: true },
-  { id: '108', canonical_symbol: 'NFO:NIFTY:FUT:20250424', exchange: 'NFO', is_active: true },
+  {
+    id: '42',
+    canonical_symbol: 'NSE:RELIANCE',
+    exchange: 'NSE',
+    is_active: true,
+  },
+  {
+    id: '108',
+    canonical_symbol: 'NFO:NIFTY:FUT:20250424',
+    exchange: 'NFO',
+    is_active: true,
+  },
 ];
 
 const mockMappings = [
-  { provider: 'kite', provider_token: '256265', instrument_token: null, uir_id: 42 },
-  { provider: 'vortex', provider_token: 'NSE_EQ-22', instrument_token: 22, uir_id: 42 },
-  { provider: 'kite', provider_token: '738561', instrument_token: null, uir_id: 108 },
+  {
+    provider: 'kite',
+    provider_token: '256265',
+    instrument_token: null,
+    uir_id: 42,
+  },
+  {
+    provider: 'vortex',
+    provider_token: 'NSE_EQ-22',
+    instrument_token: 22,
+    uir_id: 42,
+  },
+  {
+    provider: 'kite',
+    provider_token: '738561',
+    instrument_token: null,
+    uir_id: 108,
+  },
 ];
 
 describe('InstrumentRegistryService', () => {
@@ -47,9 +72,7 @@ describe('InstrumentRegistryService', () => {
       ],
     }).compile();
 
-    service = module.get<InstrumentRegistryService>(
-      InstrumentRegistryService,
-    );
+    service = module.get<InstrumentRegistryService>(InstrumentRegistryService);
   });
 
   describe('warmMaps', () => {
@@ -62,7 +85,9 @@ describe('InstrumentRegistryService', () => {
 
       // canonicalToUirId
       expect(service.resolveCanonicalSymbol('NSE:RELIANCE')).toBe(42);
-      expect(service.resolveCanonicalSymbol('NFO:NIFTY:FUT:20250424')).toBe(108);
+      expect(service.resolveCanonicalSymbol('NFO:NIFTY:FUT:20250424')).toBe(
+        108,
+      );
 
       // providerTokenToUirId
       expect(service.resolveProviderToken('kite', '256265')).toBe(42);
@@ -208,8 +233,18 @@ describe('InstrumentRegistryService', () => {
 
     it('collision: first uirId wins when two Vortex rows share an instrument_token', async () => {
       mappingRepoFind.mockResolvedValue([
-        { provider: 'vortex', provider_token: 'NSE_EQ-99', instrument_token: 99, uir_id: 10 },
-        { provider: 'vortex', provider_token: 'NSE_FO-99', instrument_token: 99, uir_id: 20 },
+        {
+          provider: 'vortex',
+          provider_token: 'NSE_EQ-99',
+          instrument_token: 99,
+          uir_id: 10,
+        },
+        {
+          provider: 'vortex',
+          provider_token: 'NSE_FO-99',
+          instrument_token: 99,
+          uir_id: 20,
+        },
       ]);
       await service.warmMaps();
       // First entry (uirId=10) wins for the numeric secondary key
@@ -243,7 +278,12 @@ describe('InstrumentRegistryService', () => {
 
     it('US instrument with massive token → massive (Tier 1 exchange match)', async () => {
       uirRepoFind.mockResolvedValue([
-        { id: '200', canonical_symbol: 'US:AAPL', exchange: 'US', is_active: true },
+        {
+          id: '200',
+          canonical_symbol: 'US:AAPL',
+          exchange: 'US',
+          is_active: true,
+        },
       ]);
       mappingRepoFind.mockResolvedValue([
         { provider: 'massive', provider_token: 'AAPL', uir_id: 200 },
@@ -301,11 +341,36 @@ describe('InstrumentRegistryService', () => {
       },
     ];
     const scopedMappings = [
-      { provider: 'kite',    provider_token: '256265',     instrument_token: null, uir_id: 42 },
-      { provider: 'vortex',  provider_token: 'NSE_EQ-22',  instrument_token: 22,   uir_id: 42 },
-      { provider: 'kite',    provider_token: '128083202',  instrument_token: null, uir_id: 43 },
-      { provider: 'binance', provider_token: 'BTCUSDT',    instrument_token: null, uir_id: 200 },
-      { provider: 'kite',    provider_token: '12345',      instrument_token: null, uir_id: 300 },
+      {
+        provider: 'kite',
+        provider_token: '256265',
+        instrument_token: null,
+        uir_id: 42,
+      },
+      {
+        provider: 'vortex',
+        provider_token: 'NSE_EQ-22',
+        instrument_token: 22,
+        uir_id: 42,
+      },
+      {
+        provider: 'kite',
+        provider_token: '128083202',
+        instrument_token: null,
+        uir_id: 43,
+      },
+      {
+        provider: 'binance',
+        provider_token: 'BTCUSDT',
+        instrument_token: null,
+        uir_id: 200,
+      },
+      {
+        provider: 'kite',
+        provider_token: '12345',
+        instrument_token: null,
+        uir_id: 300,
+      },
     ];
 
     beforeEach(async () => {
@@ -316,17 +381,31 @@ describe('InstrumentRegistryService', () => {
 
     it('numeric token resolves within provider scope (kite)', () => {
       const r = service.resolveProviderScopedSymbol('kite', '256265');
-      expect(r).toMatchObject({ status: 'resolved', uirId: 42, canonical: 'NSE:RELIANCE', providerToken: '256265' });
+      expect(r).toMatchObject({
+        status: 'resolved',
+        uirId: 42,
+        canonical: 'NSE:RELIANCE',
+        providerToken: '256265',
+      });
     });
 
     it('numeric Vortex token resolves via secondary index', () => {
       const r = service.resolveProviderScopedSymbol('vortex', '22');
-      expect(r).toMatchObject({ status: 'resolved', uirId: 42, canonical: 'NSE:RELIANCE', providerToken: 'NSE_EQ-22' });
+      expect(r).toMatchObject({
+        status: 'resolved',
+        uirId: 42,
+        canonical: 'NSE:RELIANCE',
+        providerToken: 'NSE_EQ-22',
+      });
     });
 
     it('Vortex EXCHANGE-TOKEN pair form resolves', () => {
       const r = service.resolveProviderScopedSymbol('vortex', 'NSE_EQ-22');
-      expect(r).toMatchObject({ status: 'resolved', uirId: 42, providerToken: 'NSE_EQ-22' });
+      expect(r).toMatchObject({
+        status: 'resolved',
+        uirId: 42,
+        providerToken: 'NSE_EQ-22',
+      });
     });
 
     it('Vortex pair form is case-insensitive', () => {
@@ -337,31 +416,52 @@ describe('InstrumentRegistryService', () => {
     it('exact canonical (NSE:RELIANCE) resolves only when provider has a mapping', () => {
       const kite = service.resolveProviderScopedSymbol('kite', 'NSE:RELIANCE');
       expect(kite.status).toBe('resolved');
-      const massive = service.resolveProviderScopedSymbol('massive', 'NSE:RELIANCE');
+      const massive = service.resolveProviderScopedSymbol(
+        'massive',
+        'NSE:RELIANCE',
+      );
       expect(massive.status).toBe('not_found');
     });
 
     it('underlying name (case-insensitive) — single EQ entry resolves directly', () => {
       // Kite has a token only for NSE:RELIANCE, not BSE — so underlying RELIANCE has only 1 in-provider entry.
       const r = service.resolveProviderScopedSymbol('kite', 'reliance');
-      expect(r).toMatchObject({ status: 'resolved', uirId: 42, canonical: 'NSE:RELIANCE' });
+      expect(r).toMatchObject({
+        status: 'resolved',
+        uirId: 42,
+        canonical: 'NSE:RELIANCE',
+      });
     });
 
     it('underlying with multiple EQ entries (NSE+BSE) prefers NSE within the provider', () => {
       // Add a second kite mapping so RELIANCE has both NSE+BSE tokens in kite.
       mappingRepoFind.mockResolvedValue([
         ...scopedMappings,
-        { provider: 'kite', provider_token: '128083203', instrument_token: null, uir_id: 43 },
+        {
+          provider: 'kite',
+          provider_token: '128083203',
+          instrument_token: null,
+          uir_id: 43,
+        },
       ]);
       return service.refresh().then(() => {
         const r = service.resolveProviderScopedSymbol('kite', 'RELIANCE');
-        expect(r).toMatchObject({ status: 'resolved', uirId: 42, canonical: 'NSE:RELIANCE' });
+        expect(r).toMatchObject({
+          status: 'resolved',
+          uirId: 42,
+          canonical: 'NSE:RELIANCE',
+        });
       });
     });
 
     it('Binance underlying resolves to BINANCE canonical', () => {
       const r = service.resolveProviderScopedSymbol('binance', 'btcusdt');
-      expect(r).toMatchObject({ status: 'resolved', uirId: 200, canonical: 'BINANCE:BTCUSDT', providerToken: 'BTCUSDT' });
+      expect(r).toMatchObject({
+        status: 'resolved',
+        uirId: 200,
+        canonical: 'BINANCE:BTCUSDT',
+        providerToken: 'BTCUSDT',
+      });
     });
 
     it('underlying not in this provider catalog → not_found', () => {
@@ -380,8 +480,12 @@ describe('InstrumentRegistryService', () => {
     });
 
     it('empty / non-string identifier → not_found', () => {
-      expect(service.resolveProviderScopedSymbol('kite', '').status).toBe('not_found');
-      expect(service.resolveProviderScopedSymbol('kite', undefined as any).status).toBe('not_found');
+      expect(service.resolveProviderScopedSymbol('kite', '').status).toBe(
+        'not_found',
+      );
+      expect(
+        service.resolveProviderScopedSymbol('kite', undefined as any).status,
+      ).toBe('not_found');
     });
   });
 });

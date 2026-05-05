@@ -73,7 +73,12 @@ export class RedisHealthIndicator {
     } catch (err: any) {
       const latencyMs = Date.now() - t0;
       this.logger.warn(`[RedisHealthIndicator] PING failed: ${err.message}`);
-      return { healthy: false, status: 'error', latencyMs, lastError: err.message };
+      return {
+        healthy: false,
+        status: 'error',
+        latencyMs,
+        lastError: err.message,
+      };
     }
   }
 }

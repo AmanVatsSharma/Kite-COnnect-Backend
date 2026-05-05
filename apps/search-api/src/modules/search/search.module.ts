@@ -16,5 +16,3 @@ import { AdminSearchService } from './admin-search.service';
   providers: [SearchService, AdminSearchService],
 })
 export class SearchModule {}
-
-

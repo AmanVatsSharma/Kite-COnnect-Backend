@@ -90,7 +90,10 @@ describe('BinanceWebSocketClient', () => {
 
     client.subscribe(['btcusdt', 'BTCUSDT', '12345', '   ', 'ETHUSDT']);
     expect(client.getSubscribedCount()).toBe(2);
-    expect(client.getSubscribedSymbols().sort()).toEqual(['BTCUSDT', 'ETHUSDT']);
+    expect(client.getSubscribedSymbols().sort()).toEqual([
+      'BTCUSDT',
+      'ETHUSDT',
+    ]);
     const frame = JSON.parse(lastFakeSocket.sent[0]);
     expect(frame.params).toEqual(['btcusdt@trade', 'ethusdt@trade']);
   });
@@ -103,7 +106,9 @@ describe('BinanceWebSocketClient', () => {
       (_, i) => `SYM${i}USDT`,
     );
     client.subscribe(tooMany);
-    expect(client.getSubscribedCount()).toBe(BINANCE_MAX_STREAMS_PER_CONNECTION);
+    expect(client.getSubscribedCount()).toBe(
+      BINANCE_MAX_STREAMS_PER_CONNECTION,
+    );
   });
 
   it('UNSUBSCRIBE frame removes from tracked set and sends correct params', () => {
@@ -218,7 +223,9 @@ describe('BinanceWebSocketClient', () => {
   it('does not throw on malformed JSON', () => {
     client.connect();
     lastFakeSocket.fire('open');
-    expect(() => lastFakeSocket.fire('message', '{ this is not json')).not.toThrow();
+    expect(() =>
+      lastFakeSocket.fire('message', '{ this is not json'),
+    ).not.toThrow();
   });
 
   // ── Reconnect re-subscribe ─────────────────────────────────────────────

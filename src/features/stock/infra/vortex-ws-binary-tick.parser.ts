@@ -8,7 +8,10 @@
 
 import { Logger } from '@nestjs/common';
 
-export function parseOneVortexTick(payload: Buffer, logger: Logger): any | null {
+export function parseOneVortexTick(
+  payload: Buffer,
+  logger: Logger,
+): any | null {
   try {
     const len = payload.length;
     const exchange = payload
@@ -105,7 +108,9 @@ export function parseOneVortexTick(payload: Buffer, logger: Logger): any | null 
       };
     }
 
-    logger.warn(`[Vortex] Unknown tick length: ${len} bytes, expected 22/62/266`);
+    logger.warn(
+      `[Vortex] Unknown tick length: ${len} bytes, expected 22/62/266`,
+    );
     return null;
   } catch (e) {
     logger.error(

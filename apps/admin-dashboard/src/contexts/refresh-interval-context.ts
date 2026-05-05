@@ -17,4 +17,5 @@ export interface RefreshIntervalContextValue {
   recordFetchLatency: (ms: number) => void;
 }
 
-export const RefreshIntervalContext = createContext<RefreshIntervalContextValue | null>(null);
+export const RefreshIntervalContext =
+  createContext<RefreshIntervalContextValue | null>(null);

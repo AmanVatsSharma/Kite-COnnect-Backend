@@ -28,14 +28,20 @@ export class AdminVayuController {
   constructor(private readonly vortex: VortexProviderService) {}
 
   @Get('config')
-  @ApiOperation({ summary: 'View current Vayu (Vortex) API credential status (masked)' })
+  @ApiOperation({
+    summary: 'View current Vayu (Vortex) API credential status (masked)',
+  })
   async getConfig() {
     try {
       const data = await this.vortex.getConfigStatus();
       return { success: true, data };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to read Vayu config', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to read Vayu config',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -43,16 +49,32 @@ export class AdminVayuController {
 
   @Patch('config')
   @ApiOperation({
-    summary: 'Update Vayu (Vortex) credentials — persists in Redis, survives restarts',
-    description: 'Supply any combination of apiKey, baseUrl, wsUrl, appId. Re-authenticate at /api/auth/vayu/login after updating.',
+    summary:
+      'Update Vayu (Vortex) credentials — persists in Redis, survives restarts',
+    description:
+      'Supply any combination of apiKey, baseUrl, wsUrl, appId. Re-authenticate at /api/auth/vayu/login after updating.',
   })
   async updateConfig(
-    @Body() body: { apiKey?: string; baseUrl?: string; wsUrl?: string; appId?: string },
+    @Body()
+    body: {
+      apiKey?: string;
+      baseUrl?: string;
+      wsUrl?: string;
+      appId?: string;
+    },
   ) {
     const { apiKey, baseUrl, wsUrl, appId } = body || {};
-    if (!apiKey?.trim() && !baseUrl?.trim() && !wsUrl?.trim() && !appId?.trim()) {
+    if (
+      !apiKey?.trim() &&
+      !baseUrl?.trim() &&
+      !wsUrl?.trim() &&
+      !appId?.trim()
+    ) {
       throw new HttpException(
-        { success: false, message: 'At least one of apiKey, baseUrl, wsUrl, appId is required' },
+        {
+          success: false,
+          message: 'At least one of apiKey, baseUrl, wsUrl, appId is required',
+        },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -60,11 +82,16 @@ export class AdminVayuController {
       await this.vortex.updateApiCredentials({ apiKey, baseUrl, wsUrl, appId });
       return {
         success: true,
-        message: 'Vayu config updated. Re-authenticate at /api/auth/vayu/login to generate a new access token if needed.',
+        message:
+          'Vayu config updated. Re-authenticate at /api/auth/vayu/login to generate a new access token if needed.',
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: 'Failed to update Vayu config', error: (error as any)?.message || 'unknown' },
+        {
+          success: false,
+          message: 'Failed to update Vayu config',
+          error: (error as any)?.message || 'unknown',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

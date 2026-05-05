@@ -39,7 +39,13 @@ export class UniversalInstrument {
   @Column({ type: 'date', nullable: true })
   expiry: Date | null;
 
-  @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true, default: 0 })
+  @Column({
+    type: 'decimal',
+    precision: 14,
+    scale: 4,
+    nullable: true,
+    default: 0,
+  })
   strike: number | null;
 
   @Column({ type: 'varchar', length: 2, nullable: true })

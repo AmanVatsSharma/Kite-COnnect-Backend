@@ -17,7 +17,10 @@ export function validateSubscribePayload(payload: any): {
 } {
   const errors: ValidationError[] = [];
   if (!payload || typeof payload !== 'object') {
-    return { ok: false, errors: [{ path: 'root', issue: 'payload must be an object' }] };
+    return {
+      ok: false,
+      errors: [{ path: 'root', issue: 'payload must be an object' }],
+    };
   }
   const { instruments, mode } = payload as any;
   if (!Array.isArray(instruments) || instruments.length === 0) {
@@ -27,13 +30,19 @@ export function validateSubscribePayload(payload: any): {
       (i) => !isNumericToken(i) && !isExchangeTokenString(i),
     );
     if (bad.length) {
-      errors.push({ path: 'instruments[]', issue: 'each item must be a number or EXCHANGE-TOKEN string' });
+      errors.push({
+        path: 'instruments[]',
+        issue: 'each item must be a number or EXCHANGE-TOKEN string',
+      });
     }
   }
   if (mode && !['ltp', 'ohlcv', 'full'].includes(String(mode))) {
     errors.push({ path: 'mode', issue: 'must be one of ltp|ohlcv|full' });
   }
-  return { ok: errors.length === 0, errors: errors.length ? errors : undefined };
+  return {
+    ok: errors.length === 0,
+    errors: errors.length ? errors : undefined,
+  };
 }
 
 export function validateUnsubscribePayload(payload: any): {
@@ -42,7 +51,10 @@ export function validateUnsubscribePayload(payload: any): {
 } {
   const errors: ValidationError[] = [];
   if (!payload || typeof payload !== 'object') {
-    return { ok: false, errors: [{ path: 'root', issue: 'payload must be an object' }] };
+    return {
+      ok: false,
+      errors: [{ path: 'root', issue: 'payload must be an object' }],
+    };
   }
   const { instruments } = payload as any;
   if (!Array.isArray(instruments) || instruments.length === 0) {
@@ -52,10 +64,16 @@ export function validateUnsubscribePayload(payload: any): {
       (i) => !isNumericToken(i) && !isExchangeTokenString(i),
     );
     if (bad.length) {
-      errors.push({ path: 'instruments[]', issue: 'each item must be a number or EXCHANGE-TOKEN string' });
+      errors.push({
+        path: 'instruments[]',
+        issue: 'each item must be a number or EXCHANGE-TOKEN string',
+      });
     }
   }
-  return { ok: errors.length === 0, errors: errors.length ? errors : undefined };
+  return {
+    ok: errors.length === 0,
+    errors: errors.length ? errors : undefined,
+  };
 }
 
 export function validateSetModePayload(payload: any): {
@@ -64,7 +82,10 @@ export function validateSetModePayload(payload: any): {
 } {
   const errors: ValidationError[] = [];
   if (!payload || typeof payload !== 'object') {
-    return { ok: false, errors: [{ path: 'root', issue: 'payload must be an object' }] };
+    return {
+      ok: false,
+      errors: [{ path: 'root', issue: 'payload must be an object' }],
+    };
   }
   const { instruments, mode } = payload as any;
   if (!Array.isArray(instruments) || instruments.length === 0) {
@@ -74,13 +95,17 @@ export function validateSetModePayload(payload: any): {
       (i) => !isNumericToken(i) && !isExchangeTokenString(i),
     );
     if (bad.length) {
-      errors.push({ path: 'instruments[]', issue: 'each item must be a number or EXCHANGE-TOKEN string' });
+      errors.push({
+        path: 'instruments[]',
+        issue: 'each item must be a number or EXCHANGE-TOKEN string',
+      });
     }
   }
   if (!['ltp', 'ohlcv', 'full'].includes(String(mode))) {
     errors.push({ path: 'mode', issue: 'must be one of ltp|ohlcv|full' });
   }
-  return { ok: errors.length === 0, errors: errors.length ? errors : undefined };
+  return {
+    ok: errors.length === 0,
+    errors: errors.length ? errors : undefined,
+  };
 }
-
-

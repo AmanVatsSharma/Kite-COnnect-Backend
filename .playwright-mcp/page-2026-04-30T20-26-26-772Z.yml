@@ -1,0 +1,87 @@
+- generic [ref=e2]:
+  - region "Notifications alt+T"
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: LIVE
+      - generic [ref=e7]: HEALTH FAIL · ADMIN token unset — live provider stream gated · HEALTH FAIL · ADMIN token unset — live provider stream gated
+    - generic [ref=e8]:
+      - complementary "Primary navigation" [ref=e9]:
+        - link "CMD Command" [ref=e10] [cursor=pointer]:
+          - /url: /dashboard
+          - generic [ref=e11]: CMD
+          - generic [ref=e12]: Command
+        - link "KEYS API Keys" [ref=e13] [cursor=pointer]:
+          - /url: /dashboard/keys
+          - generic [ref=e14]: KEYS
+          - generic [ref=e15]: API Keys
+        - link "PROV Provider" [ref=e16] [cursor=pointer]:
+          - /url: /dashboard/provider
+          - generic [ref=e17]: PROV
+          - generic [ref=e18]: Provider
+        - link "WS WS Admin" [ref=e19] [cursor=pointer]:
+          - /url: /dashboard/ws
+          - generic [ref=e20]: WS
+          - generic [ref=e21]: WS Admin
+        - link "SEC Security" [ref=e22] [cursor=pointer]:
+          - /url: /dashboard/abuse
+          - generic [ref=e23]: SEC
+          - generic [ref=e24]: Security
+        - link "AUD Audit" [ref=e25] [cursor=pointer]:
+          - /url: /dashboard/audit
+          - generic [ref=e26]: AUD
+          - generic [ref=e27]: Audit
+        - link "FAL Falcon" [ref=e28] [cursor=pointer]:
+          - /url: /dashboard/falcon
+          - generic [ref=e29]: FAL
+          - generic [ref=e30]: Falcon
+        - link "SRCH Search" [ref=e31] [cursor=pointer]:
+          - /url: /dashboard/search
+          - generic [ref=e32]: SRCH
+          - generic [ref=e33]: Search
+        - link "SADM Search Admin" [ref=e34] [cursor=pointer]:
+          - /url: /dashboard/search-admin
+          - generic [ref=e35]: SADM
+          - generic [ref=e36]: Search Admin
+        - link "AUTH Auth" [ref=e37] [cursor=pointer]:
+          - /url: /dashboard/auth
+          - generic [ref=e38]: AUTH
+          - generic [ref=e39]: Auth
+        - link "CON Console" [ref=e40] [cursor=pointer]:
+          - /url: /dashboard/console
+          - generic [ref=e41]: CON
+          - generic [ref=e42]: Console
+        - link "SET Settings" [ref=e43] [cursor=pointer]:
+          - /url: /dashboard/settings
+          - generic [ref=e44]: SET
+          - generic [ref=e45]: Settings
+        - button "⌘K" [ref=e46] [cursor=pointer]
+      - generic [ref=e47]:
+        - paragraph [ref=e48]:
+          - text: Set your admin token under
+          - link "Settings" [ref=e49] [cursor=pointer]:
+            - /url: /dashboard/settings
+          - text: to enable protected actions and live admin panels.
+        - generic [ref=e52]:
+          - text: Admin token required. Set it in
+          - link "Settings" [ref=e53] [cursor=pointer]:
+            - /url: /dashboard/settings
+          - text: .
+    - contentinfo [ref=e54]:
+      - generic "Asia/Kolkata" [ref=e55]: IST Fri, 01:56:26
+      - generic [ref=e56]: │
+      - generic [ref=e57]:
+        - generic [ref=e58]: Poll
+        - combobox "Polling interval" [ref=e59]:
+          - option "Paused"
+          - option "1s"
+          - option "3s"
+          - option "5s" [selected]
+          - option "15s"
+      - generic [ref=e60]: │
+      - generic "Last measured client round-trip" [ref=e61]: RT —
+      - generic [ref=e62]: │
+      - generic [ref=e63]: no token
+      - generic [ref=e64]: │
+      - generic [ref=e65]: ⌘K
+      - link "Legacy" [ref=e66] [cursor=pointer]:
+        - /url: /dashboard/legacy-dashboard.html

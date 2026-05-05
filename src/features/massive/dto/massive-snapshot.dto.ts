@@ -8,18 +8,18 @@
  */
 
 export interface MassiveLastTrade {
-  p: number;    // price
-  s: number;    // size
-  t: number;    // timestamp (Unix ms)
-  x?: number;  // exchange
+  p: number; // price
+  s: number; // size
+  t: number; // timestamp (Unix ms)
+  x?: number; // exchange
 }
 
 export interface MassiveLastQuote {
-  P?: number;  // ask price
-  S?: number;  // ask size
-  p?: number;  // bid price
-  s?: number;  // bid size
-  t?: number;  // timestamp
+  P?: number; // ask price
+  S?: number; // ask size
+  p?: number; // bid price
+  s?: number; // bid size
+  t?: number; // timestamp
 }
 
 export interface MassiveDayBar {

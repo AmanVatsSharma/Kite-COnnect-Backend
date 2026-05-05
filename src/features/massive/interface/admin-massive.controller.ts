@@ -36,14 +36,18 @@ export class AdminMassiveController {
   ) {}
 
   @Post('sync')
-  @ApiOperation({ summary: 'Trigger Massive instrument sync (one market or all)' })
+  @ApiOperation({
+    summary: 'Trigger Massive instrument sync (one market or all)',
+  })
   async triggerSync(@Body() body: { market?: string } = {}) {
     const results = await this.syncService.syncMassiveInstruments(body.market);
     return { success: true, results };
   }
 
   @Get('sync/status')
-  @ApiOperation({ summary: 'Get last Massive instrument sync result and timestamp' })
+  @ApiOperation({
+    summary: 'Get last Massive instrument sync result and timestamp',
+  })
   getSyncStatus() {
     return { success: true, ...this.syncService.getSyncStatus() };
   }
@@ -63,7 +67,10 @@ export class AdminMassiveController {
     @Query('activeOnly') activeOnly?: string,
   ) {
     const page = Math.max(1, parseInt(pageRaw || '1') || 1);
-    const pageSize = Math.max(1, Math.min(200, parseInt(pageSizeRaw || '50') || 50));
+    const pageSize = Math.max(
+      1,
+      Math.min(200, parseInt(pageSizeRaw || '50') || 50),
+    );
 
     const where: Record<string, any> = {};
     if (market) where.market = market.toLowerCase();
@@ -88,18 +95,26 @@ export class AdminMassiveController {
   }
 
   @Get('resolve')
-  @ApiOperation({ summary: 'Resolve a Massive ticker to its UIR ID and canonical symbol' })
+  @ApiOperation({
+    summary: 'Resolve a Massive ticker to its UIR ID and canonical symbol',
+  })
   @ApiQuery({ name: 'ticker', required: true, example: 'AAPL' })
   async resolve(@Query('ticker') ticker?: string) {
-    if (!ticker) throw new BadRequestException('ticker query param is required');
+    if (!ticker)
+      throw new BadRequestException('ticker query param is required');
 
     const instrument = await this.massiveRepo.findOne({
       where: { ticker: ticker.toUpperCase() },
     });
 
     const exchange = instrument
-      ? { stocks: 'US', forex: 'FX', crypto: 'CRYPTO', indices: 'IDX', options: 'US' }[instrument.market] ??
-        instrument.market.toUpperCase()
+      ? ({
+          stocks: 'US',
+          forex: 'FX',
+          crypto: 'CRYPTO',
+          indices: 'IDX',
+          options: 'US',
+        }[instrument.market] ?? instrument.market.toUpperCase())
       : 'US';
 
     const canonicalSymbol = `${exchange}:${ticker.toUpperCase()}`;

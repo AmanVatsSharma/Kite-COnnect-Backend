@@ -32,7 +32,9 @@ export class VortexInstrumentCacheService {
     try {
       const cached = await this.redisService.get<string>(cacheKey);
       if (cached) {
-        this.logger.debug(`[VortexInstrumentCacheService] Cache hit for key: ${cacheKey}`);
+        this.logger.debug(
+          `[VortexInstrumentCacheService] Cache hit for key: ${cacheKey}`,
+        );
         return JSON.parse(cached);
       }
 
@@ -153,7 +155,13 @@ export class VortexInstrumentCacheService {
     const result = await this.getCachedOrExecute(cacheKey, 300, async () => {
       const suggestions = await this.vortexInstrumentRepo
         .createQueryBuilder('v')
-        .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name', 'v.description'])
+        .select([
+          'v.token',
+          'v.symbol',
+          'v.exchange',
+          'v.instrument_name',
+          'v.description',
+        ])
         .where('v.is_active = :active', { active: true })
         .andWhere('v.symbol ILIKE :query', { query: `${trimmedQuery}%` })
         .orderBy('v.symbol', 'ASC')
@@ -187,29 +195,40 @@ export class VortexInstrumentCacheService {
   }> {
     const startTime = Date.now();
 
-    const result = await this.getCachedOrExecute('vortex:popular:instruments', 3600, async () => {
-      const popularSymbols = await this.vortexInstrumentRepo
-        .createQueryBuilder('v')
-        .select(['v.token', 'v.symbol', 'v.exchange', 'v.instrument_name', 'v.description'])
-        .where('v.is_active = :active', { active: true })
-        .andWhere('v.instrument_name IN (:...types)', {
-          types: ['EQUITIES', 'EQ'],
-        })
-        .orderBy('v.symbol', 'ASC')
-        .limit(limit)
-        .getMany();
+    const result = await this.getCachedOrExecute(
+      'vortex:popular:instruments',
+      3600,
+      async () => {
+        const popularSymbols = await this.vortexInstrumentRepo
+          .createQueryBuilder('v')
+          .select([
+            'v.token',
+            'v.symbol',
+            'v.exchange',
+            'v.instrument_name',
+            'v.description',
+          ])
+          .where('v.is_active = :active', { active: true })
+          .andWhere('v.instrument_name IN (:...types)', {
+            types: ['EQUITIES', 'EQ'],
+          })
+          .orderBy('v.symbol', 'ASC')
+          .limit(limit)
+          .getMany();
 
-      const tokens = popularSymbols.map((i) => i.token);
-      const ltp = tokens.length > 0 ? await this.ltpService.getVortexLTP(tokens) : {};
+        const tokens = popularSymbols.map((i) => i.token);
+        const ltp =
+          tokens.length > 0 ? await this.ltpService.getVortexLTP(tokens) : {};
 
-      return popularSymbols.map((s) => ({
-        token: s.token,
-        symbol: s.symbol,
-        exchange: s.exchange,
-        instrument_name: s.instrument_name,
-        last_price: ltp?.[s.token]?.last_price ?? null,
-      }));
-    });
+        return popularSymbols.map((s) => ({
+          token: s.token,
+          symbol: s.symbol,
+          exchange: s.exchange,
+          instrument_name: s.instrument_name,
+          last_price: ltp?.[s.token]?.last_price ?? null,
+        }));
+      },
+    );
 
     return {
       instruments: result,
@@ -258,9 +277,14 @@ export class VortexInstrumentCacheService {
         }
       }
 
-      this.logger.log('[VortexInstrumentCacheService] Cleared Vortex cache keys');
+      this.logger.log(
+        '[VortexInstrumentCacheService] Cleared Vortex cache keys',
+      );
     } catch (error) {
-      this.logger.warn('[VortexInstrumentCacheService] Failed to clear cache', error);
+      this.logger.warn(
+        '[VortexInstrumentCacheService] Failed to clear cache',
+        error,
+      );
     }
   }
 }

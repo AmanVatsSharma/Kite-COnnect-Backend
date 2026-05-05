@@ -47,7 +47,8 @@ const makeFactory = (clientStatus = 'ready', defaultOverrides: any = {}) => {
   return {
     isConfigured: jest.fn().mockReturnValue(clientStatus !== 'unconfigured'),
     getClient: jest.fn((name: string) => {
-      if (name === 'default') return clientStatus === 'unconfigured' ? null : defaultClient;
+      if (name === 'default')
+        return clientStatus === 'unconfigured' ? null : defaultClient;
       if (name === 'pubsub-pub') return pubClient;
       if (name === 'pubsub-sub') return subClient;
       return null;
@@ -74,7 +75,11 @@ describe('RedisService', () => {
   let factory: ReturnType<typeof makeFactory>;
   let metrics: ReturnType<typeof makeMetrics>;
 
-  const build = async (factoryStatus = 'ready', defaultOverrides: any = {}, configOverrides: Record<string, any> = {}) => {
+  const build = async (
+    factoryStatus = 'ready',
+    defaultOverrides: any = {},
+    configOverrides: Record<string, any> = {},
+  ) => {
     factory = makeFactory(factoryStatus, defaultOverrides);
     metrics = makeMetrics();
     const module = await Test.createTestingModule({
@@ -116,13 +121,20 @@ describe('RedisService', () => {
     it('calls setex with TTL when ttl provided', async () => {
       await build();
       await service.set('foo', { x: 1 }, 60);
-      expect(factory._defaultClient.setex).toHaveBeenCalledWith('foo', 60, JSON.stringify({ x: 1 }));
+      expect(factory._defaultClient.setex).toHaveBeenCalledWith(
+        'foo',
+        60,
+        JSON.stringify({ x: 1 }),
+      );
     });
 
     it('calls set without TTL when no ttl', async () => {
       await build();
       await service.set('foo', 'bar');
-      expect(factory._defaultClient.set).toHaveBeenCalledWith('foo', JSON.stringify('bar'));
+      expect(factory._defaultClient.set).toHaveBeenCalledWith(
+        'foo',
+        JSON.stringify('bar'),
+      );
     });
 
     it('returns silently when no client', async () => {
@@ -173,7 +185,13 @@ describe('RedisService', () => {
       await build();
       factory._defaultClient.set.mockResolvedValue('OK');
       expect(await service.tryAcquireLock('lock:k', 5000)).toBe(true);
-      expect(factory._defaultClient.set).toHaveBeenCalledWith('lock:k', '1', 'NX', 'PX', 5000);
+      expect(factory._defaultClient.set).toHaveBeenCalledWith(
+        'lock:k',
+        '1',
+        'NX',
+        'PX',
+        5000,
+      );
     });
 
     it('returns false when lock already held (ioredis returns null)', async () => {
@@ -223,7 +241,9 @@ describe('RedisService', () => {
       await service.subscribe('chan:x', cb2);
 
       // Find the 'message' listener registered on subClient
-      const messageCall = factory._subClient.on.mock.calls.find(([ev]: [string]) => ev === 'message');
+      const messageCall = factory._subClient.on.mock.calls.find(
+        ([ev]: [string]) => ev === 'message',
+      );
       expect(messageCall).toBeDefined();
       const handler = messageCall![1];
 
@@ -246,7 +266,9 @@ describe('RedisService', () => {
       await service.subscribe('chan:z', cb);
       await service.unsubscribe('chan:z');
 
-      const messageCall = factory._subClient.on.mock.calls.find(([ev]: [string]) => ev === 'message');
+      const messageCall = factory._subClient.on.mock.calls.find(
+        ([ev]: [string]) => ev === 'message',
+      );
       const handler = messageCall![1];
       handler('chan:z', JSON.stringify({ v: 1 }));
       expect(cb).not.toHaveBeenCalled();
@@ -258,7 +280,14 @@ describe('RedisService', () => {
 
   describe('circuit breaker', () => {
     it('opens after THRESHOLD consecutive failures, skips subsequent ops', async () => {
-      await build('ready', {}, { REDIS_CIRCUIT_BREAKER_THRESHOLD: 3, REDIS_CIRCUIT_BREAKER_RESET_MS: 30000 });
+      await build(
+        'ready',
+        {},
+        {
+          REDIS_CIRCUIT_BREAKER_THRESHOLD: 3,
+          REDIS_CIRCUIT_BREAKER_RESET_MS: 30000,
+        },
+      );
       factory._defaultClient.get.mockRejectedValue(new Error('ECONNREFUSED'));
 
       await service.get('k'); // failure 1
@@ -272,13 +301,20 @@ describe('RedisService', () => {
     });
 
     it('transitions OPEN → HALF_OPEN after resetMs, then CLOSED on success', async () => {
-      await build('ready', {}, { REDIS_CIRCUIT_BREAKER_THRESHOLD: 2, REDIS_CIRCUIT_BREAKER_RESET_MS: 1 });
+      await build(
+        'ready',
+        {},
+        {
+          REDIS_CIRCUIT_BREAKER_THRESHOLD: 2,
+          REDIS_CIRCUIT_BREAKER_RESET_MS: 1,
+        },
+      );
 
       factory._defaultClient.get.mockRejectedValue(new Error('err'));
       await service.get('k'); // failure 1
       await service.get('k'); // failure 2 → OPEN
 
-      await new Promise(r => setTimeout(r, 10)); // wait past resetMs=1ms
+      await new Promise((r) => setTimeout(r, 10)); // wait past resetMs=1ms
 
       // Next call: HALF_OPEN probe — succeeds
       factory._defaultClient.get.mockResolvedValue(JSON.stringify('ok'));
@@ -303,7 +339,10 @@ describe('RedisService', () => {
     it('publishes JSON-serialized message to pubClient', async () => {
       await build();
       await service.publish('ch', { data: 1 });
-      expect(factory._pubClient.publish).toHaveBeenCalledWith('ch', JSON.stringify({ data: 1 }));
+      expect(factory._pubClient.publish).toHaveBeenCalledWith(
+        'ch',
+        JSON.stringify({ data: 1 }),
+      );
     });
   });
 
@@ -313,7 +352,11 @@ describe('RedisService', () => {
     it('hset serializes value', async () => {
       await build();
       await service.hset('h', 'f', { v: 1 });
-      expect(factory._defaultClient.hset).toHaveBeenCalledWith('h', 'f', JSON.stringify({ v: 1 }));
+      expect(factory._defaultClient.hset).toHaveBeenCalledWith(
+        'h',
+        'f',
+        JSON.stringify({ v: 1 }),
+      );
     });
 
     it('hget deserializes value', async () => {
@@ -335,7 +378,11 @@ describe('RedisService', () => {
     it('uses market_data:{token} key', async () => {
       await build();
       await service.cacheMarketData(12345, { ltp: 100 }, 30);
-      expect(factory._defaultClient.setex).toHaveBeenCalledWith('market_data:12345', 30, expect.any(String));
+      expect(factory._defaultClient.setex).toHaveBeenCalledWith(
+        'market_data:12345',
+        30,
+        expect.any(String),
+      );
     });
   });
 });

@@ -76,10 +76,15 @@ export class AuthController {
     },
   })
   async login() {
-    const dbApiKey = await this.appConfig.get('config:kite:api_key').catch(() => null);
-    const dbApiSecret = await this.appConfig.get('config:kite:api_secret').catch(() => null);
+    const dbApiKey = await this.appConfig
+      .get('config:kite:api_key')
+      .catch(() => null);
+    const dbApiSecret = await this.appConfig
+      .get('config:kite:api_secret')
+      .catch(() => null);
     const apiKey = dbApiKey || this.configService.get<string>('KITE_API_KEY');
-    const apiSecret = dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
+    const apiSecret =
+      dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
     if (!apiKey || !apiSecret)
       throw new BadRequestException('Falcon API creds not configured');
 
@@ -88,7 +93,11 @@ export class AuthController {
     // Persist state in DB (survives process restarts and hot-reloads).
     // Redis is used as fast path when available; DB is the durable fallback.
     if (this.redisService.isRedisAvailable()) {
-      await this.redisService.set(`kite_oauth_state:${state}`, { createdAt: Date.now() }, 300);
+      await this.redisService.set(
+        `kite_oauth_state:${state}`,
+        { createdAt: Date.now() },
+        300,
+      );
     }
     await this.appConfig.set(OAUTH_STATE_KEY(state), String(Date.now()));
 
@@ -113,10 +122,15 @@ export class AuthController {
     @Query('request_token') requestToken: string,
     @Query('state') state: string,
   ) {
-    const dbApiKey = await this.appConfig.get('config:kite:api_key').catch(() => null);
-    const dbApiSecret = await this.appConfig.get('config:kite:api_secret').catch(() => null);
+    const dbApiKey = await this.appConfig
+      .get('config:kite:api_key')
+      .catch(() => null);
+    const dbApiSecret = await this.appConfig
+      .get('config:kite:api_secret')
+      .catch(() => null);
     const apiKey = dbApiKey || this.configService.get<string>('KITE_API_KEY');
-    const apiSecret = dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
+    const apiSecret =
+      dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
     if (!apiKey || !apiSecret)
       throw new BadRequestException('Falcon API creds not configured');
 
@@ -127,7 +141,9 @@ export class AuthController {
       stateValid = !!expected;
     }
     if (!stateValid) {
-      const createdAtStr = await this.appConfig.get(OAUTH_STATE_KEY(state)).catch(() => null);
+      const createdAtStr = await this.appConfig
+        .get(OAUTH_STATE_KEY(state))
+        .catch(() => null);
       if (createdAtStr) {
         const age = Date.now() - Number(createdAtStr);
         stateValid = age < 10 * 60 * 1000; // 10-min window for slower OAuth flows
@@ -209,52 +225,87 @@ export class AuthController {
   @UseGuards(AdminGuard)
   @ApiSecurity('admin')
   @ApiOperation({
-    summary: 'Exchange a Kite request_token for an access_token (admin manual fallback)',
-    description: 'Skips CSRF state check. Use when the OAuth popup flow fails. Requires x-admin-token header.',
+    summary:
+      'Exchange a Kite request_token for an access_token (admin manual fallback)',
+    description:
+      'Skips CSRF state check. Use when the OAuth popup flow fails. Requires x-admin-token header.',
   })
   @ApiBody({
     schema: {
       type: 'object',
       required: ['requestToken'],
       properties: {
-        requestToken: { type: 'string', description: 'request_token from Kite callback URL' },
+        requestToken: {
+          type: 'string',
+          description: 'request_token from Kite callback URL',
+        },
       },
     },
   })
-  @ApiOkResponse({ schema: { properties: { success: { type: 'boolean', example: true } } } })
+  @ApiOkResponse({
+    schema: { properties: { success: { type: 'boolean', example: true } } },
+  })
   async exchangeToken(@Body() body: { requestToken?: string }) {
     const requestToken = body?.requestToken?.trim();
-    if (!requestToken) throw new BadRequestException('requestToken is required');
+    if (!requestToken)
+      throw new BadRequestException('requestToken is required');
 
-    const dbApiKey = await this.appConfig.get('config:kite:api_key').catch(() => null);
-    const dbApiSecret = await this.appConfig.get('config:kite:api_secret').catch(() => null);
+    const dbApiKey = await this.appConfig
+      .get('config:kite:api_key')
+      .catch(() => null);
+    const dbApiSecret = await this.appConfig
+      .get('config:kite:api_secret')
+      .catch(() => null);
     const apiKey = dbApiKey || this.configService.get<string>('KITE_API_KEY');
-    const apiSecret = dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
-    if (!apiKey || !apiSecret) throw new BadRequestException('Falcon API creds not configured');
+    const apiSecret =
+      dbApiSecret || this.configService.get<string>('KITE_API_SECRET');
+    if (!apiKey || !apiSecret)
+      throw new BadRequestException('Falcon API creds not configured');
 
     const kite = new KiteConnect({ api_key: apiKey });
     let session: any;
     try {
       session = await kite.generateSession(requestToken, apiSecret);
     } catch (e: any) {
-      throw new BadRequestException(`Token exchange failed: ${e?.message || 'unknown error'}`);
+      throw new BadRequestException(
+        `Token exchange failed: ${e?.message || 'unknown error'}`,
+      );
     }
 
     // Deactivate previous sessions and save new one
-    await this.kiteSessionRepo.createQueryBuilder().update(KiteSession)
-      .set({ is_active: false }).where('is_active = :active', { active: true }).execute();
+    await this.kiteSessionRepo
+      .createQueryBuilder()
+      .update(KiteSession)
+      .set({ is_active: false })
+      .where('is_active = :active', { active: true })
+      .execute();
     await this.kiteSessionRepo.save(
-      this.kiteSessionRepo.create({ access_token: session.access_token, public_token: session.public_token, is_active: true, metadata: session }),
+      this.kiteSessionRepo.create({
+        access_token: session.access_token,
+        public_token: session.public_token,
+        is_active: true,
+        metadata: session,
+      }),
     );
 
     // Cache token + created_at
-    await this.redisService.set('kite:access_token', session.access_token, 24 * 3600);
-    await this.redisService.set('kite:access_token_created_at', Date.now().toString(), 24 * 3600);
+    await this.redisService.set(
+      'kite:access_token',
+      session.access_token,
+      24 * 3600,
+    );
+    await this.redisService.set(
+      'kite:access_token_created_at',
+      Date.now().toString(),
+      24 * 3600,
+    );
 
     // Update provider and restart ticker
     await this.kiteProvider.updateAccessToken(session.access_token);
     await this.kiteProvider.restartTicker();
-    try { await this.resolver.setGlobalProviderName('kite'); } catch {}
+    try {
+      await this.resolver.setGlobalProviderName('kite');
+    } catch {}
     try {
       const status = await this.streamService.getStreamingStatus();
       if (!status?.isStreaming) await this.streamService.startStreaming();
@@ -314,7 +365,9 @@ export class VortexAuthController {
     },
   })
   async login() {
-    const dbAppId = await this.appConfig.get('config:vortex:app_id').catch(() => null);
+    const dbAppId = await this.appConfig
+      .get('config:vortex:app_id')
+      .catch(() => null);
     const appId = dbAppId || this.configService.get<string>('VORTEX_APP_ID');
     if (!appId)
       throw new BadRequestException(
@@ -365,9 +418,11 @@ export class VortexAuthController {
         this.appConfig.get('config:vortex:base_url').catch(() => null),
       ]);
       const appId = dbAppId || this.configService.get<string>('VORTEX_APP_ID');
-      const apiKey = dbApiKey || this.configService.get<string>('VORTEX_API_KEY');
+      const apiKey =
+        dbApiKey || this.configService.get<string>('VORTEX_API_KEY');
       const baseUrl = (
-        dbBaseUrl || this.configService.get<string>('VORTEX_BASE_URL') ||
+        dbBaseUrl ||
+        this.configService.get<string>('VORTEX_BASE_URL') ||
         'https://vortex-api.rupeezy.in/v2'
       ).replace(/\/$/, '');
       const createSessionUrl = `${baseUrl}/user/session`;

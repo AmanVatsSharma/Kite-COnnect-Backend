@@ -37,7 +37,9 @@ export class AdminInstrumentsController {
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'Paginated UIR instrument list with provider token coverage' })
+  @ApiOperation({
+    summary: 'Paginated UIR instrument list with provider token coverage',
+  })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'pageSize', required: false, example: 50 })
   @ApiQuery({ name: 'exchange', required: false, example: 'NSE' })
@@ -49,11 +51,20 @@ export class AdminInstrumentsController {
     @Query('type') type?: string,
   ) {
     const page = Math.max(1, parseInt(pageRaw || '1') || 1);
-    const pageSize = Math.max(1, Math.min(200, parseInt(pageSizeRaw || '50') || 50));
+    const pageSize = Math.max(
+      1,
+      Math.min(200, parseInt(pageSizeRaw || '50') || 50),
+    );
 
-    const qb = this.uirRepo.createQueryBuilder('u').where('u.is_active = :active', { active: true });
-    if (exchange) qb.andWhere('u.exchange = :exchange', { exchange: exchange.toUpperCase() });
-    if (type) qb.andWhere('u.instrument_type = :type', { type: type.toUpperCase() });
+    const qb = this.uirRepo
+      .createQueryBuilder('u')
+      .where('u.is_active = :active', { active: true });
+    if (exchange)
+      qb.andWhere('u.exchange = :exchange', {
+        exchange: exchange.toUpperCase(),
+      });
+    if (type)
+      qb.andWhere('u.instrument_type = :type', { type: type.toUpperCase() });
 
     const [rows, total] = await qb
       .orderBy('u.canonical_symbol', 'ASC')
@@ -95,7 +106,9 @@ export class AdminInstrumentsController {
   }
 
   @Get('stats')
-  @ApiOperation({ summary: 'UIR registry stats and provider coverage breakdown' })
+  @ApiOperation({
+    summary: 'UIR registry stats and provider coverage breakdown',
+  })
   async stats() {
     const registryStats = this.registry.getStats();
     return {
@@ -107,10 +120,13 @@ export class AdminInstrumentsController {
   }
 
   @Get('resolve')
-  @ApiOperation({ summary: 'Resolve a canonical symbol to its UIR ID and provider tokens' })
+  @ApiOperation({
+    summary: 'Resolve a canonical symbol to its UIR ID and provider tokens',
+  })
   @ApiQuery({ name: 'symbol', required: true, example: 'NSE:RELIANCE' })
   async resolve(@Query('symbol') symbol?: string) {
-    if (!symbol) throw new BadRequestException('symbol query param is required');
+    if (!symbol)
+      throw new BadRequestException('symbol query param is required');
     const cross = this.registry.resolveCrossProvider(symbol);
     return {
       success: true,
@@ -125,7 +141,9 @@ export class AdminInstrumentsController {
   }
 
   @Get('unmapped')
-  @ApiOperation({ summary: 'Paginated list of instrument mappings with no UIR link' })
+  @ApiOperation({
+    summary: 'Paginated list of instrument mappings with no UIR link',
+  })
   @ApiQuery({ name: 'provider', required: false, example: 'kite' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'pageSize', required: false, example: 50 })
@@ -135,7 +153,10 @@ export class AdminInstrumentsController {
     @Query('pageSize') pageSizeRaw?: string,
   ) {
     const page = Math.max(1, parseInt(pageRaw || '1') || 1);
-    const pageSize = Math.max(1, Math.min(200, parseInt(pageSizeRaw || '50') || 50));
+    const pageSize = Math.max(
+      1,
+      Math.min(200, parseInt(pageSizeRaw || '50') || 50),
+    );
 
     const where: Record<string, any> = { uir_id: IsNull() };
     if (provider) where['provider'] = provider.toLowerCase();
@@ -158,7 +179,9 @@ export class AdminInstrumentsController {
   }
 
   @Post('refresh')
-  @ApiOperation({ summary: 'Refresh the in-memory UIR registry from the database' })
+  @ApiOperation({
+    summary: 'Refresh the in-memory UIR registry from the database',
+  })
   async refresh() {
     await this.registry.refresh();
     const registryStats = this.registry.getStats();

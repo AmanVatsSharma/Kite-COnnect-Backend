@@ -11,7 +11,10 @@ import {
 import { Transform, Type } from 'class-transformer';
 
 export class LtpPairDto {
-  @ApiProperty({ enum: ['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'], example: 'NSE_EQ' })
+  @ApiProperty({
+    enum: ['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'],
+    example: 'NSE_EQ',
+  })
   @IsIn(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'])
   exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
 
@@ -22,14 +25,20 @@ export class LtpPairDto {
 }
 
 export class LtpRequestDto {
-  @ApiPropertyOptional({ type: [Number], description: 'List of instrument tokens' })
+  @ApiPropertyOptional({
+    type: [Number],
+    description: 'List of instrument tokens',
+  })
   @IsOptional()
   @IsArray()
   @ArrayNotEmpty()
   @IsInt({ each: true })
   instruments?: number[];
 
-  @ApiPropertyOptional({ type: [LtpPairDto], description: 'Explicit exchange-token pairs' })
+  @ApiPropertyOptional({
+    type: [LtpPairDto],
+    description: 'Explicit exchange-token pairs',
+  })
   @IsOptional()
   @IsArray()
   @ArrayNotEmpty()
@@ -37,5 +46,3 @@ export class LtpRequestDto {
   @Type(() => LtpPairDto)
   pairs?: LtpPairDto[];
 }
-
-

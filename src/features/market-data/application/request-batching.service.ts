@@ -19,8 +19,16 @@ import { ProviderQueueService } from '@features/market-data/application/provider
 import { MarketDataStreamService } from '@features/market-data/application/market-data-stream.service';
 
 // Ambient declarations for timers in environments lacking lib.dom types
-declare function setInterval(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): any;
-declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): any;
+declare function setInterval(
+  handler: (...args: any[]) => void,
+  timeout?: number,
+  ...args: any[]
+): any;
+declare function setTimeout(
+  handler: (...args: any[]) => void,
+  timeout?: number,
+  ...args: any[]
+): any;
 
 interface PendingRequest {
   resolve: (value: any) => void;
@@ -307,8 +315,9 @@ export class RequestBatchingService implements OnModuleInit, OnModuleDestroy {
             this.logger.warn(
               `[Batching] ${stillMissing.length} tokens still missing after stale fill → gated provider LTP fallback`,
             );
-            const ltpMap = await this.providerQueue.execute('ltp' as any, async () =>
-              (provider as any).getLTP(stillMissing),
+            const ltpMap = await this.providerQueue.execute(
+              'ltp' as any,
+              async () => (provider as any).getLTP(stillMissing),
             );
             for (const tok of stillMissing) {
               const lv = ltpMap?.[tok]?.last_price;
@@ -369,7 +378,9 @@ export class RequestBatchingService implements OnModuleInit, OnModuleDestroy {
         }
       }
       const keys = Array.from(
-        new Set(allPairs.map((p) => `${String(p.exchange)}-${String(p.token)}`)),
+        new Set(
+          allPairs.map((p) => `${String(p.exchange)}-${String(p.token)}`),
+        ),
       );
       const uniquePairs: Pair[] = keys.map((k) => {
         const [ex, tok] = k.split('-');
@@ -389,26 +400,29 @@ export class RequestBatchingService implements OnModuleInit, OnModuleDestroy {
       for (const chunk of chunks) {
         try {
           const chunkStart = Date.now();
-          const map = await this.providerQueue.execute('ltp' as any, async () => {
-            if (typeof provider.getLTPByPairs === 'function') {
-              return provider.getLTPByPairs(chunk);
-            }
-            const tokens = chunk.map((p) => String(p.token));
-            const ltp = await provider.getLTP(tokens);
-            const out: Record<string, { last_price: number | null }> = {};
-            for (const p of chunk) {
-              const k = `${String(p.exchange).toUpperCase()}-${String(p.token)}`;
-              const row = ltp?.[String(p.token)];
-              const lp = row?.last_price;
-              out[k] = {
-                last_price:
-                  Number.isFinite(Number(lp)) && Number(lp) > 0
-                    ? Number(lp)
-                    : null,
-              };
-            }
-            return out;
-          });
+          const map = await this.providerQueue.execute(
+            'ltp' as any,
+            async () => {
+              if (typeof provider.getLTPByPairs === 'function') {
+                return provider.getLTPByPairs(chunk);
+              }
+              const tokens = chunk.map((p) => String(p.token));
+              const ltp = await provider.getLTP(tokens);
+              const out: Record<string, { last_price: number | null }> = {};
+              for (const p of chunk) {
+                const k = `${String(p.exchange).toUpperCase()}-${String(p.token)}`;
+                const row = ltp?.[String(p.token)];
+                const lp = row?.last_price;
+                out[k] = {
+                  last_price:
+                    Number.isFinite(Number(lp)) && Number(lp) > 0
+                      ? Number(lp)
+                      : null,
+                };
+              }
+              return out;
+            },
+          );
           batchedCalls++;
           const elapsed = Date.now() - chunkStart;
           Object.assign(results, map || {});
@@ -446,7 +460,7 @@ export class RequestBatchingService implements OnModuleInit, OnModuleDestroy {
         const missingKeys = keys.filter(
           (k) =>
             !Number.isFinite((results as any)?.[k]?.last_price) ||
-            (((results as any)?.[k]?.last_price ?? 0) <= 0),
+            ((results as any)?.[k]?.last_price ?? 0) <= 0,
         );
         if (missingKeys.length) {
           const missingTokens = Array.from(
@@ -457,9 +471,8 @@ export class RequestBatchingService implements OnModuleInit, OnModuleDestroy {
             ),
           );
           if (missingTokens.length) {
-            const staleMap = await this.marketDataStream.getRecentLTP(
-              missingTokens,
-            );
+            const staleMap =
+              await this.marketDataStream.getRecentLTP(missingTokens);
             for (const k of missingKeys) {
               const tok = String(k.split('-').pop() || '').trim();
               const lp = staleMap?.[tok]?.last_price;

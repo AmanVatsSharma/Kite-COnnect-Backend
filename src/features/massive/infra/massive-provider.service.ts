@@ -22,7 +22,9 @@ import { MassiveMultiStreamClient } from './massive-multi-stream.client';
 import { AppConfigService } from '@infra/app-config/app-config.service';
 
 @Injectable()
-export class MassiveProviderService implements OnModuleInit, MarketDataProvider {
+export class MassiveProviderService
+  implements OnModuleInit, MarketDataProvider
+{
   readonly providerName = 'massive' as const;
   private readonly logger = new Logger(MassiveProviderService.name);
   private ticker: MassiveMultiStreamClient | undefined;
@@ -46,12 +48,15 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
   }
 
   private async loadConfigOverrides(): Promise<void> {
-    const apiKey = await this.appConfig.get('config:massive:api_key').catch(() => null);
+    const apiKey = await this.appConfig
+      .get('config:massive:api_key')
+      .catch(() => null);
     if (apiKey) this.apiKeyOverride = apiKey;
   }
 
   async initialize(): Promise<void> {
-    const apiKey = this.apiKeyOverride ?? this.config.get<string>('MASSIVE_API_KEY');
+    const apiKey =
+      this.apiKeyOverride ?? this.config.get<string>('MASSIVE_API_KEY');
     if (!apiKey) {
       this.logger.warn(
         '[Massive] No API key configured — provider operating in degraded mode. Set via admin panel or MASSIVE_API_KEY env var.',
@@ -64,7 +69,9 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
     this.rest.init(apiKey);
     this.multiStream.init(apiKey, this.rest);
     this.initialized = true;
-    this.logger.log('[Massive] Provider initialized (realtime=true, streams=stocks+forex+crypto)');
+    this.logger.log(
+      '[Massive] Provider initialized (realtime=true, streams=stocks+forex+crypto)',
+    );
     // Reconnect all streams when credentials are hot-reloaded
     if (wasConnected) {
       this.multiStream.disconnect();
@@ -87,10 +94,18 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
   }
 
   async getConfigStatus(): Promise<{
-    apiKey: { masked: string | null; source: 'db' | 'env' | 'none'; configured: boolean };
+    apiKey: {
+      masked: string | null;
+      source: 'db' | 'env' | 'none';
+      configured: boolean;
+    };
     realtime: boolean;
     assetClass: string;
-    streams: Array<{ name: string; isConnected: boolean; subscribedCount: number }>;
+    streams: Array<{
+      name: string;
+      isConnected: boolean;
+      subscribedCount: number;
+    }>;
     initialized: boolean;
     degraded: boolean;
   }> {
@@ -99,7 +114,7 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
     return {
       apiKey: {
         masked: this.maskCred(effectiveKey),
-        source: this.apiKeyOverride ? 'db' : (envKey ? 'env' : 'none'),
+        source: this.apiKeyOverride ? 'db' : envKey ? 'env' : 'none',
         configured: !!effectiveKey,
       },
       realtime: true,
@@ -123,7 +138,9 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
 
   async getInstruments(exchange?: string, opts?: any): Promise<any[]> {
     if (!this.rest.isReady()) {
-      this.logger.warn('[Massive] getInstruments: client not initialized (degraded)');
+      this.logger.warn(
+        '[Massive] getInstruments: client not initialized (degraded)',
+      );
       return [];
     }
     try {
@@ -188,7 +205,10 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
       const snapshots = await this.rest.getSnapshots(tokens);
       const result: Record<string, any> = {};
       for (const [sym, snap] of Object.entries(snapshots)) {
-        result[sym] = { instrument_token: sym, last_price: snap.lastTrade?.p ?? 0 };
+        result[sym] = {
+          instrument_token: sym,
+          last_price: snap.lastTrade?.p ?? 0,
+        };
       }
       return result;
     } catch (err) {
@@ -210,7 +230,9 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
         result[sym] = {
           instrument_token: sym,
           last_price: snap.lastTrade?.p ?? 0,
-          ohlc: day ? { open: day.o, high: day.h, low: day.l, close: day.c } : {},
+          ohlc: day
+            ? { open: day.o, high: day.h, low: day.l, close: day.c }
+            : {},
         };
       }
       return result;
@@ -234,7 +256,8 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
       const k = `${String(p.exchange).toUpperCase()}-${String(p.token)}`;
       const lp = ltpMap[String(p.token)]?.last_price;
       result[k] = {
-        last_price: Number.isFinite(Number(lp)) && Number(lp) > 0 ? Number(lp) : null,
+        last_price:
+          Number.isFinite(Number(lp)) && Number(lp) > 0 ? Number(lp) : null,
       };
     }
     return result;
@@ -249,7 +272,9 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
     // token may be passed as the numeric UIR proxy; caller should pass symbol as string via opts
     const ticker = String(token);
     if (!this.rest.isReady()) {
-      this.logger.warn('[Massive] getHistoricalData: client not initialized (degraded)');
+      this.logger.warn(
+        '[Massive] getHistoricalData: client not initialized (degraded)',
+      );
       return null;
     }
     try {
@@ -271,7 +296,9 @@ export class MassiveProviderService implements OnModuleInit, MarketDataProvider 
   initializeTicker(): TickerLike {
     if (this.ticker) return this.ticker;
     if (!this.multiStream.isReady()) {
-      this.logger.warn('[Massive] initializeTicker: API key not set — ticker unavailable');
+      this.logger.warn(
+        '[Massive] initializeTicker: API key not set — ticker unavailable',
+      );
       return undefined as any;
     }
     this.ticker = this.multiStream;

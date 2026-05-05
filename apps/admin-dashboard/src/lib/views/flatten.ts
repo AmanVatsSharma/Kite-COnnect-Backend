@@ -17,8 +17,13 @@ export function flattenObject(
   maxDepth = 2,
   depth = 0,
 ): KvRow[] {
-  if (obj === null || obj === undefined) return [{ label: prefix || 'value', value: '—' }];
-  if (typeof obj === 'string' || typeof obj === 'number' || typeof obj === 'boolean') {
+  if (obj === null || obj === undefined)
+    return [{ label: prefix || 'value', value: '—' }];
+  if (
+    typeof obj === 'string' ||
+    typeof obj === 'number' ||
+    typeof obj === 'boolean'
+  ) {
     return [{ label: prefix || 'value', value: String(obj) }];
   }
   if (Array.isArray(obj)) {
@@ -31,12 +36,19 @@ export function flattenObject(
   for (const [k, v] of Object.entries(obj)) {
     const key = prefix ? `${prefix}.${k}` : k;
     if (depth >= maxDepth) {
-      rows.push({ label: key, value: typeof v === 'object' ? JSON.stringify(v) : String(v) });
+      rows.push({
+        label: key,
+        value: typeof v === 'object' ? JSON.stringify(v) : String(v),
+      });
       continue;
     }
     if (v === null || v === undefined) {
       rows.push({ label: key, value: '—' });
-    } else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+    } else if (
+      typeof v === 'string' ||
+      typeof v === 'number' ||
+      typeof v === 'boolean'
+    ) {
       rows.push({ label: key, value: String(v) });
     } else if (Array.isArray(v)) {
       rows.push({ label: key, value: `[${v.length} items]` });

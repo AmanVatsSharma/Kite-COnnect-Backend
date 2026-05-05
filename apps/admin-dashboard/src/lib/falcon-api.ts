@@ -19,7 +19,11 @@ import type {
 const admin = { admin: true as const };
 
 export interface FalconConfigStatus {
-  apiKey: { masked: string | null; hasValue: boolean; source: 'redis' | 'env' | 'none' };
+  apiKey: {
+    masked: string | null;
+    hasValue: boolean;
+    source: 'redis' | 'env' | 'none';
+  };
   apiSecret: { hasValue: boolean; source: 'redis' | 'env' | 'none' };
   accessToken: { masked: string | null; hasValue: boolean };
   initialized: boolean;
@@ -29,7 +33,10 @@ export function getFalconConfig() {
   return apiFetch<FalconConfigStatus>('/api/admin/falcon/config', { ...admin });
 }
 
-export function updateFalconConfig(body: { apiKey: string; apiSecret?: string }) {
+export function updateFalconConfig(body: {
+  apiKey: string;
+  apiSecret?: string;
+}) {
   return apiFetch<{ success: boolean; message: string }>(
     '/api/admin/falcon/config',
     { ...admin, method: 'PATCH', body: JSON.stringify(body) },
@@ -63,7 +70,8 @@ export function getFalconInstruments(params: FalconInstrumentsParams = {}) {
   if (params.exchange) q.set('exchange', params.exchange);
   if (params.instrument_type) q.set('instrument_type', params.instrument_type);
   if (params.segment) q.set('segment', params.segment);
-  if (params.is_active !== undefined) q.set('is_active', String(params.is_active));
+  if (params.is_active !== undefined)
+    q.set('is_active', String(params.is_active));
   if (params.limit !== undefined) q.set('limit', String(params.limit));
   if (params.offset !== undefined) q.set('offset', String(params.offset));
   const qs = q.toString() ? `?${q.toString()}` : '';
@@ -75,7 +83,10 @@ export function getFalconInstruments(params: FalconInstrumentsParams = {}) {
 
 export function searchFalconInstruments(q: string, limit = 20) {
   const params = new URLSearchParams({ q, limit: String(limit) });
-  return apiFetch<FalconInstrument[]>(`/api/admin/falcon/instruments/search?${params}`, { ...admin });
+  return apiFetch<FalconInstrument[]>(
+    `/api/admin/falcon/instruments/search?${params}`,
+    { ...admin },
+  );
 }
 
 export function syncFalconInstruments(exchange?: string) {
@@ -104,17 +115,27 @@ export function getFalconLTP(tokens: string[]) {
 }
 
 export function getFalconQuote(tokens: string[]) {
-  return apiFetch<Record<string, FalconQuote>>(
-    '/api/admin/falcon/quote',
-    { ...admin, method: 'POST', body: JSON.stringify({ tokens }) },
-  );
+  return apiFetch<Record<string, FalconQuote>>('/api/admin/falcon/quote', {
+    ...admin,
+    method: 'POST',
+    body: JSON.stringify({ tokens }),
+  });
 }
 
 export function getFalconOHLC(tokens: string[]) {
-  return apiFetch<Record<string, { last_price: number; ohlc: { open: number; high: number; low: number; close: number } }>>(
-    '/api/admin/falcon/ohlc',
-    { ...admin, method: 'POST', body: JSON.stringify({ tokens }) },
-  );
+  return apiFetch<
+    Record<
+      string,
+      {
+        last_price: number;
+        ohlc: { open: number; high: number; low: number; close: number };
+      }
+    >
+  >('/api/admin/falcon/ohlc', {
+    ...admin,
+    method: 'POST',
+    body: JSON.stringify({ tokens }),
+  });
 }
 
 export function getFalconHistorical(
@@ -145,7 +166,9 @@ export interface FalconBatchHistoricalRequest {
   oi?: boolean;
 }
 
-export function postFalconHistoricalBatch(requests: FalconBatchHistoricalRequest[]) {
+export function postFalconHistoricalBatch(
+  requests: FalconBatchHistoricalRequest[],
+) {
   return apiFetch<Record<number, { candles?: FalconCandle[]; error?: string }>>(
     '/api/admin/falcon/historical/batch',
     { ...admin, method: 'POST', body: JSON.stringify({ requests }) },
@@ -172,7 +195,10 @@ export interface FalconShardStatusResponse {
 }
 
 export function getFalconShardStatus() {
-  return apiFetch<FalconShardStatusResponse>('/api/admin/falcon/ticker/shards', { ...admin });
+  return apiFetch<FalconShardStatusResponse>(
+    '/api/admin/falcon/ticker/shards',
+    { ...admin },
+  );
 }
 
 // ─── Options Chain (Admin) ─────────────────────────────────────────────────
@@ -220,23 +246,36 @@ export function flushFalconCache(body: FlushFalconCacheBody) {
 export interface FalconSessionHealth {
   hasToken: boolean;
   maskedToken: string | null;
-  createdAt: number | null;   // ms timestamp
-  ttlSeconds: number;          // -2 = missing, -1 = no expiry, 0+ = seconds remaining
+  createdAt: number | null; // ms timestamp
+  ttlSeconds: number; // -2 = missing, -1 = no expiry, 0+ = seconds remaining
   connected: boolean;
   degraded: boolean;
-  lastError: { message: string; code?: number; status?: number; time: string } | null;
+  lastError: {
+    message: string;
+    code?: number;
+    status?: number;
+    time: string;
+  } | null;
 }
 
 export function getFalconSession() {
-  return apiFetch<FalconSessionHealth>('/api/admin/falcon/session', { ...admin });
+  return apiFetch<FalconSessionHealth>('/api/admin/falcon/session', {
+    ...admin,
+  });
 }
 
 export function revokeFalconSession() {
-  return apiFetch<{ message: string }>('/api/admin/falcon/session', { ...admin, method: 'DELETE' });
+  return apiFetch<{ message: string }>('/api/admin/falcon/session', {
+    ...admin,
+    method: 'DELETE',
+  });
 }
 
 export function postFalconTickerRestart() {
-  return apiFetch<{ message: string }>('/api/admin/falcon/ticker/restart', { ...admin, method: 'POST' });
+  return apiFetch<{ message: string }>('/api/admin/falcon/ticker/restart', {
+    ...admin,
+    method: 'POST',
+  });
 }
 
 /** Admin manual request_token exchange — fallback when OAuth popup fails. */

@@ -60,7 +60,10 @@ export class UniversalLtpService {
 
     if (!ids?.length) return { success: true, data: result };
 
-    type VortexPair = { exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO'; token: string };
+    type VortexPair = {
+      exchange: 'NSE_EQ' | 'NSE_FO' | 'NSE_CUR' | 'MCX_FO';
+      token: string;
+    };
     const vortexPairs: VortexPair[] = [];
     const vortexTokenToUirId = new Map<string, number>(); // "NSE_EQ-22" → uirId
 
@@ -78,7 +81,7 @@ export class UniversalLtpService {
       if (!providerMap) continue;
 
       const vortexToken = providerMap.get('vortex'); // "NSE_EQ-22"
-      const kiteToken = providerMap.get('kite');     // "256265"
+      const kiteToken = providerMap.get('kite'); // "256265"
       const massiveToken = providerMap.get('massive'); // "AAPL"
       const binanceToken = providerMap.get('binance'); // "BTCUSDT"
 
@@ -89,7 +92,10 @@ export class UniversalLtpService {
         // Split on last '-' to separate "NSE_EQ" from "22"
         const lastDash = vortexToken.lastIndexOf('-');
         if (lastDash > 0) {
-          const exchange = vortexToken.substring(0, lastDash) as VortexPair['exchange'];
+          const exchange = vortexToken.substring(
+            0,
+            lastDash,
+          ) as VortexPair['exchange'];
           const token = vortexToken.substring(lastDash + 1);
           vortexPairs.push({ exchange, token });
           vortexTokenToUirId.set(vortexToken, id);
@@ -113,56 +119,103 @@ export class UniversalLtpService {
     await Promise.all([
       // Vortex batch
       vortexPairs.length
-        ? this.vortexProvider.getLTPByPairs(vortexPairs)
+        ? this.vortexProvider
+            .getLTPByPairs(vortexPairs)
             .then((ltpMap) => {
               for (const [exTok, val] of Object.entries(ltpMap)) {
                 const uirId = vortexTokenToUirId.get(exTok);
-                if (uirId != null) result[String(uirId)] = val;
+                if (uirId != null) {
+                  result[String(uirId)] = {
+                    ...val,
+                    canonical_symbol:
+                      this.registry.getCanonicalSymbol(uirId) ?? null,
+                  };
+                }
               }
             })
-            .catch((err: any) => this.logger.warn(`[UniversalLtp] vortex batch failed: ${err?.message}`))
+            .catch((err: any) =>
+              this.logger.warn(
+                `[UniversalLtp] vortex batch failed: ${err?.message}`,
+              ),
+            )
         : Promise.resolve(),
 
       // Kite batch (fallback for instruments without vortex mapping)
       kitePairs.length
-        ? this.kiteProvider.getLTPByPairs(kitePairs)
+        ? this.kiteProvider
+            .getLTPByPairs(kitePairs)
             .then((ltpMap) => {
               for (const [key, val] of Object.entries(ltpMap)) {
                 // Try token alone (last segment after '-') as a lookup key
                 const tok = key.includes('-') ? key.split('-').pop()! : key;
-                const uirId = kiteTokenToUirId.get(tok) ?? kiteTokenToUirId.get(key);
-                if (uirId != null) result[String(uirId)] = val as { last_price: number | null };
+                const uirId =
+                  kiteTokenToUirId.get(tok) ?? kiteTokenToUirId.get(key);
+                if (uirId != null) {
+                  result[String(uirId)] = {
+                    ...(val as { last_price: number | null }),
+                    canonical_symbol:
+                      this.registry.getCanonicalSymbol(uirId) ?? null,
+                  };
+                }
               }
             })
-            .catch((err: any) => this.logger.warn(`[UniversalLtp] kite batch failed: ${err?.message}`))
+            .catch((err: any) =>
+              this.logger.warn(
+                `[UniversalLtp] kite batch failed: ${err?.message}`,
+              ),
+            )
         : Promise.resolve(),
 
       // Massive batch (US/FX/CRYPTO/IDX instruments)
       massivePairs.length
-        ? this.massiveProvider.getLTPByPairs(massivePairs)
+        ? this.massiveProvider
+            .getLTPByPairs(massivePairs)
             .then((ltpMap) => {
               // MassiveProvider keys result as "EXCHANGE-TOKEN" (e.g. "US-AAPL")
               for (const [key, val] of Object.entries(ltpMap)) {
                 const tok = key.includes('-') ? key.split('-').pop()! : key;
-                const uirId = massiveTokenToUirId.get(tok) ?? massiveTokenToUirId.get(key);
-                if (uirId != null) result[String(uirId)] = val;
+                const uirId =
+                  massiveTokenToUirId.get(tok) ?? massiveTokenToUirId.get(key);
+                if (uirId != null) {
+                  result[String(uirId)] = {
+                    ...val,
+                    canonical_symbol:
+                      this.registry.getCanonicalSymbol(uirId) ?? null,
+                  };
+                }
               }
             })
-            .catch((err: any) => this.logger.warn(`[UniversalLtp] massive batch failed: ${err?.message}`))
+            .catch((err: any) =>
+              this.logger.warn(
+                `[UniversalLtp] massive batch failed: ${err?.message}`,
+              ),
+            )
         : Promise.resolve(),
 
       // Binance batch (BINANCE crypto pairs)
       binancePairs.length
-        ? this.binanceProvider.getLTPByPairs(binancePairs)
+        ? this.binanceProvider
+            .getLTPByPairs(binancePairs)
             .then((ltpMap) => {
               // BinanceProvider keys result as "EXCHANGE-TOKEN" (e.g. "BINANCE-BTCUSDT")
               for (const [key, val] of Object.entries(ltpMap)) {
                 const tok = key.includes('-') ? key.split('-').pop()! : key;
-                const uirId = binanceTokenToUirId.get(tok) ?? binanceTokenToUirId.get(key);
-                if (uirId != null) result[String(uirId)] = val;
+                const uirId =
+                  binanceTokenToUirId.get(tok) ?? binanceTokenToUirId.get(key);
+                if (uirId != null) {
+                  result[String(uirId)] = {
+                    ...val,
+                    canonical_symbol:
+                      this.registry.getCanonicalSymbol(uirId) ?? null,
+                  };
+                }
               }
             })
-            .catch((err: any) => this.logger.warn(`[UniversalLtp] binance batch failed: ${err?.message}`))
+            .catch((err: any) =>
+              this.logger.warn(
+                `[UniversalLtp] binance batch failed: ${err?.message}`,
+              ),
+            )
         : Promise.resolve(),
     ]);
 

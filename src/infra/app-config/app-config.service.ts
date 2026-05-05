@@ -48,7 +48,10 @@ export class AppConfigService {
         return row.value;
       }
     } catch (error) {
-      this.logger.warn(`[AppConfig] DB read failed for key "${key}"`, error as any);
+      this.logger.warn(
+        `[AppConfig] DB read failed for key "${key}"`,
+        error as any,
+      );
     }
     return null;
   }
@@ -64,7 +67,10 @@ export class AppConfigService {
         } catch {}
       }
     } catch (error) {
-      this.logger.error(`[AppConfig] DB write failed for key "${key}"`, error as any);
+      this.logger.error(
+        `[AppConfig] DB write failed for key "${key}"`,
+        error as any,
+      );
       throw error;
     }
   }
@@ -79,7 +85,10 @@ export class AppConfigService {
         } catch {}
       }
     } catch (error) {
-      this.logger.warn(`[AppConfig] DB delete failed for key "${key}"`, error as any);
+      this.logger.warn(
+        `[AppConfig] DB delete failed for key "${key}"`,
+        error as any,
+      );
     }
   }
 }

@@ -47,11 +47,34 @@ export type PublicProviderName = 'falcon' | 'vayu' | 'atlas' | 'drift';
 export type StreamProviderName = 'kite' | 'vortex' | 'massive' | 'binance';
 
 /** Display info for a public provider brand — used in the SearchPage VIA badge. */
-export const PUBLIC_PROVIDER_LABELS: Record<PublicProviderName, { name: string; color: string; bg: string; covers: string }> = {
-  falcon: { name: 'Falcon', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', covers: 'Indian equity (NSE/BSE)' },
-  vayu:   { name: 'Vayu',   color: '#818cf8', bg: 'rgba(99, 102, 241, 0.15)', covers: 'F&O / currency / commodities' },
-  atlas:  { name: 'Atlas',  color: '#34d399', bg: 'rgba(16, 185, 129, 0.15)', covers: 'US stocks / forex / options' },
-  drift:  { name: 'Drift',  color: '#facc15', bg: 'rgba(234, 179, 8, 0.15)', covers: 'Global crypto Spot' },
+export const PUBLIC_PROVIDER_LABELS: Record<
+  PublicProviderName,
+  { name: string; color: string; bg: string; covers: string }
+> = {
+  falcon: {
+    name: 'Falcon',
+    color: '#f59e0b',
+    bg: 'rgba(245, 158, 11, 0.15)',
+    covers: 'Indian equity (NSE/BSE)',
+  },
+  vayu: {
+    name: 'Vayu',
+    color: '#818cf8',
+    bg: 'rgba(99, 102, 241, 0.15)',
+    covers: 'F&O / currency / commodities',
+  },
+  atlas: {
+    name: 'Atlas',
+    color: '#34d399',
+    bg: 'rgba(16, 185, 129, 0.15)',
+    covers: 'US stocks / forex / options',
+  },
+  drift: {
+    name: 'Drift',
+    color: '#facc15',
+    bg: 'rgba(234, 179, 8, 0.15)',
+    covers: 'Global crypto Spot',
+  },
 };
 
 export type SearchResultItem = {
@@ -105,7 +128,11 @@ export type SearchFilters = {
   fields?: string;
 };
 
-type SearchResponse = { success: boolean; data: SearchResultItem[]; timestamp: string };
+type SearchResponse = {
+  success: boolean;
+  data: SearchResultItem[];
+  timestamp: string;
+};
 
 /**
  * Whether to call the admin variant. The dashboard is admin-only, so it defaults
@@ -155,7 +182,9 @@ export function suggestInstruments(
   return fetchSearch('/api/search/suggest', { q, limit, ...filters }, opts);
 }
 
-export function getFacets(filters: Omit<SearchFilters, 'ltp_only' | 'mode' | 'fields'> = {}): Promise<{
+export function getFacets(
+  filters: Omit<SearchFilters, 'ltp_only' | 'mode' | 'fields'> = {},
+): Promise<{
   success: boolean;
   data: Record<string, Record<string, number>>;
   timestamp: string;
@@ -182,7 +211,11 @@ export type SearchAdminOverview = {
     scanned: number;
     top: { q: string; symbol: string; count: number }[];
   };
-  popularQueries: { q: string; totalSelections: number; uniqueSymbols: number }[];
+  popularQueries: {
+    q: string;
+    totalSelections: number;
+    uniqueSymbols: number;
+  }[];
   errors: string[];
   generatedAt: string;
 };
@@ -194,7 +227,10 @@ export async function getSearchAdminOverview(topN = 30): Promise<{
   const headers = new Headers();
   const t = getAdminToken();
   if (t) headers.set('x-admin-token', t);
-  const res = await fetch(apiUrl(`/api/search/admin/overview?topN=${topN}`), { headers });
-  if (!res.ok) throw new Error(`Search Admin ${res.status}: ${await res.text()}`);
+  const res = await fetch(apiUrl(`/api/search/admin/overview?topN=${topN}`), {
+    headers,
+  });
+  if (!res.ok)
+    throw new Error(`Search Admin ${res.status}: ${await res.text()}`);
   return res.json();
 }

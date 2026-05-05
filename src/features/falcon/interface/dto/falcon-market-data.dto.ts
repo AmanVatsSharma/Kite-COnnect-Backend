@@ -8,12 +8,22 @@
  */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-const VALID_INTERVALS = ['minute', '3minute', '5minute', '10minute', '15minute', '30minute', '60minute', 'day'] as const;
+const VALID_INTERVALS = [
+  'minute',
+  '3minute',
+  '5minute',
+  '10minute',
+  '15minute',
+  '30minute',
+  '60minute',
+  'day',
+] as const;
 export type HistoricalInterval = (typeof VALID_INTERVALS)[number];
 
 export class FalconTokensDto {
   @ApiProperty({
-    description: 'Array of instrument tokens (numeric strings) or EXCHANGE:SYMBOL identifiers. Max 500.',
+    description:
+      'Array of instrument tokens (numeric strings) or EXCHANGE:SYMBOL identifiers. Max 500.',
     example: ['256265', '738561'],
     type: [String],
   })
@@ -41,13 +51,15 @@ export class FalconHistoricalQueryDto {
   interval!: HistoricalInterval;
 
   @ApiPropertyOptional({
-    description: 'Fetch continuous contract data (F&O only). Defaults to false.',
+    description:
+      'Fetch continuous contract data (F&O only). Defaults to false.',
     example: false,
   })
   continuous?: string;
 
   @ApiPropertyOptional({
-    description: 'Include Open Interest in candles (F&O only). Defaults to false.',
+    description:
+      'Include Open Interest in candles (F&O only). Defaults to false.',
     example: false,
   })
   oi?: string;
@@ -58,16 +70,29 @@ export class FalconBatchHistoricalItemDto {
   @ApiProperty({ description: 'Instrument token (numeric)', example: 738561 })
   token!: number;
 
-  @ApiProperty({ description: "From date 'YYYY-MM-DD' or 'YYYY-MM-DD HH:mm:ss'", example: '2026-04-01' })
+  @ApiProperty({
+    description: "From date 'YYYY-MM-DD' or 'YYYY-MM-DD HH:mm:ss'",
+    example: '2026-04-01',
+  })
   from!: string;
 
-  @ApiProperty({ description: "To date 'YYYY-MM-DD' or 'YYYY-MM-DD HH:mm:ss'", example: '2026-04-11' })
+  @ApiProperty({
+    description: "To date 'YYYY-MM-DD' or 'YYYY-MM-DD HH:mm:ss'",
+    example: '2026-04-11',
+  })
   to!: string;
 
-  @ApiProperty({ description: 'Candle interval', enum: VALID_INTERVALS, example: 'day' })
+  @ApiProperty({
+    description: 'Candle interval',
+    enum: VALID_INTERVALS,
+    example: 'day',
+  })
   interval!: HistoricalInterval;
 
-  @ApiPropertyOptional({ description: 'Continuous contract (F&O only)', example: false })
+  @ApiPropertyOptional({
+    description: 'Continuous contract (F&O only)',
+    example: false,
+  })
   continuous?: boolean;
 
   @ApiPropertyOptional({ description: 'Include OI (F&O only)', example: false })
@@ -77,7 +102,8 @@ export class FalconBatchHistoricalItemDto {
 /** Body for POST /historical/batch — up to 10 tokens in a single call. */
 export class FalconBatchHistoricalDto {
   @ApiProperty({
-    description: 'Array of historical requests (max 10). Each must include token, from, to, interval.',
+    description:
+      'Array of historical requests (max 10). Each must include token, from, to, interval.',
     type: [FalconBatchHistoricalItemDto],
   })
   requests!: FalconBatchHistoricalItemDto[];

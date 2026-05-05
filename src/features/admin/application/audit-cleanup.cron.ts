@@ -25,9 +25,7 @@ export class AuditCleanupCronService {
     private readonly auditRepo: Repository<RequestAuditLog>,
     private readonly configService: ConfigService,
   ) {
-    const raw = Number(
-      this.configService.get('AUDIT_LOG_RETENTION_DAYS', '7'),
-    );
+    const raw = Number(this.configService.get('AUDIT_LOG_RETENTION_DAYS', '7'));
     this.retentionDays = Number.isFinite(raw) && raw > 0 ? raw : 7;
     // eslint-disable-next-line no-console
     console.log(
@@ -67,5 +65,3 @@ export class AuditCleanupCronService {
     }
   }
 }
-
-

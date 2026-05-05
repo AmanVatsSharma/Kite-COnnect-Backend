@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateBinanceInstruments1745683200000 implements MigrationInterface {
+export class CreateBinanceInstruments1745683200000
+  implements MigrationInterface
+{
   name = 'CreateBinanceInstruments1745683200000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -40,9 +42,15 @@ export class CreateBinanceInstruments1745683200000 implements MigrationInterface
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_binance_instruments_is_active`);
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_binance_instruments_quote_asset`);
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_binance_instruments_symbol`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_binance_instruments_is_active`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_binance_instruments_quote_asset`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_binance_instruments_symbol`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS binance_instruments`);
   }
 }

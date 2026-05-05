@@ -116,13 +116,15 @@ export class VayuSearchService {
         const sym = String(s.symbol || '').toUpperCase();
         if (!sym || seen.has(sym)) continue;
         seen.add(sym);
-        deduped.push({
-          token: s.token,
-          symbol: sym,
-          exchange: s.exchange,
-          instrument_name: s.instrument_name,
-          description: s.description,
-        });
+        deduped.push(
+          this.vortexInstrumentService.enrichSingleWithUir({
+            token: s.token,
+            symbol: sym,
+            exchange: s.exchange,
+            instrument_name: s.instrument_name,
+            description: s.description,
+          }),
+        );
         if (deduped.length >= limit) break;
       }
 
@@ -231,7 +233,7 @@ export class VayuSearchService {
       const list = items.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
         const lp = pairLtp?.[key]?.last_price ?? null;
-        return {
+        return this.vortexInstrumentService.enrichSingleWithUir({
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
@@ -243,7 +245,7 @@ export class VayuSearchService {
           lot_size: i.lot_size,
           description: i.description,
           last_price: lp,
-        };
+        });
       });
 
       const filtered = ltpOnly
@@ -317,8 +319,8 @@ export class VayuSearchService {
         ltpOnlyRaw === true;
       const list = items.map((i) => {
         const key = `${String(i.exchange || '').toUpperCase()}-${String(i.token)}`;
-        const lp = includeLtp ? pairLtp?.[key]?.last_price ?? null : null;
-        return {
+        const lp = includeLtp ? (pairLtp?.[key]?.last_price ?? null) : null;
+        return this.vortexInstrumentService.enrichSingleWithUir({
           token: i.token,
           symbol: i.symbol,
           exchange: i.exchange,
@@ -330,7 +332,7 @@ export class VayuSearchService {
           lot_size: i.lot_size,
           description: i.description,
           last_price: lp,
-        };
+        });
       });
       const filtered = ltpOnly
         ? list.filter(
@@ -359,10 +361,7 @@ export class VayuSearchService {
     }
   }
 
-  async getVortexTickerBySymbol(
-    symbol: string,
-    ltpOnlyRaw?: string | boolean,
-  ) {
+  async getVortexTickerBySymbol(symbol: string, ltpOnlyRaw?: string | boolean) {
     try {
       const { instrument } =
         await this.vortexInstrumentService.resolveVortexSymbol(symbol);
@@ -406,7 +405,7 @@ export class VayuSearchService {
 
         return {
           success: true,
-          data: {
+          data: this.vortexInstrumentService.enrichSingleWithUir({
             token: instrument.token,
             symbol: instrument.symbol,
             exchange: instrument.exchange,
@@ -418,7 +417,7 @@ export class VayuSearchService {
             lot_size: instrument.lot_size,
             description: instrument.description,
             last_price: lastPrice,
-          },
+          }),
           ltp_only: ltpOnly || false,
         };
       } catch (ltpError) {
@@ -451,4 +450,3 @@ export class VayuSearchService {
     }
   }
 }
-

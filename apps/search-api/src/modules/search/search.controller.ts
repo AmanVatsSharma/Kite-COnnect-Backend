@@ -122,7 +122,8 @@ function buildResponseRow(
     out._internalProvider = raw.streamProvider;
     if (raw.kiteToken !== undefined) out.kiteToken = raw.kiteToken;
     if (raw.vortexToken !== undefined) out.vortexToken = raw.vortexToken;
-    if (raw.vortexExchange !== undefined) out.vortexExchange = raw.vortexExchange;
+    if (raw.vortexExchange !== undefined)
+      out.vortexExchange = raw.vortexExchange;
     if (raw.massiveToken !== undefined) out.massiveToken = raw.massiveToken;
     if (raw.binanceToken !== undefined) out.binanceToken = raw.binanceToken;
   }
@@ -188,7 +189,8 @@ function isInternalIncludeAuthorized(
   includeRaw: string | undefined,
   adminTokenHeader: string | undefined,
 ): boolean {
-  if (!includeRaw || String(includeRaw).toLowerCase() !== 'internal') return false;
+  if (!includeRaw || String(includeRaw).toLowerCase() !== 'internal')
+    return false;
   const expected = process.env.ADMIN_TOKEN || '';
   if (!expected) return false;
   return String(adminTokenHeader || '').trim() === expected;
@@ -257,16 +259,26 @@ export class SearchController {
     @Headers('x-admin-token') adminTokenHeader?: string,
   ) {
     if (!q || q.trim().length === 0) {
-      throw new HttpException({ success: false, message: 'q is required' }, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        { success: false, message: 'q is required' },
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const limit = Math.min(Number(limitRaw || 10), 50);
     const ltpOnly =
-      String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true ||
-      String(liveRaw || '').toLowerCase() === 'true' || liveRaw === true;
-    const modeVe = mode ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()] : undefined;
+      String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+      ltpOnlyRaw === true ||
+      String(liveRaw || '').toLowerCase() === 'true' ||
+      liveRaw === true;
+    const modeVe = mode
+      ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()]
+      : undefined;
 
-    const includeInternal = isInternalIncludeAuthorized(includeRaw, adminTokenHeader);
+    const includeInternal = isInternalIncludeAuthorized(
+      includeRaw,
+      adminTokenHeader,
+    );
     const selectedFields = parseFieldsParam(fieldsRaw);
     const meiliAttrs = buildMeiliAttrs(selectedFields, includeInternal);
 
@@ -286,18 +298,31 @@ export class SearchController {
 
     const probeMult = Number(process.env.LTP_ONLY_PROBE_MULTIPLIER || 5);
     const searchCap = Number(process.env.SEARCH_LTP_ONLY_HYDRATE_CAP || 200);
-    const probeLimit = ltpOnly ? Math.min(Math.max(limit * probeMult, limit), searchCap) : limit;
+    const probeLimit = ltpOnly
+      ? Math.min(Math.max(limit * probeMult, limit), searchCap)
+      : limit;
 
-    const items = await this.searchService.searchInstruments(q.trim(), probeLimit, filters, meiliAttrs);
-    const quotes = await this.searchService.hydrateLtpByItems(items.slice(0, probeLimit));
-
-    const enriched = items.map((it) =>
-      buildResponseRow(it, quotes?.[String(it.id)]?.last_price ?? null, selectedFields, includeInternal),
+    const items = await this.searchService.searchInstruments(
+      q.trim(),
+      probeLimit,
+      filters,
+      meiliAttrs,
+    );
+    const quotes = await this.searchService.hydrateLtpByItems(
+      items.slice(0, probeLimit),
     );
 
-    const data = (ltpOnly
-      ? enriched.filter((v) => v.priceStatus === 'live')
-      : enriched
+    const enriched = items.map((it) =>
+      buildResponseRow(
+        it,
+        quotes?.[String(it.id)]?.last_price ?? null,
+        selectedFields,
+        includeInternal,
+      ),
+    );
+
+    const data = (
+      ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched
     ).slice(0, limit);
 
     this.logger.log(
@@ -340,11 +365,18 @@ export class SearchController {
     }
 
     const ltpOnly =
-      String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true ||
-      String(liveRaw || '').toLowerCase() === 'true' || liveRaw === true;
-    const modeVe = mode ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()] : undefined;
+      String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
+      ltpOnlyRaw === true ||
+      String(liveRaw || '').toLowerCase() === 'true' ||
+      liveRaw === true;
+    const modeVe = mode
+      ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()]
+      : undefined;
 
-    const includeInternal = isInternalIncludeAuthorized(includeRaw, adminTokenHeader);
+    const includeInternal = isInternalIncludeAuthorized(
+      includeRaw,
+      adminTokenHeader,
+    );
     const selectedFields = parseFieldsParam(fieldsRaw);
     const meiliAttrs = buildMeiliAttrs(selectedFields, includeInternal);
 
@@ -363,18 +395,31 @@ export class SearchController {
 
     const probeMult = Number(process.env.LTP_ONLY_PROBE_MULTIPLIER || 5);
     const suggestCap = Number(process.env.SUGGEST_LTP_ONLY_HYDRATE_CAP || 100);
-    const probeLimit = ltpOnly ? Math.min(Math.max(limit * probeMult, limit), suggestCap) : limit;
+    const probeLimit = ltpOnly
+      ? Math.min(Math.max(limit * probeMult, limit), suggestCap)
+      : limit;
 
-    const items = await this.searchService.searchInstruments(q.trim(), probeLimit, filters, meiliAttrs);
-    const quotes = await this.searchService.hydrateLtpByItems(items.slice(0, probeLimit));
-
-    const enriched = items.map((it) =>
-      buildResponseRow(it, quotes?.[String(it.id)]?.last_price ?? null, selectedFields, includeInternal),
+    const items = await this.searchService.searchInstruments(
+      q.trim(),
+      probeLimit,
+      filters,
+      meiliAttrs,
+    );
+    const quotes = await this.searchService.hydrateLtpByItems(
+      items.slice(0, probeLimit),
     );
 
-    const data = (ltpOnly
-      ? enriched.filter((v) => v.priceStatus === 'live')
-      : enriched
+    const enriched = items.map((it) =>
+      buildResponseRow(
+        it,
+        quotes?.[String(it.id)]?.last_price ?? null,
+        selectedFields,
+        includeInternal,
+      ),
+    );
+
+    const data = (
+      ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched
     ).slice(0, limit);
 
     this.logger.log(
@@ -398,13 +443,19 @@ export class SearchController {
     @Query('instrumentType') instrumentType?: string,
     @Query('assetClass') assetClass?: string,
   ) {
-    const raw = await this.searchService.facetCounts({ exchange, segment, instrumentType, assetClass });
+    const raw = await this.searchService.facetCounts({
+      exchange,
+      segment,
+      instrumentType,
+      assetClass,
+    });
     // Remap internal streamProvider names → public brand names so the filter UI
     // can pass these values directly as ?streamProvider= without translation.
     if (raw.streamProvider) {
       const mapped: Record<string, number> = {};
       for (const [k, v] of Object.entries(raw.streamProvider)) {
-        mapped[internalToPublicProvider(k as InternalProviderName)] = v as number;
+        mapped[internalToPublicProvider(k as InternalProviderName)] =
+          v as number;
       }
       raw.streamProvider = mapped;
     }
@@ -426,45 +477,168 @@ export class SearchController {
       success: true,
       data: {
         endpoints: {
-          search:   'GET /api/search',
-          suggest:  'GET /api/search/suggest',
-          filters:  'GET /api/search/filters  — live facet counts per field value',
-          schema:   'GET /api/search/schema   — this endpoint',
-          stream:   'GET /api/search/stream   — SSE live-price ticker',
+          search: 'GET /api/search',
+          suggest: 'GET /api/search/suggest',
+          filters:
+            'GET /api/search/filters  — live facet counts per field value',
+          schema: 'GET /api/search/schema   — this endpoint',
+          stream: 'GET /api/search/stream   — SSE live-price ticker',
         },
         params: {
-          q:              { type: 'string',  required: true,  note: 'Ticker symbol, company name, or synonym (e.g. SBI, NIFTY50, Bitcoin)' },
-          limit:          { type: 'integer', default: 10, max: 50 },
-          exchange:       { type: 'string',  filterable: true,  enums: ['NSE','BSE','NFO','BFO','MCX','CDS','BCD','BINANCE','CRYPTO','US','FX','IDX','GLOBAL','NCO','NSEIX'] },
-          segment:        { type: 'string',  filterable: true,  enums: ['NSE','BSE','NFO-FUT','NFO-OPT','BFO-FUT','BFO-OPT','MCX-FUT','MCX-OPT','CDS-FUT','CDS-OPT','NCO','NCO-FUT','NCO-OPT','spot','stocks','crypto','INDICES'] },
-          instrumentType: { type: 'string',  filterable: true,  enums: ['EQ','FUT','CE','PE','ETF','IDX','CS','ADRC','ETN','ETS','ETV','FUND','SP','PFD','WARRANT','UNIT','RIGHT'] },
-          assetClass:     { type: 'string',  filterable: true,  enums: ['equity','crypto','currency','commodity'], note: 'Top-level asset category; use this for broad filtering (e.g. all crypto)' },
-          streamProvider: { type: 'string',  filterable: true,  enums: ['falcon','vayu','atlas','drift'],
-                            note: 'Public brand name of the live-data provider. falcon=Indian equity (NSE/BSE), vayu=F&O/currency/commodities, atlas=US stocks/forex, drift=Global crypto Spot' },
-          optionType:     { type: 'string',  filterable: true,  enums: ['CE','PE'], note: 'Only relevant for options instruments' },
-          isDerivative:   { type: 'boolean', filterable: true,  note: 'true = futures/options; false = equity/spot' },
-          mode:           { type: 'string',  note: 'Shorthand for vortexExchange filter. eq=NSE_EQ, fno=NSE_FO, curr=NSE_CUR, commodities=MCX_FO' },
-          expiry_from:    { type: 'date',    format: 'YYYY-MM-DD', note: 'Filter derivatives by expiry >= date' },
-          expiry_to:      { type: 'date',    format: 'YYYY-MM-DD', note: 'Filter derivatives by expiry <= date' },
-          strike_min:     { type: 'number',  note: 'Filter options by strike >= value' },
-          strike_max:     { type: 'number',  note: 'Filter options by strike <= value' },
-          ltp_only:       { type: 'boolean', default: false, note: 'When true, returns only instruments with a live price right now' },
-          live:           { type: 'boolean', default: false, note: 'Alias for ltp_only — ?live=true returns only instruments with a live price' },
-          fields:         { type: 'string',  note: 'Comma-separated projection. Always includes: id, canonicalSymbol, wsSubscribeUirId, last_price, priceStatus, streamProvider. Allowed extras: symbol,name,exchange,segment,instrumentType,assetClass,optionType,expiry,strike,lotSize,tickSize,isDerivative,underlyingSymbol' },
+          q: {
+            type: 'string',
+            required: true,
+            note: 'Ticker symbol, company name, or synonym (e.g. SBI, NIFTY50, Bitcoin)',
+          },
+          limit: { type: 'integer', default: 10, max: 50 },
+          exchange: {
+            type: 'string',
+            filterable: true,
+            enums: [
+              'NSE',
+              'BSE',
+              'NFO',
+              'BFO',
+              'MCX',
+              'CDS',
+              'BCD',
+              'BINANCE',
+              'CRYPTO',
+              'US',
+              'FX',
+              'IDX',
+              'GLOBAL',
+              'NCO',
+              'NSEIX',
+            ],
+          },
+          segment: {
+            type: 'string',
+            filterable: true,
+            enums: [
+              'NSE',
+              'BSE',
+              'NFO-FUT',
+              'NFO-OPT',
+              'BFO-FUT',
+              'BFO-OPT',
+              'MCX-FUT',
+              'MCX-OPT',
+              'CDS-FUT',
+              'CDS-OPT',
+              'NCO',
+              'NCO-FUT',
+              'NCO-OPT',
+              'spot',
+              'stocks',
+              'crypto',
+              'INDICES',
+            ],
+          },
+          instrumentType: {
+            type: 'string',
+            filterable: true,
+            enums: [
+              'EQ',
+              'FUT',
+              'CE',
+              'PE',
+              'ETF',
+              'IDX',
+              'CS',
+              'ADRC',
+              'ETN',
+              'ETS',
+              'ETV',
+              'FUND',
+              'SP',
+              'PFD',
+              'WARRANT',
+              'UNIT',
+              'RIGHT',
+            ],
+          },
+          assetClass: {
+            type: 'string',
+            filterable: true,
+            enums: ['equity', 'crypto', 'currency', 'commodity'],
+            note: 'Top-level asset category; use this for broad filtering (e.g. all crypto)',
+          },
+          streamProvider: {
+            type: 'string',
+            filterable: true,
+            enums: ['falcon', 'vayu', 'atlas', 'drift'],
+            note: 'Public brand name of the live-data provider. falcon=Indian equity (NSE/BSE), vayu=F&O/currency/commodities, atlas=US stocks/forex, drift=Global crypto Spot',
+          },
+          optionType: {
+            type: 'string',
+            filterable: true,
+            enums: ['CE', 'PE'],
+            note: 'Only relevant for options instruments',
+          },
+          isDerivative: {
+            type: 'boolean',
+            filterable: true,
+            note: 'true = futures/options; false = equity/spot',
+          },
+          mode: {
+            type: 'string',
+            note: 'Shorthand for vortexExchange filter. eq=NSE_EQ, fno=NSE_FO, curr=NSE_CUR, commodities=MCX_FO',
+          },
+          expiry_from: {
+            type: 'date',
+            format: 'YYYY-MM-DD',
+            note: 'Filter derivatives by expiry >= date',
+          },
+          expiry_to: {
+            type: 'date',
+            format: 'YYYY-MM-DD',
+            note: 'Filter derivatives by expiry <= date',
+          },
+          strike_min: {
+            type: 'number',
+            note: 'Filter options by strike >= value',
+          },
+          strike_max: {
+            type: 'number',
+            note: 'Filter options by strike <= value',
+          },
+          ltp_only: {
+            type: 'boolean',
+            default: false,
+            note: 'When true, returns only instruments with a live price right now',
+          },
+          live: {
+            type: 'boolean',
+            default: false,
+            note: 'Alias for ltp_only — ?live=true returns only instruments with a live price',
+          },
+          fields: {
+            type: 'string',
+            note: 'Comma-separated projection. Always includes: id, canonicalSymbol, wsSubscribeUirId, last_price, priceStatus, streamProvider. Allowed extras: symbol,name,exchange,segment,instrumentType,assetClass,optionType,expiry,strike,lotSize,tickSize,isDerivative,underlyingSymbol',
+          },
         },
         responseFields: {
-          id:               'Universal instrument ID — use this to subscribe to live prices via WebSocket',
-          wsSubscribeUirId: 'Same as id — convenience alias for WebSocket subscribe payloads',
-          canonicalSymbol:  'Human-readable unique key, e.g. NSE:RELIANCE or BINANCE:BTCUSDT',
-          last_price:       'Latest known price (null if no live price available)',
-          priceStatus:      '"live" = price arrived within cache TTL; "stale" = no recent tick',
-          streamProvider:   'Public brand name of the provider streaming this instrument (falcon/vayu/atlas/drift)',
+          id: 'Universal instrument ID — use this to subscribe to live prices via WebSocket',
+          wsSubscribeUirId:
+            'Same as id — convenience alias for WebSocket subscribe payloads',
+          canonicalSymbol:
+            'Human-readable unique key, e.g. NSE:RELIANCE or BINANCE:BTCUSDT',
+          last_price: 'Latest known price (null if no live price available)',
+          priceStatus:
+            '"live" = price arrived within cache TTL; "stale" = no recent tick',
+          streamProvider:
+            'Public brand name of the provider streaming this instrument (falcon/vayu/atlas/drift)',
         },
         wsSubscribe: {
           note: 'Subscribe to live prices by passing the instrument id as wsSubscribeUirId',
-          example: { event: 'subscribe', data: { instruments: [355010], mode: 'ltp' } },
+          example: {
+            event: 'subscribe',
+            data: { instruments: [355010], mode: 'ltp' },
+          },
         },
-        filterTip: 'Call GET /api/search/filters to get live counts per value for each filterable field.',
+        filterTip:
+          'Call GET /api/search/filters to get live counts per value for each filterable field.',
       },
       timestamp: new Date().toISOString(),
     };
@@ -488,15 +662,28 @@ export class SearchController {
    */
   @Post('telemetry/selection')
   async selection(
-    @Body() body: { q?: string; symbol?: string; universalId?: number; instrumentToken?: number },
+    @Body()
+    body: {
+      q?: string;
+      symbol?: string;
+      universalId?: number;
+      instrumentToken?: number;
+    },
   ) {
     const q = String(body?.q || '').trim();
     const symbol = String(body?.symbol || '').trim();
     const uid = body?.universalId ?? body?.instrumentToken; // accept both for backward compat
     if (!q || !symbol) {
-      throw new HttpException({ success: false, message: 'q and symbol are required' }, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        { success: false, message: 'q and symbol are required' },
+        HttpStatus.BAD_REQUEST,
+      );
     }
-    await this.searchService.logSelectionTelemetry(q, symbol, Number.isFinite(uid) ? Number(uid) : undefined);
+    await this.searchService.logSelectionTelemetry(
+      q,
+      symbol,
+      Number.isFinite(uid) ? Number(uid) : undefined,
+    );
     return { success: true };
   }
 
@@ -526,9 +713,13 @@ export class SearchController {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
+    const ltpOnly =
+      String(ltpOnlyRaw || '').toLowerCase() === 'true' || ltpOnlyRaw === true;
     const parseIds = (s?: string): number[] =>
-      String(s || '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n));
+      String(s || '')
+        .split(',')
+        .map((x) => Number(x.trim()))
+        .filter((n) => Number.isFinite(n));
 
     // Accept both ?ids and the legacy ?tokens. Cap at 100 to bound the per-tick LTP fan-out.
     let ids: number[] = parseIds(idsRaw || tokensRaw).slice(0, 100);
@@ -549,7 +740,11 @@ export class SearchController {
         }
         // Lazy-resolve from ?q on the first tick if no ids were given.
         if (!ids.length && q) {
-          const items = await this.searchService.searchInstruments(q.trim(), 10, {});
+          const items = await this.searchService.searchInstruments(
+            q.trim(),
+            10,
+            {},
+          );
           // Use UIR id directly — works for kite/vortex/massive/binance equally.
           // The trading-app's UniversalLtpService routes per-instrument across all 4 providers.
           ids = items.map((i: SearchResultItem) => i.id).slice(0, 100);
@@ -558,11 +753,14 @@ export class SearchController {
         // hydrateLtpByItems takes SearchResultItem[]; build a lightweight stub list since we
         // only have ids in the SSE poll loop. The Redis cache key is `q:ltp:uid:{id}` and
         // /api/stock/universal/ltp accepts ids — both keyed by id, no extra fields needed.
-        const stubs = ids.map((id) => ({ id } as SearchResultItem));
+        const stubs = ids.map((id) => ({ id }) as SearchResultItem);
         const quotes = await this.searchService.hydrateLtpByItems(stubs);
         const payload = ltpOnly
           ? Object.fromEntries(
-              Object.entries(quotes).filter(([, v]: any) => Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0),
+              Object.entries(quotes).filter(
+                ([, v]: any) =>
+                  Number.isFinite(v?.last_price) && (v?.last_price ?? 0) > 0,
+              ),
             )
           : quotes;
         send({ quotes: payload, ts: new Date().toISOString() });

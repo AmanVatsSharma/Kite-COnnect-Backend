@@ -92,7 +92,11 @@ class CircuitBreaker {
     }
   }
 
-  snapshot(): { state: CbState; consecutiveFailures: number; openedAt: number | null } {
+  snapshot(): {
+    state: CbState;
+    consecutiveFailures: number;
+    openedAt: number | null;
+  } {
     return {
       state: this.state,
       consecutiveFailures: this.failures,
@@ -131,47 +135,78 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const threshold = this.config.get<number>('REDIS_CIRCUIT_BREAKER_THRESHOLD', 5);
-    const resetMs = this.config.get<number>('REDIS_CIRCUIT_BREAKER_RESET_MS', 30_000);
+    const threshold = this.config.get<number>(
+      'REDIS_CIRCUIT_BREAKER_THRESHOLD',
+      5,
+    );
+    const resetMs = this.config.get<number>(
+      'REDIS_CIRCUIT_BREAKER_RESET_MS',
+      30_000,
+    );
 
-    this.circuitBreaker = new CircuitBreaker(threshold, resetMs, this.metrics, RedisService.name);
+    this.circuitBreaker = new CircuitBreaker(
+      threshold,
+      resetMs,
+      this.metrics,
+      RedisService.name,
+    );
 
-    this.defaultClient = this.factory.getClient('default') as Redis | Cluster | null;
-    this.pubClient = this.factory.getClient('pubsub-pub') as Redis | Cluster | null;
-    this.subClient = this.factory.getClient('pubsub-sub') as Redis | Cluster | null;
+    this.defaultClient = this.factory.getClient('default') as
+      | Redis
+      | Cluster
+      | null;
+    this.pubClient = this.factory.getClient('pubsub-pub') as
+      | Redis
+      | Cluster
+      | null;
+    this.subClient = this.factory.getClient('pubsub-sub') as
+      | Redis
+      | Cluster
+      | null;
 
     // Register ONE 'message' event listener for the subscriber dispatcher
     if (this.subClient) {
-      (this.subClient as Redis).on('message', (channel: string, rawMessage: string) => {
-        const callbacks = this.subscriptions.get(channel);
-        if (!callbacks || callbacks.size === 0) return;
-        let parsed: any;
-        try {
-          parsed = JSON.parse(rawMessage);
-        } catch {
-          parsed = rawMessage;
-        }
-        for (const cb of callbacks) {
+      (this.subClient as Redis).on(
+        'message',
+        (channel: string, rawMessage: string) => {
+          const callbacks = this.subscriptions.get(channel);
+          if (!callbacks || callbacks.size === 0) return;
+          let parsed: any;
           try {
-            cb(parsed);
-          } catch (err: any) {
-            this.logger.error(`[RedisService] subscriber callback error on channel ${channel}: ${err?.message}`);
+            parsed = JSON.parse(rawMessage);
+          } catch {
+            parsed = rawMessage;
           }
-        }
-      });
+          for (const cb of callbacks) {
+            try {
+              cb(parsed);
+            } catch (err: any) {
+              this.logger.error(
+                `[RedisService] subscriber callback error on channel ${channel}: ${err?.message}`,
+              );
+            }
+          }
+        },
+      );
     }
 
     if (this.defaultClient) {
-      this.logger.log('[RedisService] Initialized with ioredis clients from RedisClientFactory');
+      this.logger.log(
+        '[RedisService] Initialized with ioredis clients from RedisClientFactory',
+      );
     } else {
-      this.logger.warn('[RedisService] No Redis client available — running in graceful degradation mode');
+      this.logger.warn(
+        '[RedisService] No Redis client available — running in graceful degradation mode',
+      );
     }
   }
 
   async onModuleDestroy(): Promise<void> {
     // Clients are owned and destroyed by RedisClientFactory — just clear local state
     this.subscriptions.clear();
-    this.logger.log('[RedisService] Subscriptions cleared — clients managed by RedisClientFactory');
+    this.logger.log(
+      '[RedisService] Subscriptions cleared — clients managed by RedisClientFactory',
+    );
   }
 
   // ─── Availability ──────────────────────────────────────────────────────────
@@ -189,7 +224,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    */
   getStats(): {
     connected: boolean;
-    circuitBreaker: { state: string; consecutiveFailures: number; openedAt: number | null };
+    circuitBreaker: {
+      state: string;
+      consecutiveFailures: number;
+      openedAt: number | null;
+    };
     hits: number;
     misses: number;
   } {
@@ -227,15 +266,19 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async get<T>(key: string): Promise<T | null> {
     const client = this.defaultClient as Redis | null;
     if (!client) return null;
-    return this.withCircuitBreaker('get', async () => {
-      const raw = await client.get(key);
-      if (raw === null || raw === undefined) {
-        this.missCount++;
-        return null;
-      }
-      this.hitCount++;
-      return JSON.parse(raw) as T;
-    }, null);
+    return this.withCircuitBreaker(
+      'get',
+      async () => {
+        const raw = await client.get(key);
+        if (raw === null || raw === undefined) {
+          this.missCount++;
+          return null;
+        }
+        this.hitCount++;
+        return JSON.parse(raw) as T;
+      },
+      null,
+    );
   }
 
   /**
@@ -253,10 +296,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async exists(key: string): Promise<boolean> {
     const client = this.defaultClient as Redis | null;
     if (!client) return false;
-    return this.withCircuitBreaker('exists', async () => {
-      const result = await client.exists(key);
-      return result === 1;
-    }, false);
+    return this.withCircuitBreaker(
+      'exists',
+      async () => {
+        const result = await client.exists(key);
+        return result === 1;
+      },
+      false,
+    );
   }
 
   /**
@@ -303,11 +350,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async tryAcquireLock(key: string, ttlMs: number): Promise<boolean> {
     const client = this.defaultClient as Redis | null;
     if (!client) return false;
-    return this.withCircuitBreaker('tryAcquireLock', async () => {
-      // ioredis positional NX/PX — cast to any to bypass overload TS checks
-      const res = await (client as any).set(key, '1', 'NX', 'PX', ttlMs);
-      return res === 'OK';
-    }, false);
+    return this.withCircuitBreaker(
+      'tryAcquireLock',
+      async () => {
+        // ioredis positional NX/PX — cast to any to bypass overload TS checks
+        const res = await (client as any).set(key, '1', 'NX', 'PX', ttlMs);
+        return res === 'OK';
+      },
+      false,
+    );
   }
 
   // ─── Hash ops ─────────────────────────────────────────────────────────────
@@ -318,7 +369,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async hset(key: string, field: string, value: any): Promise<void> {
     const client = this.defaultClient as Redis | null;
     if (!client) return;
-    await this.withCircuitBreaker('hset', () => client.hset(key, field, JSON.stringify(value)));
+    await this.withCircuitBreaker('hset', () =>
+      client.hset(key, field, JSON.stringify(value)),
+    );
   }
 
   /**
@@ -327,10 +380,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async hget<T>(key: string, field: string): Promise<T | null> {
     const client = this.defaultClient as Redis | null;
     if (!client) return null;
-    return this.withCircuitBreaker('hget', async () => {
-      const raw = await client.hget(key, field);
-      return raw ? (JSON.parse(raw) as T) : null;
-    }, null);
+    return this.withCircuitBreaker(
+      'hget',
+      async () => {
+        const raw = await client.hget(key, field);
+        return raw ? (JSON.parse(raw) as T) : null;
+      },
+      null,
+    );
   }
 
   /**
@@ -339,15 +396,19 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async hgetall<T>(key: string): Promise<Record<string, T>> {
     const client = this.defaultClient as Redis | null;
     if (!client) return {};
-    return this.withCircuitBreaker('hgetall', async () => {
-      const raw = await client.hgetall(key);
-      if (!raw) return {};
-      const result: Record<string, T> = {};
-      for (const [f, v] of Object.entries(raw)) {
-        result[f] = JSON.parse(v) as T;
-      }
-      return result;
-    }, {});
+    return this.withCircuitBreaker(
+      'hgetall',
+      async () => {
+        const raw = await client.hgetall(key);
+        if (!raw) return {};
+        const result: Record<string, T> = {};
+        for (const [f, v] of Object.entries(raw)) {
+          result[f] = JSON.parse(v) as T;
+        }
+        return result;
+      },
+      {},
+    );
   }
 
   /**
@@ -367,7 +428,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async lpush(key: string, value: any): Promise<void> {
     const client = this.defaultClient as Redis | null;
     if (!client) return;
-    await this.withCircuitBreaker('lpush', () => client.lpush(key, JSON.stringify(value)));
+    await this.withCircuitBreaker('lpush', () =>
+      client.lpush(key, JSON.stringify(value)),
+    );
   }
 
   /**
@@ -376,10 +439,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async rpop<T>(key: string): Promise<T | null> {
     const client = this.defaultClient as Redis | null;
     if (!client) return null;
-    return this.withCircuitBreaker('rpop', async () => {
-      const raw = await client.rpop(key);
-      return raw ? (JSON.parse(raw) as T) : null;
-    }, null);
+    return this.withCircuitBreaker(
+      'rpop',
+      async () => {
+        const raw = await client.rpop(key);
+        return raw ? (JSON.parse(raw) as T) : null;
+      },
+      null,
+    );
   }
 
   /**
@@ -388,10 +455,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async lrange<T>(key: string, start: number, stop: number): Promise<T[]> {
     const client = this.defaultClient as Redis | null;
     if (!client) return [];
-    return this.withCircuitBreaker('lrange', async () => {
-      const values = await client.lrange(key, start, stop);
-      return values.map((v) => JSON.parse(v) as T);
-    }, []);
+    return this.withCircuitBreaker(
+      'lrange',
+      async () => {
+        const values = await client.lrange(key, start, stop);
+        return values.map((v) => JSON.parse(v) as T);
+      },
+      [],
+    );
   }
 
   /**
@@ -401,7 +472,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async lrangeRaw(key: string, start = 0, stop = -1): Promise<string[]> {
     const client = this.defaultClient as Redis | null;
     if (!client) return [];
-    return this.withCircuitBreaker('lrangeRaw', () => client.lrange(key, start, stop), []);
+    return this.withCircuitBreaker(
+      'lrangeRaw',
+      () => client.lrange(key, start, stop),
+      [],
+    );
   }
 
   /**
@@ -430,7 +505,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       await client.publish(channel, JSON.stringify(message));
       this.emit('publish', 'success');
     } catch (err: any) {
-      this.logger.error(`[RedisService] publish error on channel ${channel}: ${err?.message}`);
+      this.logger.error(
+        `[RedisService] publish error on channel ${channel}: ${err?.message}`,
+      );
       this.emit('publish', 'failure');
     }
   }
@@ -440,7 +517,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Deduplicates ioredis subscribe calls per channel — adds callback to dispatcher Set.
    * Fails silently when unavailable.
    */
-  async subscribe(channel: string, callback: (message: any) => void): Promise<void> {
+  async subscribe(
+    channel: string,
+    callback: (message: any) => void,
+  ): Promise<void> {
     const client = this.subClient as Redis | null;
     if (!client) return;
     try {
@@ -452,7 +532,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.subscriptions.get(channel)!.add(callback);
       this.emit('subscribe', 'success');
     } catch (err: any) {
-      this.logger.error(`[RedisService] subscribe error on channel ${channel}: ${err?.message}`);
+      this.logger.error(
+        `[RedisService] subscribe error on channel ${channel}: ${err?.message}`,
+      );
       this.emit('subscribe', 'failure');
     }
   }
@@ -469,7 +551,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       await client.unsubscribe(channel);
       this.emit('unsubscribe', 'success');
     } catch (err: any) {
-      this.logger.error(`[RedisService] unsubscribe error on channel ${channel}: ${err?.message}`);
+      this.logger.error(
+        `[RedisService] unsubscribe error on channel ${channel}: ${err?.message}`,
+      );
       this.emit('unsubscribe', 'failure');
     }
   }
@@ -485,26 +569,32 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async scanDelete(pattern: string): Promise<number> {
     const client = this.defaultClient as Redis | null;
     if (!client) return 0;
-    return this.withCircuitBreaker('scanDelete', async () => {
-      let cursor = '0';
-      let deleted = 0;
-      do {
-        const [nextCursor, keys]: [string, string[]] = await client.scan(
-          cursor,
-          'MATCH',
-          pattern,
-          'COUNT',
-          100,
+    return this.withCircuitBreaker(
+      'scanDelete',
+      async () => {
+        let cursor = '0';
+        let deleted = 0;
+        do {
+          const [nextCursor, keys]: [string, string[]] = await client.scan(
+            cursor,
+            'MATCH',
+            pattern,
+            'COUNT',
+            100,
+          );
+          cursor = nextCursor;
+          if (keys.length > 0) {
+            await client.del(...keys);
+            deleted += keys.length;
+          }
+        } while (cursor !== '0');
+        this.logger.log(
+          `[RedisService] scanDelete(${pattern}): deleted ${deleted} keys`,
         );
-        cursor = nextCursor;
-        if (keys.length > 0) {
-          await client.del(...keys);
-          deleted += keys.length;
-        }
-      } while (cursor !== '0');
-      this.logger.log(`[RedisService] scanDelete(${pattern}): deleted ${deleted} keys`);
-      return deleted;
-    }, 0);
+        return deleted;
+      },
+      0,
+    );
   }
 
   // ─── Domain ops ───────────────────────────────────────────────────────────
@@ -512,7 +602,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * Cache market data for an instrument token. Key format: market_data:{token}.
    */
-  async cacheMarketData(instrumentToken: number, data: any, ttl = 60): Promise<void> {
+  async cacheMarketData(
+    instrumentToken: number,
+    data: any,
+    ttl = 60,
+  ): Promise<void> {
     this.logger.debug(`Caching market data for instrument: ${instrumentToken}`);
     await this.set(`market_data:${instrumentToken}`, data, ttl);
   }
@@ -521,7 +615,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Get cached market data for an instrument token. Returns null on MISS.
    */
   async getCachedMarketData(instrumentToken: number): Promise<any> {
-    this.logger.debug(`Retrieving cached market data for instrument: ${instrumentToken}`);
+    this.logger.debug(
+      `Retrieving cached market data for instrument: ${instrumentToken}`,
+    );
     return this.get(`market_data:${instrumentToken}`);
   }
 

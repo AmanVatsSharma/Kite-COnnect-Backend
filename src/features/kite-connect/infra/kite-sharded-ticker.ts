@@ -62,7 +62,8 @@ export interface KiteShardedTickerOptions {
 export class KiteShardedTicker {
   private readonly shards: KiteShardState[] = [];
   private readonly tokenToShard: Map<number, number> = new Map();
-  private readonly eventHandlers: Map<string, Array<(...args: any[]) => void>> = new Map();
+  private readonly eventHandlers: Map<string, Array<(...args: any[]) => void>> =
+    new Map();
 
   private readonly apiKey: string;
   private readonly accessToken: string;
@@ -104,7 +105,9 @@ export class KiteShardedTicker {
       this.attachShardHandlers(shard);
       this.shards.push(shard);
     }
-    this.logger.log(`[KiteShardedTicker] Built ${this.maxShards} shard(s), capacity ${this.getSubscriptionLimit()} tokens`);
+    this.logger.log(
+      `[KiteShardedTicker] Built ${this.maxShards} shard(s), capacity ${this.getSubscriptionLimit()} tokens`,
+    );
   }
 
   private attachShardHandlers(shard: KiteShardState): void {
@@ -137,7 +140,9 @@ export class KiteShardedTicker {
     });
 
     inner.on('error', (error: any) => {
-      this.logger.error(`[KiteShardedTicker] Shard ${shard.index} error: ${error?.message ?? error}`);
+      this.logger.error(
+        `[KiteShardedTicker] Shard ${shard.index} error: ${error?.message ?? error}`,
+      );
       if (this.isAuthError(error)) {
         // Disable ALL shards — shared access token
         for (const s of this.shards) {
@@ -145,7 +150,9 @@ export class KiteShardedTicker {
         }
         this.opts.onAuthError?.(shard.index, error);
         this.emit('error', error);
-        try { inner.disconnect?.(); } catch {}
+        try {
+          inner.disconnect?.();
+        } catch {}
       } else {
         this.opts.onError?.(shard.index, error);
         this.emit('error', error);
@@ -153,12 +160,16 @@ export class KiteShardedTicker {
     });
 
     inner.on('reconnect', (...args: any[]) => {
-      this.logger.warn(`[KiteShardedTicker] Shard ${shard.index} reconnect event`);
+      this.logger.warn(
+        `[KiteShardedTicker] Shard ${shard.index} reconnect event`,
+      );
       this.emit('reconnect', shard.index, args);
     });
 
     inner.on('noreconnect', (...args: any[]) => {
-      this.logger.warn(`[KiteShardedTicker] Shard ${shard.index} noreconnect event`);
+      this.logger.warn(
+        `[KiteShardedTicker] Shard ${shard.index} noreconnect event`,
+      );
       this.emit('noreconnect', shard.index, args);
     });
 
@@ -172,11 +183,15 @@ export class KiteShardedTicker {
 
   private handleShardDisconnect(shard: KiteShardState): void {
     if (shard.disableReconnect) {
-      this.logger.warn(`[KiteShardedTicker] Shard ${shard.index} reconnect disabled (auth error)`);
+      this.logger.warn(
+        `[KiteShardedTicker] Shard ${shard.index} reconnect disabled (auth error)`,
+      );
       return;
     }
     if (shard.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.logger.warn(`[KiteShardedTicker] Shard ${shard.index} max reconnect attempts (${this.maxReconnectAttempts}) reached`);
+      this.logger.warn(
+        `[KiteShardedTicker] Shard ${shard.index} max reconnect attempts (${this.maxReconnectAttempts}) reached`,
+      );
       this.opts.onMaxReconnect?.(shard.index);
       return;
     }
@@ -189,8 +204,13 @@ export class KiteShardedTicker {
       `[KiteShardedTicker] Shard ${shard.index} reconnecting in ${delayMs}ms (attempt ${shard.reconnectAttempts}/${this.maxReconnectAttempts})`,
     );
     setTimeout(() => {
-      try { shard.inner.connect(); } catch (e) {
-        this.logger.error(`[KiteShardedTicker] Shard ${shard.index} reconnect call failed`, e as any);
+      try {
+        shard.inner.connect();
+      } catch (e) {
+        this.logger.error(
+          `[KiteShardedTicker] Shard ${shard.index} reconnect call failed`,
+          e as any,
+        );
       }
     }, delayMs);
   }
@@ -211,9 +231,14 @@ export class KiteShardedTicker {
       for (const [mode, modeTokens] of modeGroups) {
         shard.inner.setMode(mode, modeTokens);
       }
-      this.logger.log(`[KiteShardedTicker] Shard ${shard.index} resubscribed ${tokens.length} tokens`);
+      this.logger.log(
+        `[KiteShardedTicker] Shard ${shard.index} resubscribed ${tokens.length} tokens`,
+      );
     } catch (e) {
-      this.logger.error(`[KiteShardedTicker] Shard ${shard.index} resubscribe failed`, e as any);
+      this.logger.error(
+        `[KiteShardedTicker] Shard ${shard.index} resubscribe failed`,
+        e as any,
+      );
     }
   }
 
@@ -230,8 +255,13 @@ export class KiteShardedTicker {
 
   connect(): void {
     for (const shard of this.shards) {
-      try { shard.inner.connect(); } catch (e) {
-        this.logger.error(`[KiteShardedTicker] Shard ${shard.index} connect() failed`, e as any);
+      try {
+        shard.inner.connect();
+      } catch (e) {
+        this.logger.error(
+          `[KiteShardedTicker] Shard ${shard.index} connect() failed`,
+          e as any,
+        );
       }
     }
   }
@@ -239,7 +269,9 @@ export class KiteShardedTicker {
   disconnect(): void {
     for (const shard of this.shards) {
       shard.disableReconnect = true; // prevent auto-reconnect after intentional disconnect
-      try { shard.inner.disconnect?.(); } catch {}
+      try {
+        shard.inner.disconnect?.();
+      } catch {}
     }
   }
 
@@ -263,7 +295,8 @@ export class KiteShardedTicker {
     for (const token of tokens) {
       const existingShard = this.tokenToShard.get(token);
       if (existingShard !== undefined) {
-        if (!byShardExist.has(existingShard)) byShardExist.set(existingShard, []);
+        if (!byShardExist.has(existingShard))
+          byShardExist.set(existingShard, []);
         byShardExist.get(existingShard)!.push(token);
       } else {
         const shardIdx = this.pickShard();
@@ -279,7 +312,9 @@ export class KiteShardedTicker {
     }
 
     if (noCapacity.length) {
-      this.logger.warn(`[KiteShardedTicker] No capacity for ${noCapacity.length} tokens (all ${this.maxShards} shards full)`);
+      this.logger.warn(
+        `[KiteShardedTicker] No capacity for ${noCapacity.length} tokens (all ${this.maxShards} shards full)`,
+      );
       this.emit('capacity_exceeded', noCapacity);
     }
 
@@ -293,7 +328,10 @@ export class KiteShardedTicker {
           for (const t of newTokens) shard.tokenModes.set(t, kiteMode);
         }
       } catch (e) {
-        this.logger.error(`[KiteShardedTicker] Shard ${shardIdx} subscribe failed`, e as any);
+        this.logger.error(
+          `[KiteShardedTicker] Shard ${shardIdx} subscribe failed`,
+          e as any,
+        );
       }
     }
 
@@ -305,7 +343,10 @@ export class KiteShardedTicker {
           shard.inner.setMode(kiteMode, existTokens);
           for (const t of existTokens) shard.tokenModes.set(t, kiteMode);
         } catch (e) {
-          this.logger.error(`[KiteShardedTicker] Shard ${shardIdx} setMode failed`, e as any);
+          this.logger.error(
+            `[KiteShardedTicker] Shard ${shardIdx} setMode failed`,
+            e as any,
+          );
         }
       }
     }
@@ -330,7 +371,10 @@ export class KiteShardedTicker {
         shard.inner.setMode(kiteMode, shardTokens);
         for (const t of shardTokens) shard.tokenModes.set(t, kiteMode);
       } catch (e) {
-        this.logger.error(`[KiteShardedTicker] Shard ${shardIdx} setMode failed`, e as any);
+        this.logger.error(
+          `[KiteShardedTicker] Shard ${shardIdx} setMode failed`,
+          e as any,
+        );
       }
     }
   }
@@ -350,7 +394,10 @@ export class KiteShardedTicker {
       try {
         shard.inner.unsubscribe(shardTokens);
       } catch (e) {
-        this.logger.error(`[KiteShardedTicker] Shard ${shardIdx} unsubscribe failed`, e as any);
+        this.logger.error(
+          `[KiteShardedTicker] Shard ${shardIdx} unsubscribe failed`,
+          e as any,
+        );
       }
       for (const t of shardTokens) {
         shard.subscribedTokens.delete(t);
@@ -369,8 +416,13 @@ export class KiteShardedTicker {
   private emit(event: string, ...args: any[]): void {
     const handlers = this.eventHandlers.get(event) ?? [];
     for (const h of handlers) {
-      try { h(...args); } catch (e) {
-        this.logger.error(`[KiteShardedTicker] Event handler error for '${event}'`, e as any);
+      try {
+        h(...args);
+      } catch (e) {
+        this.logger.error(
+          `[KiteShardedTicker] Event handler error for '${event}'`,
+          e as any,
+        );
       }
     }
   }
@@ -401,7 +453,8 @@ export class KiteShardedTicker {
   private isAuthError(error: any): boolean {
     const msg = String(error?.message ?? '').toLowerCase();
     const code = error?.code ?? error?.data?.code;
-    const status = error?.status ?? error?.data?.status ?? error?.response?.status;
+    const status =
+      error?.status ?? error?.data?.status ?? error?.response?.status;
     if (status === 403) return true;
     if (code && String(code).startsWith('4')) {
       const c = Number(code);

@@ -2,13 +2,33 @@
  * @file falcon-instrument.service.ts
  * @module falcon
  * @description Sync Kite Connect instruments into falcon_instruments with batched upserts, daily cron, retries, and optional reconciliation (Vortex-style).
- * @author BharatERP
- * @created 2025-01-01
- * @updated 2026-04-22
  *
- * Notes:
- * - Requires Kite OAuth (KITE_ACCESS_TOKEN or Redis kite:access_token) for sync.
- * - Cron schedule: FALCON_INSTRUMENTS_CRON (default 09:45 IST) via FALCON_INSTRUMENTS_CRON_TZ.
+ * Exports:
+ *   - FalconInstrumentService                     — core service: sync, read, UIR enrichment
+ *   - FalconInstrumentSyncResult                  — sync outcome shape
+ *   - FalconInstrumentSyncOptions                 — sync behaviour flags
+ *
+ * Depends on:
+ *   - @features/market-data/application/instrument-registry.service — in-memory UIR Map for O(1) enrichment
+ *   - @features/kite-connect/infra/kite-provider.service            — Kite REST/WS client
+ *   - @features/falcon/infra/falcon-provider.adapter                — LTP / quote adapter
+ *
+ * Side-effects:
+ *   - DB writes: falcon_instruments (upsert), instrument_mappings (upsert + uir_id update), universal_instruments (upsert)
+ *   - Redis writes: symbol cache, stats cache, options-chain cache, sync job state
+ *
+ * Key invariants:
+ *   - enrichWithUir() is synchronous and zero-DB — it reads from the in-memory registry warmed by InstrumentRegistryService.refresh()
+ *   - All public read methods apply enrichWithUir() at their return boundary so callers always receive uir_id + canonical_symbol
+ *   - Cron schedule: FALCON_INSTRUMENTS_CRON (default 09:45 IST) via FALCON_INSTRUMENTS_CRON_TZ
+ *
+ * Read order:
+ *   1. enrichWithUir()     — UIR enrichment helper; understand this first
+ *   2. syncFalconInstruments() — sync pipeline: Kite → DB → UIR → registry refresh
+ *   3. getEquities / getFutures / getOptions / getCommodities — read + enrich paths
+ *
+ * Author:      BharatERP
+ * Last-updated: 2026-05-05
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -52,11 +72,30 @@ export class FalconInstrumentService implements OnModuleInit {
 
   /** Hardcoded popular Kite instrument trading symbols for the popular-instruments endpoint. */
   private static readonly POPULAR_SYMBOLS = [
-    'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX',
-    'RELIANCE', 'INFY', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN',
-    'WIPRO', 'HCLTECH', 'AXISBANK', 'KOTAKBANK', 'LT',
-    'BAJFINANCE', 'MARUTI', 'TATAMOTORS', 'ADANIENT',
-    'GOLD', 'SILVER', 'CRUDEOIL', 'NATURALGAS',
+    'NIFTY',
+    'BANKNIFTY',
+    'FINNIFTY',
+    'MIDCPNIFTY',
+    'SENSEX',
+    'RELIANCE',
+    'INFY',
+    'TCS',
+    'HDFCBANK',
+    'ICICIBANK',
+    'SBIN',
+    'WIPRO',
+    'HCLTECH',
+    'AXISBANK',
+    'KOTAKBANK',
+    'LT',
+    'BAJFINANCE',
+    'MARUTI',
+    'TATAMOTORS',
+    'ADANIENT',
+    'GOLD',
+    'SILVER',
+    'CRUDEOIL',
+    'NATURALGAS',
   ];
 
   constructor(
@@ -111,7 +150,10 @@ export class FalconInstrumentService implements OnModuleInit {
   }
 
   private isScheduledSyncEnabled(): boolean {
-    const raw = this.config.get<string>('FALCON_INSTRUMENT_SYNC_ENABLED', 'true');
+    const raw = this.config.get<string>(
+      'FALCON_INSTRUMENT_SYNC_ENABLED',
+      'true',
+    );
     return String(raw).toLowerCase() !== 'false';
   }
 
@@ -132,9 +174,14 @@ export class FalconInstrumentService implements OnModuleInit {
           );
           return;
         }
-        const result = await this.syncFalconInstruments(undefined, undefined, undefined, {
-          reconcile: this.reconcileDefault(),
-        });
+        const result = await this.syncFalconInstruments(
+          undefined,
+          undefined,
+          undefined,
+          {
+            reconcile: this.reconcileDefault(),
+          },
+        );
         if (result.skipped) {
           this.logger.warn(
             `[FalconInstrumentService] Daily sync skipped: ${result.skipReason}`,
@@ -219,7 +266,10 @@ export class FalconInstrumentService implements OnModuleInit {
           last_price: Number(row.last_price) || 0,
           // Kite SDK parses CSV date → JS Date object; ISO string is 24 chars but column is varchar(16).
           expiry: row.expiry
-            ? (row.expiry instanceof Date ? row.expiry.toISOString() : String(row.expiry)).slice(0, 10)
+            ? (row.expiry instanceof Date
+                ? row.expiry.toISOString()
+                : String(row.expiry)
+              ).slice(0, 10)
             : '',
           strike: Number(row.strike) || 0,
           tick_size: Number(row.tick_size) || 0.05,
@@ -306,10 +356,15 @@ export class FalconInstrumentService implements OnModuleInit {
       }
 
       const wantReconcile =
-        opts?.reconcile !== undefined ? opts.reconcile : this.reconcileDefault();
+        opts?.reconcile !== undefined
+          ? opts.reconcile
+          : this.reconcileDefault();
       if (wantReconcile && fetchedTokens.size > 0) {
         try {
-          reconciled = await this.reconcileInactiveRows(fetchedTokens, exchange);
+          reconciled = await this.reconcileInactiveRows(
+            fetchedTokens,
+            exchange,
+          );
           if (reconciled > 0) {
             this.logger.log(
               `[FalconInstrumentService] Reconciliation deactivated ${reconciled} rows`,
@@ -327,17 +382,25 @@ export class FalconInstrumentService implements OnModuleInit {
       try {
         await this.populateSymbolCache(payloads);
       } catch (e) {
-        this.logger.warn('[FalconInstrumentService] Symbol cache population failed (non-fatal)', e as Error);
+        this.logger.warn(
+          '[FalconInstrumentService] Symbol cache population failed (non-fatal)',
+          e as Error,
+        );
       }
 
       // Upsert universal instruments, cross-link vortex mappings, then refresh registry
       try {
         const uirCount = await this.upsertUniversalInstruments(payloads);
-        this.logger.log(`[FalconInstrumentService] UIR upsert: ${uirCount} instruments linked`);
+        this.logger.log(
+          `[FalconInstrumentService] UIR upsert: ${uirCount} instruments linked`,
+        );
         await this.crossLinkProviderMappings();
         await this.instrumentRegistry.refresh();
       } catch (uirErr) {
-        this.logger.warn('[FalconInstrumentService] UIR upsert failed (non-fatal)', uirErr as Error);
+        this.logger.warn(
+          '[FalconInstrumentService] UIR upsert failed (non-fatal)',
+          uirErr as Error,
+        );
       }
 
       this.logger.log(
@@ -357,7 +420,9 @@ export class FalconInstrumentService implements OnModuleInit {
    * Populate Redis symbol → token cache: falcon:sym2tok:{EXCHANGE}:{SYMBOL} = instrument_token.
    * TTL: 86400s (refreshed on each sync). Used by resolveSymbolsToTokens for fast WS resolution.
    */
-  private async populateSymbolCache(instruments: FalconInstrument[]): Promise<void> {
+  private async populateSymbolCache(
+    instruments: FalconInstrument[],
+  ): Promise<void> {
     if (!instruments.length) return;
     const CHUNK = 500;
     let count = 0;
@@ -376,7 +441,9 @@ export class FalconInstrumentService implements OnModuleInit {
       );
       count += batch.length;
     }
-    this.logger.log(`[FalconInstrumentService] Symbol cache populated: ${count} entries`);
+    this.logger.log(
+      `[FalconInstrumentService] Symbol cache populated: ${count} entries`,
+    );
   }
 
   /**
@@ -462,9 +529,13 @@ export class FalconInstrumentService implements OnModuleInit {
       this.logger.log(
         `[FalconInstrumentService] Cross-link complete: kite→vortex updated, vortex→kite updated`,
       );
-      void r1; void r2;
+      void r1;
+      void r2;
     } catch (e) {
-      this.logger.warn('[FalconInstrumentService] Cross-link pass failed (non-fatal)', e as Error);
+      this.logger.warn(
+        '[FalconInstrumentService] Cross-link pass failed (non-fatal)',
+        e as Error,
+      );
     }
   }
 
@@ -472,7 +543,9 @@ export class FalconInstrumentService implements OnModuleInit {
    * Upsert universal instrument rows for each Falcon instrument and link them
    * to existing instrument_mappings via uir_id.
    */
-  private async upsertUniversalInstruments(payloads: FalconInstrument[]): Promise<number> {
+  private async upsertUniversalInstruments(
+    payloads: FalconInstrument[],
+  ): Promise<number> {
     let uirCount = 0;
     const CHUNK = 500;
 
@@ -481,10 +554,19 @@ export class FalconInstrumentService implements OnModuleInit {
 
       // Build the UIR rows and a token→canonical map for this chunk
       type UirRow = {
-        canonical_symbol: string; exchange: string; underlying: string;
-        instrument_type: string; expiry: Date | null; strike: number;
-        option_type: string | null; lot_size: number; tick_size: number;
-        name: string; segment: string; is_active: boolean; asset_class: string;
+        canonical_symbol: string;
+        exchange: string;
+        underlying: string;
+        instrument_type: string;
+        expiry: Date | null;
+        strike: number;
+        option_type: string | null;
+        lot_size: number;
+        tick_size: number;
+        name: string;
+        segment: string;
+        is_active: boolean;
+        asset_class: string;
       };
       const uirRows: UirRow[] = [];
       const tokenToCanonical = new Map<string, string>(); // provider_token → canonical
@@ -497,28 +579,51 @@ export class FalconInstrumentService implements OnModuleInit {
           // used as the canonical underlying — clients subscribe by tradingsymbol.
           const underlying = (p.tradingsymbol || p.name).toUpperCase().trim();
           if (!underlying) continue;
-          const instrumentType = p.segment?.includes('INDICES') ? 'IDX' : (p.instrument_type || 'EQ');
+          const instrumentType = p.segment?.includes('INDICES')
+            ? 'IDX'
+            : p.instrument_type || 'EQ';
           let expiry: Date | null = null;
           if (p.expiry && p.expiry.length >= 10) {
             expiry = new Date(p.expiry);
             if (isNaN(expiry.getTime())) expiry = null;
           }
           const strike = Number(p.strike) || null;
-          const optionType = (instrumentType === 'CE' || instrumentType === 'PE') ? instrumentType : null;
+          const optionType =
+            instrumentType === 'CE' || instrumentType === 'PE'
+              ? instrumentType
+              : null;
           const canonicalSymbol = computeCanonicalSymbol({
-            exchange: normalizedExchange, underlying, instrument_type: instrumentType,
-            expiry, strike, option_type: optionType,
+            exchange: normalizedExchange,
+            underlying,
+            instrument_type: instrumentType,
+            expiry,
+            strike,
+            option_type: optionType,
           });
           uirRows.push({
-            canonical_symbol: canonicalSymbol, exchange: normalizedExchange,
-            underlying, instrument_type: instrumentType, expiry,
-            strike: strike || 0, option_type: optionType,
-            lot_size: p.lot_size || 1, tick_size: Number(p.tick_size) || 0.05,
-            name: p.name || '', segment: p.segment || '', is_active: true,
-            asset_class: normalizedExchange === 'MCX' ? 'commodity' : (normalizedExchange === 'CDS' ? 'currency' : 'equity'),
+            canonical_symbol: canonicalSymbol,
+            exchange: normalizedExchange,
+            underlying,
+            instrument_type: instrumentType,
+            expiry,
+            strike: strike || 0,
+            option_type: optionType,
+            lot_size: p.lot_size || 1,
+            tick_size: Number(p.tick_size) || 0.05,
+            name: p.name || '',
+            segment: p.segment || '',
+            is_active: true,
+            asset_class:
+              normalizedExchange === 'MCX'
+                ? 'commodity'
+                : normalizedExchange === 'CDS'
+                  ? 'currency'
+                  : 'equity',
           });
           tokenToCanonical.set(String(p.instrument_token), canonicalSymbol);
-        } catch { /* skip malformed row */ }
+        } catch {
+          /* skip malformed row */
+        }
       }
 
       if (!uirRows.length) continue;
@@ -536,7 +641,9 @@ export class FalconInstrumentService implements OnModuleInit {
           skipUpdateIfNoValuesChanged: false,
         });
       } catch (err) {
-        this.logger.warn(`[FalconInstrumentService] UIR bulk upsert chunk failed: ${(err as Error)?.message}`);
+        this.logger.warn(
+          `[FalconInstrumentService] UIR bulk upsert chunk failed: ${(err as Error)?.message}`,
+        );
         continue;
       }
 
@@ -544,35 +651,47 @@ export class FalconInstrumentService implements OnModuleInit {
       const canonicals = dedupedUirRows.map((r) => r.canonical_symbol);
       let idRows: { id: string; canonical_symbol: string }[] = [];
       try {
-        idRows = await this.uirRepo
+        idRows = (await this.uirRepo
           .createQueryBuilder('u')
           .select(['u.id', 'u.canonical_symbol'])
           .where('u.canonical_symbol IN (:...canonicals)', { canonicals })
-          .getMany() as any;
+          .getMany()) as any;
       } catch (err) {
-        this.logger.warn(`[FalconInstrumentService] UIR ID fetch failed: ${(err as Error)?.message}`);
+        this.logger.warn(
+          `[FalconInstrumentService] UIR ID fetch failed: ${(err as Error)?.message}`,
+        );
         continue;
       }
       const canonicalToId = new Map<string, number>(
-        idRows.map((r) => [r.canonical_symbol, Number((r as any).id ?? (r as any).u_id)]),
+        idRows.map((r) => [
+          r.canonical_symbol,
+          Number((r as any).id ?? (r as any).u_id),
+        ]),
       );
 
       // 3. Bulk update instrument_mappings with uir_id (1 DB call via CASE WHEN)
       const updates: { token: string; uirId: number }[] = [];
       for (const [token, canonical] of tokenToCanonical) {
         const uirId = canonicalToId.get(canonical);
-        if (uirId) { updates.push({ token, uirId }); uirCount++; }
+        if (uirId) {
+          updates.push({ token, uirId });
+          uirCount++;
+        }
       }
       if (updates.length) {
         try {
           const tokens = updates.map((u) => u.token);
-          const cases = updates.map((u) => `WHEN provider_token = '${u.token}' THEN ${u.uirId}`).join(' ');
+          const cases = updates
+            .map((u) => `WHEN provider_token = '${u.token}' THEN ${u.uirId}`)
+            .join(' ');
           await this.mappingRepo.query(
             `UPDATE instrument_mappings SET uir_id = CASE ${cases} END WHERE provider = 'kite' AND provider_token = ANY($1)`,
             [tokens],
           );
         } catch (err) {
-          this.logger.warn(`[FalconInstrumentService] Mapping uir_id bulk update failed: ${(err as Error)?.message}`);
+          this.logger.warn(
+            `[FalconInstrumentService] Mapping uir_id bulk update failed: ${(err as Error)?.message}`,
+          );
         }
       }
     }
@@ -645,33 +764,30 @@ export class FalconInstrumentService implements OnModuleInit {
     if (filters?.offset) qb.offset(filters.offset);
     qb.orderBy('fi.tradingsymbol', 'ASC');
     const instruments = await qb.getMany();
-    return { instruments, total };
+    return { instruments: this.enrichWithUir(instruments), total };
   }
 
-  async getFalconInstrumentByToken(
-    token: number,
-  ): Promise<FalconInstrument | null> {
-    return this.falconInstrumentRepo.findOne({ where: { instrument_token: token } });
+  async getFalconInstrumentByToken(token: number) {
+    const inst = await this.falconInstrumentRepo.findOne({
+      where: { instrument_token: token },
+    });
+    return inst ? this.enrichWithUir([inst])[0] : null;
   }
 
-  async getFalconInstrumentsBatch(
-    tokens: number[],
-  ): Promise<Record<number, FalconInstrument>> {
+  async getFalconInstrumentsBatch(tokens: number[]) {
     const list = await this.falconInstrumentRepo.find({
       where: { instrument_token: In(tokens) } as any,
     });
-    const out: Record<number, FalconInstrument> = {};
-    list.forEach((i) => (out[i.instrument_token] = i));
+    const enriched = this.enrichWithUir(list);
+    const out: Record<number, (typeof enriched)[0]> = {};
+    enriched.forEach((i) => (out[i.instrument_token] = i));
     return out;
   }
 
-  async searchFalconInstruments(
-    q: string,
-    limit = 20,
-  ): Promise<FalconInstrument[]> {
+  async searchFalconInstruments(q: string, limit = 20) {
     const normalized = (q || '').trim().toUpperCase();
     if (!normalized) return [];
-    return await this.falconInstrumentRepo
+    const results = await this.falconInstrumentRepo
       .createQueryBuilder('fi')
       .where('UPPER(fi.tradingsymbol) LIKE :q', { q: `%${normalized}%` })
       .orWhere('UPPER(fi.name) LIKE :q', { q: `%${normalized}%` })
@@ -679,6 +795,7 @@ export class FalconInstrumentService implements OnModuleInit {
       .limit(limit)
       .orderBy('fi.tradingsymbol', 'ASC')
       .getMany();
+    return this.enrichWithUir(results);
   }
 
   async getFalconInstrumentStats(): Promise<{
@@ -706,11 +823,11 @@ export class FalconInstrumentService implements OnModuleInit {
       .groupBy('fi.instrument_type')
       .getRawMany<{ instrument_type: string; count: string }>();
     const by_exchange: Record<string, number> = {};
-    by_exchange_rows.forEach((r) => (by_exchange[r.exchange] = Number(r.count)));
-    const by_type: Record<string, number> = {};
-    by_type_rows.forEach(
-      (r) => (by_type[r.instrument_type] = Number(r.count)),
+    by_exchange_rows.forEach(
+      (r) => (by_exchange[r.exchange] = Number(r.count)),
     );
+    const by_type: Record<string, number> = {};
+    by_type_rows.forEach((r) => (by_type[r.instrument_type] = Number(r.count)));
     return { total, by_exchange, by_type, active, inactive };
   }
 
@@ -727,14 +844,18 @@ export class FalconInstrumentService implements OnModuleInit {
   }> {
     const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
     qb.where(`(fi.instrument_type = 'EQ' OR fi.segment IN ('NSE','BSE'))`);
-    if (filters?.exchange) qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
+    if (filters?.exchange)
+      qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
     if (typeof filters?.is_active === 'boolean')
       qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
     if (filters?.q) {
       const q = `%${String(filters.q).trim().toUpperCase()}%`;
-      qb.andWhere('(UPPER(fi.tradingsymbol) LIKE :q OR UPPER(fi.name) LIKE :q)', {
-        q,
-      });
+      qb.andWhere(
+        '(UPPER(fi.tradingsymbol) LIKE :q OR UPPER(fi.name) LIKE :q)',
+        {
+          q,
+        },
+      );
     }
     const total = await qb.getCount();
     const limit = Math.max(1, Math.min(1000, filters?.limit ?? 100));
@@ -758,13 +879,14 @@ export class FalconInstrumentService implements OnModuleInit {
       if (filters?.ltp_only) {
         withLive = withLive.filter(
           (x) =>
-            Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0,
+            Number.isFinite(x.last_price_live) &&
+            (x.last_price_live as any) > 0,
         );
       }
     } catch {
       /* enrichment optional */
     }
-    return { items: withLive, total };
+    return { items: this.enrichWithUir(withLive), total };
   }
 
   async getFutures(filters: {
@@ -782,12 +904,16 @@ export class FalconInstrumentService implements OnModuleInit {
   }> {
     const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
     qb.where(`(fi.instrument_type = 'FUT' OR fi.segment ILIKE '%FUT%')`);
-    if (filters?.exchange) qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
-    if (filters?.symbol) qb.andWhere('fi.tradingsymbol = :sym', {
-      sym: filters.symbol,
-    });
-    if (filters?.expiry_from) qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
-    if (filters?.expiry_to) qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
+    if (filters?.exchange)
+      qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
+    if (filters?.symbol)
+      qb.andWhere('fi.tradingsymbol = :sym', {
+        sym: filters.symbol,
+      });
+    if (filters?.expiry_from)
+      qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
+    if (filters?.expiry_to)
+      qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
     if (typeof filters?.is_active === 'boolean')
       qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
     const total = await qb.getCount();
@@ -812,13 +938,14 @@ export class FalconInstrumentService implements OnModuleInit {
       if (filters?.ltp_only) {
         withLive = withLive.filter(
           (x) =>
-            Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0,
+            Number.isFinite(x.last_price_live) &&
+            (x.last_price_live as any) > 0,
         );
       }
     } catch {
       /* optional */
     }
-    return { items: withLive, total };
+    return { items: this.enrichWithUir(withLive), total };
   }
 
   async getOptions(filters: {
@@ -839,12 +966,16 @@ export class FalconInstrumentService implements OnModuleInit {
   }> {
     const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
     qb.where(`(fi.instrument_type IN ('CE','PE') OR fi.segment ILIKE '%OPT%')`);
-    if (filters?.exchange) qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
-    if (filters?.symbol) qb.andWhere('fi.tradingsymbol = :sym', {
-      sym: filters.symbol,
-    });
-    if (filters?.expiry_from) qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
-    if (filters?.expiry_to) qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
+    if (filters?.exchange)
+      qb.andWhere('fi.exchange = :ex', { ex: filters.exchange });
+    if (filters?.symbol)
+      qb.andWhere('fi.tradingsymbol = :sym', {
+        sym: filters.symbol,
+      });
+    if (filters?.expiry_from)
+      qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
+    if (filters?.expiry_to)
+      qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
     if (typeof filters?.strike_min === 'number')
       qb.andWhere('fi.strike >= :smin', { smin: filters.strike_min });
     if (typeof filters?.strike_max === 'number')
@@ -875,7 +1006,8 @@ export class FalconInstrumentService implements OnModuleInit {
       if (filters?.ltp_only) {
         withLive = withLive.filter(
           (x) =>
-            Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0,
+            Number.isFinite(x.last_price_live) &&
+            (x.last_price_live as any) > 0,
         );
       }
     } catch {
@@ -897,11 +1029,13 @@ export class FalconInstrumentService implements OnModuleInit {
     total: number;
   }> {
     const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
-    if (filters?.exchange) qb.where('fi.exchange = :ex', { ex: filters.exchange });
+    if (filters?.exchange)
+      qb.where('fi.exchange = :ex', { ex: filters.exchange });
     else qb.where(`fi.exchange = 'MCX'`);
-    if (filters?.symbol) qb.andWhere('fi.tradingsymbol = :sym', {
-      sym: filters.symbol,
-    });
+    if (filters?.symbol)
+      qb.andWhere('fi.tradingsymbol = :sym', {
+        sym: filters.symbol,
+      });
     if (filters?.instrument_type)
       qb.andWhere('fi.instrument_type = :it', { it: filters.instrument_type });
     if (typeof filters?.is_active === 'boolean')
@@ -928,7 +1062,8 @@ export class FalconInstrumentService implements OnModuleInit {
       if (filters?.ltp_only) {
         withLive = withLive.filter(
           (x) =>
-            Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0,
+            Number.isFinite(x.last_price_live) &&
+            (x.last_price_live as any) > 0,
         );
       }
     } catch {
@@ -958,8 +1093,7 @@ export class FalconInstrumentService implements OnModuleInit {
     const out = list
       .map((i) => {
         const lp = Number(ltp?.[String(i.instrument_token)]?.last_price);
-        const last_price =
-          Number.isFinite(lp) && lp > 0 ? lp : null;
+        const last_price = Number.isFinite(lp) && lp > 0 ? lp : null;
         return {
           instrument_token: i.instrument_token,
           symbol: i.tradingsymbol,
@@ -988,7 +1122,9 @@ export class FalconInstrumentService implements OnModuleInit {
     if (!row) return null;
     let last_price: number | null = null;
     try {
-      const ltp = await this.falconAdapter.getLTP([String(row.instrument_token)]);
+      const ltp = await this.falconAdapter.getLTP([
+        String(row.instrument_token),
+      ]);
       const lp = Number(ltp?.[String(row.instrument_token)]?.last_price);
       last_price = Number.isFinite(lp) && lp > 0 ? lp : null;
     } catch {
@@ -1070,7 +1206,9 @@ export class FalconInstrumentService implements OnModuleInit {
   private isMarketHours(): boolean {
     try {
       const now = new Date();
-      const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      const ist = new Date(
+        now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }),
+      );
       const day = ist.getDay();
       if (day === 0 || day === 6) return false; // weekend
       const mins = ist.getHours() * 60 + ist.getMinutes();
@@ -1098,9 +1236,20 @@ export class FalconInstrumentService implements OnModuleInit {
       ltp_only: boolean;
     };
   }> {
-    const sym = String(symbol || '').trim().toUpperCase();
+    const sym = String(symbol || '')
+      .trim()
+      .toUpperCase();
     if (!sym) {
-      return { success: true, data: { symbol: sym, expiries: [], strikes: [], options: {}, ltp_only: ltpOnly } };
+      return {
+        success: true,
+        data: {
+          symbol: sym,
+          expiries: [],
+          strikes: [],
+          options: {},
+          ltp_only: ltpOnly,
+        },
+      };
     }
 
     // Redis cache
@@ -1108,7 +1257,9 @@ export class FalconInstrumentService implements OnModuleInit {
     try {
       const cached = await this.redis.get<any>(cacheKey);
       if (cached) return cached;
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
 
     const rows = await this.falconInstrumentRepo
       .createQueryBuilder('fi')
@@ -1122,7 +1273,9 @@ export class FalconInstrumentService implements OnModuleInit {
     try {
       const tokens = rows.map((r) => String(r.instrument_token));
       if (tokens.length) ltpMap = await this.falconAdapter.getLTP(tokens);
-    } catch { /* enrichment optional */ }
+    } catch {
+      /* enrichment optional */
+    }
 
     const expirySet = new Set<string>();
     const strikeSet = new Set<number>();
@@ -1168,7 +1321,9 @@ export class FalconInstrumentService implements OnModuleInit {
     const ttl = this.isMarketHours() ? 60 : 300;
     try {
       await this.redis.set(cacheKey, result, ttl);
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
 
     return result;
   }
@@ -1187,7 +1342,9 @@ export class FalconInstrumentService implements OnModuleInit {
     items: Array<FalconInstrument & { last_price_live: number | null }>;
     total: number;
   }> {
-    const sym = String(symbol || '').trim().toUpperCase();
+    const sym = String(symbol || '')
+      .trim()
+      .toUpperCase();
     const qb = this.falconInstrumentRepo
       .createQueryBuilder('fi')
       .where('UPPER(fi.name) = :sym', { sym })
@@ -1204,11 +1361,16 @@ export class FalconInstrumentService implements OnModuleInit {
     try {
       const tokens = items.map((i) => String(i.instrument_token));
       if (tokens.length) ltpMap = await this.falconAdapter.getLTP(tokens);
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     let withLive = items.map((i) => {
       const lp = Number(ltpMap?.[String(i.instrument_token)]?.last_price);
-      return { ...i, last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null };
+      return {
+        ...i,
+        last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null,
+      };
     });
     if (ltpOnly) withLive = withLive.filter((i) => i.last_price_live !== null);
     return { items: withLive, total };
@@ -1226,7 +1388,9 @@ export class FalconInstrumentService implements OnModuleInit {
     success: boolean;
     data: { suggestions: Array<{ symbol: string; exchange: string }> };
   }> {
-    const normalized = String(q || '').trim().toUpperCase();
+    const normalized = String(q || '')
+      .trim()
+      .toUpperCase();
     if (!normalized) {
       return { success: true, data: { suggestions: [] } };
     }
@@ -1238,7 +1402,8 @@ export class FalconInstrumentService implements OnModuleInit {
       .where("fi.instrument_type IN ('FUT', 'CE', 'PE')")
       .andWhere('fi.is_active = true')
       .andWhere('UPPER(fi.name) LIKE :q', { q: `${normalized}%` });
-    if (scope === 'nse') qb.andWhere("fi.exchange IN ('NFO', 'CDS', 'BFO', 'NSE')");
+    if (scope === 'nse')
+      qb.andWhere("fi.exchange IN ('NFO', 'CDS', 'BFO', 'NSE')");
     else if (scope === 'mcx') qb.andWhere("fi.exchange = 'MCX'");
     qb.groupBy('fi.name').limit(lim * 4);
     const rows = await qb.getRawMany<{ name: string; exchange: string }>();
@@ -1274,36 +1439,59 @@ export class FalconInstrumentService implements OnModuleInit {
     total: number;
   }> {
     const qb = this.falconInstrumentRepo.createQueryBuilder('fi');
-    qb.where("fi.exchange = 'MCX'").andWhere("fi.instrument_type IN ('CE', 'PE')");
+    qb.where("fi.exchange = 'MCX'").andWhere(
+      "fi.instrument_type IN ('CE', 'PE')",
+    );
     if (filters?.symbol) {
       const sym = filters.symbol.toUpperCase();
       qb.andWhere('UPPER(fi.name) = :sym', { sym });
     }
-    if (filters?.option_type) qb.andWhere('fi.instrument_type = :ot', { ot: filters.option_type });
-    if (filters?.expiry_from) qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
-    if (filters?.expiry_to) qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
-    if (typeof filters?.strike_min === 'number') qb.andWhere('fi.strike >= :smin', { smin: filters.strike_min });
-    if (typeof filters?.strike_max === 'number') qb.andWhere('fi.strike <= :smax', { smax: filters.strike_max });
-    if (typeof filters?.is_active === 'boolean') qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
+    if (filters?.option_type)
+      qb.andWhere('fi.instrument_type = :ot', { ot: filters.option_type });
+    if (filters?.expiry_from)
+      qb.andWhere('fi.expiry >= :ef', { ef: filters.expiry_from });
+    if (filters?.expiry_to)
+      qb.andWhere('fi.expiry <= :et', { et: filters.expiry_to });
+    if (typeof filters?.strike_min === 'number')
+      qb.andWhere('fi.strike >= :smin', { smin: filters.strike_min });
+    if (typeof filters?.strike_max === 'number')
+      qb.andWhere('fi.strike <= :smax', { smax: filters.strike_max });
+    if (typeof filters?.is_active === 'boolean')
+      qb.andWhere('fi.is_active = :ia', { ia: filters.is_active });
     const total = await qb.getCount();
     const limit = Math.max(1, Math.min(1000, filters?.limit ?? 100));
     const offset = Math.max(0, filters?.offset ?? 0);
-    qb.orderBy('fi.expiry', 'ASC').addOrderBy('fi.strike', 'ASC').limit(limit).offset(offset);
+    qb.orderBy('fi.expiry', 'ASC')
+      .addOrderBy('fi.strike', 'ASC')
+      .limit(limit)
+      .offset(offset);
     const items = await qb.getMany();
-    let withLive = items.map((i) => ({ ...i, last_price_live: null as number | null }));
+    let withLive = items.map((i) => ({
+      ...i,
+      last_price_live: null as number | null,
+    }));
     try {
       const tokens = items.map((i) => String(i.instrument_token));
       if (tokens.length) {
         const ltp = await this.falconAdapter.getLTP(tokens);
         withLive = items.map((i) => {
           const lp = Number(ltp?.[String(i.instrument_token)]?.last_price);
-          return { ...i, last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null };
+          return {
+            ...i,
+            last_price_live: Number.isFinite(lp) && lp > 0 ? lp : null,
+          };
         });
         if (filters?.ltp_only) {
-          withLive = withLive.filter((x) => Number.isFinite(x.last_price_live) && (x.last_price_live as any) > 0);
+          withLive = withLive.filter(
+            (x) =>
+              Number.isFinite(x.last_price_live) &&
+              (x.last_price_live as any) > 0,
+          );
         }
       }
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
     return { items: withLive, total };
   }
 
@@ -1322,7 +1510,9 @@ export class FalconInstrumentService implements OnModuleInit {
     const lim = Math.max(1, Math.min(200, limit));
     const rows = await this.falconInstrumentRepo
       .createQueryBuilder('fi')
-      .where('fi.tradingsymbol IN (:...syms)', { syms: FalconInstrumentService.POPULAR_SYMBOLS })
+      .where('fi.tradingsymbol IN (:...syms)', {
+        syms: FalconInstrumentService.POPULAR_SYMBOLS,
+      })
       .andWhere('fi.is_active = true')
       .andWhere("fi.instrument_type = 'EQ'")
       .orderBy('fi.tradingsymbol', 'ASC')
@@ -1333,7 +1523,9 @@ export class FalconInstrumentService implements OnModuleInit {
     try {
       const tokens = rows.map((r) => String(r.instrument_token));
       if (tokens.length) ltpMap = await this.falconAdapter.getLTP(tokens);
-    } catch { /* optional */ }
+    } catch {
+      /* optional */
+    }
 
     const items = rows.map((r) => {
       const lp = Number(ltpMap?.[String(r.instrument_token)]?.last_price);
@@ -1359,7 +1551,9 @@ export class FalconInstrumentService implements OnModuleInit {
       .where('is_active = false')
       .execute();
     const deleted = result.affected ?? 0;
-    this.logger.log(`[FalconInstrumentService] Deleted ${deleted} inactive instruments`);
+    this.logger.log(
+      `[FalconInstrumentService] Deleted ${deleted} inactive instruments`,
+    );
     return { deleted };
   }
 
@@ -1369,7 +1563,9 @@ export class FalconInstrumentService implements OnModuleInit {
     instrument_type?: string,
   ): Promise<{ deleted: number }> {
     if (!exchange && !instrument_type) {
-      throw new Error('At least one filter required: exchange or instrument_type');
+      throw new Error(
+        'At least one filter required: exchange or instrument_type',
+      );
     }
     const qb = this.falconInstrumentRepo
       .createQueryBuilder()
@@ -1377,8 +1573,14 @@ export class FalconInstrumentService implements OnModuleInit {
       .from(FalconInstrument);
     const conditions: string[] = [];
     const params: Record<string, string> = {};
-    if (exchange) { conditions.push('exchange = :ex'); params.ex = exchange; }
-    if (instrument_type) { conditions.push('instrument_type = :it'); params.it = instrument_type; }
+    if (exchange) {
+      conditions.push('exchange = :ex');
+      params.ex = exchange;
+    }
+    if (instrument_type) {
+      conditions.push('instrument_type = :it');
+      params.it = instrument_type;
+    }
     qb.where(conditions.join(' AND '), params);
     const result = await qb.execute();
     const deleted = result.affected ?? 0;
@@ -1398,7 +1600,11 @@ export class FalconInstrumentService implements OnModuleInit {
       'falcon:stats',
     ];
     for (const key of keys) {
-      try { await this.redis.del(key); } catch { /* non-fatal */ }
+      try {
+        await this.redis.del(key);
+      } catch {
+        /* non-fatal */
+      }
     }
     this.logger.log('[FalconInstrumentService] Cleared Falcon cache keys');
   }
@@ -1409,9 +1615,15 @@ export class FalconInstrumentService implements OnModuleInit {
     try {
       const cached = await this.redis.get<any>(key);
       if (cached) return cached;
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
     const stats = await this.getFalconInstrumentStats();
-    try { await this.redis.set(key, stats, 60); } catch { /* non-fatal */ }
+    try {
+      await this.redis.set(key, stats, 60);
+    } catch {
+      /* non-fatal */
+    }
     return stats;
   }
 
@@ -1428,29 +1640,154 @@ export class FalconInstrumentService implements OnModuleInit {
     const jobId = randomUUID();
     const key = `falcon:sync:job:${jobId}`;
     try {
-      await this.redis.set(key, { status: 'started', exchange: exchange || 'all', ts: Date.now() }, 3600);
-    } catch { /* non-fatal */ }
+      await this.redis.set(
+        key,
+        { status: 'started', exchange: exchange || 'all', ts: Date.now() },
+        3600,
+      );
+    } catch {
+      /* non-fatal */
+    }
     setImmediate(async () => {
       try {
-        await this.redis.set(key, { status: 'running', ts: Date.now() }, 3600).catch(() => { /* noop */ });
+        await this.redis
+          .set(key, { status: 'running', ts: Date.now() }, 3600)
+          .catch(() => {
+            /* noop */
+          });
         const summary = await this.syncFalconInstruments(
           exchange,
           undefined,
           async (p) => {
-            try { await this.redis.set(key, { status: 'running', progress: p, ts: Date.now() }, 3600); } catch { /* noop */ }
+            try {
+              await this.redis.set(
+                key,
+                { status: 'running', progress: p, ts: Date.now() },
+                3600,
+              );
+            } catch {
+              /* noop */
+            }
           },
         );
-        await this.redis.set(key, { status: 'completed', summary, ts: Date.now() }, 3600).catch(() => { /* noop */ });
+        await this.redis
+          .set(key, { status: 'completed', summary, ts: Date.now() }, 3600)
+          .catch(() => {
+            /* noop */
+          });
       } catch (e: any) {
-        await this.redis.set(key, { status: 'failed', error: e?.message || 'unknown', ts: Date.now() }, 3600).catch(() => { /* noop */ });
+        await this.redis
+          .set(
+            key,
+            {
+              status: 'failed',
+              error: e?.message || 'unknown',
+              ts: Date.now(),
+            },
+            3600,
+          )
+          .catch(() => {
+            /* noop */
+          });
       }
     });
-    return { success: true, jobId, message: 'Sync job started', timestamp: new Date().toISOString() };
+    return {
+      success: true,
+      jobId,
+      message: 'Sync job started',
+      timestamp: new Date().toISOString(),
+    };
   }
 
   // =====================================================================
   // End Vayu-parity additions
   // =====================================================================
+
+  /**
+   * Enrich items with UIR fields using the in-memory registry — O(1), synchronous, zero DB hits.
+   * Applied at the return boundary of every public read method.
+   */
+  public enrichArrayWithUir<T extends { instrument_token: number }>(
+    items: T[],
+  ): Array<T & { uir_id: number | null; canonical_symbol: string | null }> {
+    return this.enrichWithUir(items);
+  }
+
+  /**
+   * Public UIR enrichment for single Falcon instrument.
+   */
+  public enrichSingleWithUir<T extends { instrument_token: number }>(
+    item: T,
+  ): T & { uir_id: number | null; canonical_symbol: string | null } {
+    return this.enrichWithUir([item])[0];
+  }
+
+  /**
+   * Public UIR enrichment for market data records (keyed by token string).
+   * Used for LTP, Quote, OHLC responses.
+   */
+  public enrichMarketDataRecord<T>(
+    data: Record<string, T>,
+  ): Record<
+    string,
+    T & { uir_id: number | null; canonical_symbol: string | null }
+  > {
+    const out: Record<
+      string,
+      T & { uir_id: number | null; canonical_symbol: string | null }
+    > = {};
+    for (const [token, val] of Object.entries(data)) {
+      const uirId = this.instrumentRegistry.resolveProviderToken('kite', token);
+      const canonical_symbol =
+        uirId != null
+          ? (this.instrumentRegistry.getCanonicalSymbol(uirId) ?? null)
+          : null;
+      out[token] = {
+        ...(val as any),
+        uir_id: uirId ?? null,
+        canonical_symbol,
+      };
+    }
+    return out;
+  }
+
+  private enrichWithUir<T extends { instrument_token: number }>(
+    items: T[],
+  ): Array<T & { uir_id: number | null; canonical_symbol: string | null }> {
+    return items.map((item) => {
+      const uirId = this.instrumentRegistry.resolveProviderToken(
+        'kite',
+        item.instrument_token,
+      );
+      const canonical_symbol =
+        uirId != null
+          ? (this.instrumentRegistry.getCanonicalSymbol(uirId) ?? null)
+          : null;
+      return { ...item, uir_id: uirId ?? null, canonical_symbol };
+    });
+  }
+
+  /** UIR coverage diagnostic: how many active Falcon instruments have a UIR mapping. */
+  async getUirCoverage(): Promise<{
+    total_active: number;
+    mapped_count: number;
+    unmapped_count: number;
+    coverage_pct: number;
+  }> {
+    const total_active = await this.falconInstrumentRepo.count({
+      where: { is_active: true } as any,
+    });
+    const [row] = await this.mappingRepo.query(
+      `SELECT COUNT(*)::int AS count FROM instrument_mappings WHERE provider = 'kite' AND uir_id IS NOT NULL`,
+    );
+    const mapped_count = Number(row?.count ?? 0);
+    const unmapped_count = Math.max(0, total_active - mapped_count);
+    const coverage_pct =
+      total_active > 0
+        ? Math.round((mapped_count / total_active) * 1000) / 10
+        : 0;
+    return { total_active, mapped_count, unmapped_count, coverage_pct };
+  }
 
   private buildDescription(i: FalconInstrument): string {
     const ex = (i.exchange || '').toUpperCase();
@@ -1487,7 +1824,11 @@ export class FalconInstrumentService implements OnModuleInit {
     if (it === 'FUT' || i.segment?.toUpperCase().includes('FUT')) {
       return `${ex} ${sym} ${ddMonYYYY} FUT`.trim();
     }
-    if (it === 'CE' || it === 'PE' || i.segment?.toUpperCase().includes('OPT')) {
+    if (
+      it === 'CE' ||
+      it === 'PE' ||
+      i.segment?.toUpperCase().includes('OPT')
+    ) {
       const strike = Number(i.strike) || 0;
       return `${ex} ${sym} ${ddMonYYYY} ${strike} ${it}`.trim();
     }

@@ -103,14 +103,18 @@ export class VortexInstrumentCleanupService {
       const autoCleanup = filters.auto_cleanup || false;
       const dryRun = filters.dry_run !== false;
       const probeAttempts = Math.max(1, Number(filters.probe_attempts ?? 3));
-      const probeIntervalMs = Math.max(1000, Number(filters.probe_interval_ms ?? 1000));
+      const probeIntervalMs = Math.max(
+        1000,
+        Number(filters.probe_interval_ms ?? 1000),
+      );
       const requireConsensus = Math.max(
         1,
         Math.min(Number(filters.require_consensus ?? 2), probeAttempts),
       );
       const safeCleanup = !(filters.safe_cleanup === false);
 
-      const queryBuilder = this.vortexInstrumentRepo.createQueryBuilder('instrument');
+      const queryBuilder =
+        this.vortexInstrumentRepo.createQueryBuilder('instrument');
 
       if (filters.exchange) {
         queryBuilder.andWhere('instrument.exchange = :exchange', {
@@ -156,7 +160,9 @@ export class VortexInstrumentCleanupService {
         }
       }
 
-      queryBuilder.andWhere('instrument.is_active = :is_active', { is_active: true });
+      queryBuilder.andWhere('instrument.is_active = :is_active', {
+        is_active: true,
+      });
 
       let allInstruments = await queryBuilder.getMany();
       if (filters?.limit && Number(filters.limit) > 0) {
@@ -219,10 +225,15 @@ export class VortexInstrumentCleanupService {
       const reasonCounts: Record<string, number> = {};
       let totalPairsIncluded = 0;
       let totalInvalidExchange = 0;
-      let totalMissingFromResponse = 0;
+      const totalMissingFromResponse = 0;
       let totalIndeterminate = 0;
 
-      const allowedExchanges = new Set(['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO']);
+      const allowedExchanges = new Set([
+        'NSE_EQ',
+        'NSE_FO',
+        'NSE_CUR',
+        'MCX_FO',
+      ]);
 
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
         const batch = batches[batchIndex];
@@ -247,7 +258,9 @@ export class VortexInstrumentCleanupService {
           }> = [];
 
           for (const instrument of batch) {
-            const normalizedEx = normalizeVortexExchange(instrument.exchange || '');
+            const normalizedEx = normalizeVortexExchange(
+              instrument.exchange || '',
+            );
             if (normalizedEx && allowedExchanges.has(normalizedEx)) {
               pairs.push({
                 exchange: normalizedEx as 'NSE_EQ',
@@ -273,7 +286,8 @@ export class VortexInstrumentCleanupService {
               });
               invalidLtpCount++;
               totalInvalidExchange++;
-              reasonCounts.invalid_exchange = (reasonCounts.invalid_exchange || 0) + 1;
+              reasonCounts.invalid_exchange =
+                (reasonCounts.invalid_exchange || 0) + 1;
               this.logger.debug(
                 `[VortexInstrumentCleanupService] Instrument ${instrument.token} invalid exchange: ${instrument.exchange}`,
               );
@@ -299,13 +313,16 @@ export class VortexInstrumentCleanupService {
 
           const pairKeyToInstrument = new Map<string, VortexInstrument>();
           for (const instrument of batch) {
-            const normalizedEx = normalizeVortexExchange(instrument.exchange || '');
+            const normalizedEx = normalizeVortexExchange(
+              instrument.exchange || '',
+            );
             if (normalizedEx && allowedExchanges.has(normalizedEx)) {
               const pairKey = `${normalizedEx}-${instrument.token}`;
               pairKeyToInstrument.set(pairKey, instrument);
             }
           }
-          const tokenState: Record<number, { hits: number; probes: number }> = {};
+          const tokenState: Record<number, { hits: number; probes: number }> =
+            {};
           for (const instrument of batch) {
             tokenState[instrument.token] = { hits: 0, probes: 0 };
           }
@@ -322,12 +339,18 @@ export class VortexInstrumentCleanupService {
             const keysCount = Object.keys(ltpResults || {}).length;
             if (keysCount === 0) attemptHadEmpty = true;
             for (const instrument of batch) {
-              const normalizedEx = normalizeVortexExchange(instrument.exchange || '');
-              if (!normalizedEx || !allowedExchanges.has(normalizedEx)) continue;
+              const normalizedEx = normalizeVortexExchange(
+                instrument.exchange || '',
+              );
+              if (!normalizedEx || !allowedExchanges.has(normalizedEx))
+                continue;
               const pairKey = `${normalizedEx}-${instrument.token}`;
               tokenState[instrument.token].probes += 1;
               const ltpData: { last_price?: number } | undefined =
-                (ltpResults && (ltpResults as Record<string, { last_price?: number }>)[pairKey]) ||
+                (ltpResults &&
+                  (ltpResults as Record<string, { last_price?: number }>)[
+                    pairKey
+                  ]) ||
                 undefined;
               const lastPrice = ltpData?.last_price;
               if (Number.isFinite(lastPrice) && lastPrice > 0) {
@@ -339,9 +362,14 @@ export class VortexInstrumentCleanupService {
             }
           }
           for (const instrument of batch) {
-            const normalizedEx = normalizeVortexExchange(instrument.exchange || '');
+            const normalizedEx = normalizeVortexExchange(
+              instrument.exchange || '',
+            );
             if (!normalizedEx || !allowedExchanges.has(normalizedEx)) continue;
-            const state = tokenState[instrument.token] || { hits: 0, probes: 0 };
+            const state = tokenState[instrument.token] || {
+              hits: 0,
+              probes: 0,
+            };
             if (state.hits > 0) {
               validLtpCount++;
               continue;
@@ -362,7 +390,8 @@ export class VortexInstrumentCleanupService {
                 reason: 'indeterminate',
                 ltp_response: null,
               });
-              reasonCounts.indeterminate = (reasonCounts.indeterminate || 0) + 1;
+              reasonCounts.indeterminate =
+                (reasonCounts.indeterminate || 0) + 1;
             } else if (state.probes >= requireConsensus) {
               invalidLtpCount++;
               invalidInstruments.push({
@@ -396,7 +425,8 @@ export class VortexInstrumentCleanupService {
                 reason: 'indeterminate',
                 ltp_response: null,
               });
-              reasonCounts.indeterminate = (reasonCounts.indeterminate || 0) + 1;
+              reasonCounts.indeterminate =
+                (reasonCounts.indeterminate || 0) + 1;
             }
           }
           onProgress?.({
@@ -411,7 +441,10 @@ export class VortexInstrumentCleanupService {
           });
         } catch (batchError: unknown) {
           errorCount++;
-          const msg = batchError instanceof Error ? batchError.message : String(batchError);
+          const msg =
+            batchError instanceof Error
+              ? batchError.message
+              : String(batchError);
           this.logger.error(
             `[VortexInstrumentCleanupService] Error processing batch ${batchIndex + 1}`,
             batchError,
@@ -448,7 +481,7 @@ export class VortexInstrumentCleanupService {
       );
 
       let deactivatedCount = 0;
-      let removedCount = 0;
+      const removedCount = 0;
 
       if (autoCleanup && !dryRun && invalidInstruments.length > 0) {
         const candidates = safeCleanup
@@ -539,20 +572,27 @@ export class VortexInstrumentCleanupService {
         },
       };
     } catch (error) {
-      this.logger.error('[VortexInstrumentCleanupService] Validation failed', error);
+      this.logger.error(
+        '[VortexInstrumentCleanupService] Validation failed',
+        error,
+      );
       throw error;
     }
   }
 
   async deleteInactiveInstruments(): Promise<number> {
     try {
-      this.logger.log('[VortexInstrumentCleanupService] Starting deletion of inactive instruments');
+      this.logger.log(
+        '[VortexInstrumentCleanupService] Starting deletion of inactive instruments',
+      );
 
       const count = await this.vortexInstrumentRepo.count({
         where: { is_active: false },
       });
 
-      this.logger.log(`[VortexInstrumentCleanupService] Found ${count} inactive instruments to delete`);
+      this.logger.log(
+        `[VortexInstrumentCleanupService] Found ${count} inactive instruments to delete`,
+      );
 
       if (count === 0) {
         return 0;
@@ -588,10 +628,15 @@ export class VortexInstrumentCleanupService {
   }): Promise<number> {
     const { exchange, instrument_name, instrument_type } = opts || {};
     if (!exchange && !instrument_name && !instrument_type) {
-      throw new Error('At least one filter (exchange or instrument_name) is required');
+      throw new Error(
+        'At least one filter (exchange or instrument_name) is required',
+      );
     }
     try {
-      const qb = this.vortexInstrumentRepo.createQueryBuilder().delete().from(VortexInstrument as any);
+      const qb = this.vortexInstrumentRepo
+        .createQueryBuilder()
+        .delete()
+        .from(VortexInstrument as any);
       const whereParts: string[] = [];
       const params: Record<string, unknown> = {};
       if (exchange) {
@@ -622,15 +667,21 @@ export class VortexInstrumentCleanupService {
       }
       const result = await qb.execute();
       const deleted = result.affected || 0;
-      this.logger.log('[VortexInstrumentCleanupService] deleteInstrumentsByFilter', {
-        exchange,
-        instrument_name,
-        instrument_type,
-        deleted,
-      });
+      this.logger.log(
+        '[VortexInstrumentCleanupService] deleteInstrumentsByFilter',
+        {
+          exchange,
+          instrument_name,
+          instrument_type,
+          deleted,
+        },
+      );
       return deleted;
     } catch (error) {
-      this.logger.error('[VortexInstrumentCleanupService] deleteInstrumentsByFilter failed', error);
+      this.logger.error(
+        '[VortexInstrumentCleanupService] deleteInstrumentsByFilter failed',
+        error,
+      );
       throw error;
     }
   }

@@ -2,11 +2,11 @@ import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm';
 
 /**
  * Migration: Add description field to vortex_instruments table
- * 
+ *
  * The description field provides a human-readable description of each instrument
  * for better documentation and debugging. It's computed from exchange, symbol,
  * instrument_name, expiry_date, strike_price, and option_type.
- * 
+ *
  * Examples:
  * - "NSE_EQ RELIANCE EQ"
  * - "NSE_FO NIFTY 25JAN2024 22000 CE"
@@ -59,4 +59,3 @@ export class AddDescriptionToVortexInstruments1700000000003
     }
   }
 }
-
