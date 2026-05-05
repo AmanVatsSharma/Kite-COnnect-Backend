@@ -53,8 +53,9 @@ export class FalconController {
     private readonly redis: RedisService,
   ) {}
 
-  @Get('instruments/instrument-statistics')
-  async stats() {
+  @Get('instruments/stats')
+  @ApiOperation({ summary: 'Falcon instrument statistics' })
+  async getFalconInstrumentsStats() {
     try {
       const data = await this.falconInstruments.getFalconInstrumentStats();
       return { success: true, data };
@@ -72,7 +73,7 @@ export class FalconController {
   }
 
   @Get('stats')
-  @ApiOperation({ summary: 'Falcon instrument statistics' })
+  @ApiOperation({ summary: 'Falcon instrument statistics (alternative path)' })
   async getFalconStatsDirect() {
     try {
       const data = await this.falconInstruments.getFalconInstrumentStats();
