@@ -346,7 +346,7 @@ export class FalconController {
       const token = Number(tokenRaw);
       if (!Number.isFinite(token)) {
         throw new HttpException(
-          { success: false, message: 'Invalid token' },
+          { success: false, message: `Invalid token: ${tokenRaw}` },
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -1070,7 +1070,7 @@ export class FalconController {
       const token = Number(tokenRaw);
       if (!Number.isFinite(token)) {
         throw new HttpException(
-          { success: false, message: 'Invalid token' },
+          { success: false, message: `Invalid token: ${tokenRaw}` },
           HttpStatus.BAD_REQUEST,
         );
       }
