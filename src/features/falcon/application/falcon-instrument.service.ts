@@ -1798,9 +1798,9 @@ export class FalconInstrumentService implements OnModuleInit {
           // NFO/MCX symbols usually follow: {SYMBOL}{YY}{MONTH}{STRIKE}{TYPE}
           // e.g., "RELIANCE24MAYFUT" -> "RELIANCE", "NIFTY2452322000CE" -> "NIFTY"
           // We look for the first occurrence of a digit to find the end of the base symbol.
-          const digitIndex = tradingsymbol.search(/\d/);
-          if (digitIndex > 0) {
-            baseSymbol = tradingsymbol.substring(0, digitIndex);
+          const digitMatch = tradingsymbol.match(/\d/);
+          if (digitMatch && digitMatch.index !== undefined && digitMatch.index > 0) {
+            baseSymbol = tradingsymbol.substring(0, digitMatch.index);
           }
         }
 
