@@ -1022,7 +1022,7 @@ export class FalconInstrumentService implements OnModuleInit {
     } catch {
       /* optional */
     }
-    return { items: withLive, total };
+    return { items: this.enrichWithUir(withLive), total };
   }
 
   async getCommodities(filters: {
@@ -1078,7 +1078,7 @@ export class FalconInstrumentService implements OnModuleInit {
     } catch {
       /* optional */
     }
-    return { items: withLive, total };
+    return { items: this.enrichWithUir(withLive), total };
   }
 
   async searchTickers(q: string, limit = 20, ltp_only = false) {
@@ -1117,7 +1117,7 @@ export class FalconInstrumentService implements OnModuleInit {
           ? Number.isFinite(x.last_price) && (x.last_price as any) > 0
           : true,
       );
-    return out;
+    return this.enrichWithUir(out);
   }
 
   async getTickerBySymbol(symbol: string) {
@@ -1139,7 +1139,7 @@ export class FalconInstrumentService implements OnModuleInit {
     } catch {
       /* optional */
     }
-    return {
+    const tickerData = {
       instrument_token: row.instrument_token,
       symbol: row.tradingsymbol,
       exchange: row.exchange,
@@ -1147,6 +1147,7 @@ export class FalconInstrumentService implements OnModuleInit {
       description: row.description,
       last_price,
     };
+    return this.enrichWithUir([tickerData])[0];
   }
 
   async validateFalconInstruments(opts: {
@@ -1270,13 +1271,15 @@ export class FalconInstrumentService implements OnModuleInit {
       /* non-fatal */
     }
 
-    const rows = await this.falconInstrumentRepo
+    const rawRows = await this.falconInstrumentRepo
       .createQueryBuilder('fi')
       .where('UPPER(fi.name) = :sym', { sym })
       .andWhere("fi.instrument_type IN ('CE', 'PE')")
       .orderBy('fi.expiry', 'ASC')
       .addOrderBy('fi.strike', 'ASC')
       .getMany();
+
+    const rows = this.enrichWithUir(rawRows);
 
     let ltpMap: Record<string, any> = {};
     try {
@@ -1312,6 +1315,8 @@ export class FalconInstrumentService implements OnModuleInit {
         lot_size: row.lot_size,
         tick_size: row.tick_size,
         last_price_live,
+        uir_id: row.uir_id,
+        canonical_symbol: row.canonical_symbol,
       };
     }
 
@@ -1382,7 +1387,7 @@ export class FalconInstrumentService implements OnModuleInit {
       };
     });
     if (ltpOnly) withLive = withLive.filter((i) => i.last_price_live !== null);
-    return { items: withLive, total };
+    return { items: this.enrichWithUir(withLive), total };
   }
 
   /**
@@ -1501,21 +1506,11 @@ export class FalconInstrumentService implements OnModuleInit {
     } catch {
       /* optional */
     }
-    return { items: withLive, total };
+    return { items: this.enrichWithUir(withLive), total };
   }
 
-  /** Popular hardcoded symbols — looks them up by tradingsymbol (EQ instruments) + enriches with LTP. */
-  async getPopularInstruments(limit = 50): Promise<{
-    items: Array<{
-      instrument_token: number;
-      tradingsymbol: string;
-      name: string;
-      exchange: string;
-      instrument_type: string;
-      last_price_live: number | null;
-      description: string;
-    }>;
-  }> {
+  /** Popular hardcoded symbols — looks them up by tradingsymbol (EQ instruments) + enriches with LTP + UIR. */
+  async getPopularInstruments(limit = 50) {
     const lim = Math.max(1, Math.min(200, limit));
     const rows = await this.falconInstrumentRepo
       .createQueryBuilder('fi')
@@ -1548,7 +1543,7 @@ export class FalconInstrumentService implements OnModuleInit {
         description: r.description,
       };
     });
-    return { items };
+    return { items: this.enrichWithUir(items) };
   }
 
   /** Permanently delete all instruments where is_active = false. */

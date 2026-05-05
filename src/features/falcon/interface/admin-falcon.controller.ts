@@ -6,7 +6,7 @@
  *   secured by x-admin-token so the admin dashboard can call it directly.
  * @author BharatERP
  * @created 2026-04-14
- * @updated 2026-04-14 — added ticker restart/status/shards, instruments export/resolve, batch historical, options chain, cache flush
+ * @updated 2026-05-05 — added GET instruments/uir-coverage diagnostic endpoint
  */
 import {
   Controller,
@@ -398,6 +398,26 @@ export class AdminFalconController {
         {
           success: false,
           message: 'Symbol resolution failed',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('instruments/uir-coverage')
+  @ApiOperation({
+    summary: 'UIR coverage diagnostic: how many active Falcon instruments have a UIR mapping',
+  })
+  async uirCoverage() {
+    try {
+      const data = await this.instruments.getUirCoverage();
+      return { success: true, data };
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'UIR coverage check failed',
           error: (error as any)?.message || 'unknown',
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
