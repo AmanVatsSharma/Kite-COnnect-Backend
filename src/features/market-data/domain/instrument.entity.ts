@@ -15,7 +15,7 @@ export class Instrument {
   @PrimaryColumn()
   instrument_token: number;
 
-  @Column()
+  @Column({ nullable: true })
   exchange_token: number;
 
   @Column()
