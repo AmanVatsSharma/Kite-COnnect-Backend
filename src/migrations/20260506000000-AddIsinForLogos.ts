@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddIsinForLogos20260506 implements MigrationInterface {
+export class AddIsinForLogos20260506000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `ALTER TABLE "falcon_instruments" ADD COLUMN "isin" varchar(16)`,
