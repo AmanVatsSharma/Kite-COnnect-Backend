@@ -245,38 +245,6 @@ export class FalconController {
     }
   }
 
-  @Get('instruments/:token')
-  async getInstrumentByToken(@Param('token') tokenRaw?: string) {
-    try {
-      const token = Number(tokenRaw);
-      if (!Number.isFinite(token)) {
-        throw new HttpException(
-          { success: false, message: 'Invalid token' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      const instrument =
-        await this.falconInstruments.getFalconInstrumentByToken(token);
-      if (!instrument) {
-        throw new HttpException(
-          { success: false, message: 'Instrument not found' },
-          HttpStatus.NOT_FOUND,
-        );
-      }
-      return { success: true, data: instrument };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Failed to fetch Falcon instrument',
-          error: (error as any)?.message || 'unknown',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
   @Get('instruments/search')
   async search(@Query('q') q?: string, @Query('limit') limitRaw?: string) {
     try {
@@ -319,6 +287,84 @@ export class FalconController {
         {
           success: false,
           message: 'Falcon stats failed',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('instruments/popular')
+  @ApiOperation({
+    summary: 'Popular Falcon instruments (hardcoded list + live LTP)',
+  })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async popularInstruments(@Query('limit') limitRaw?: string) {
+    try {
+      const limit = parseInt(String(limitRaw || '50')) || 50;
+      const result = await this.falconInstruments.getPopularInstruments(limit);
+      return { success: true, ...result };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Falcon popular instruments failed',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('instruments/cached-stats')
+  @ApiOperation({
+    summary: 'Falcon instrument stats (Redis-cached, faster than /stats)',
+  })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async cachedStats() {
+    try {
+      const data = await this.falconInstruments.getCachedStats();
+      return { success: true, data };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Falcon cached stats failed',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('instruments/:token')
+  async getInstrumentByToken(@Param('token') tokenRaw?: string) {
+    try {
+      const token = Number(tokenRaw);
+      if (!Number.isFinite(token)) {
+        throw new HttpException(
+          { success: false, message: 'Invalid token' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const instrument =
+        await this.falconInstruments.getFalconInstrumentByToken(token);
+      if (!instrument) {
+        throw new HttpException(
+          { success: false, message: 'Instrument not found' },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      return { success: true, data: instrument };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Failed to fetch Falcon instrument',
           error: (error as any)?.message || 'unknown',
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -1258,52 +1304,6 @@ export class FalconController {
         {
           success: false,
           message: 'Falcon MCX options failed',
-          error: (error as any)?.message || 'unknown',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Get('instruments/popular')
-  @ApiOperation({
-    summary: 'Popular Falcon instruments (hardcoded list + live LTP)',
-  })
-  @ApiQuery({ name: 'limit', required: false, example: 50 })
-  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
-  async popularInstruments(@Query('limit') limitRaw?: string) {
-    try {
-      const limit = parseInt(String(limitRaw || '50')) || 50;
-      const result = await this.falconInstruments.getPopularInstruments(limit);
-      return { success: true, ...result };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Falcon popular instruments failed',
-          error: (error as any)?.message || 'unknown',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Get('instruments/cached-stats')
-  @ApiOperation({
-    summary: 'Falcon instrument stats (Redis-cached, faster than /stats)',
-  })
-  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
-  async cachedStats() {
-    try {
-      const data = await this.falconInstruments.getCachedStats();
-      return { success: true, data };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Falcon cached stats failed',
           error: (error as any)?.message || 'unknown',
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
