@@ -54,9 +54,15 @@ export class UniversalLtpService {
 
   async getUniversalLtp(ids: number[]): Promise<{
     success: true;
-    data: Record<string, { last_price: number | null }>;
+    data: Record<
+      string,
+      { last_price: number | null; canonical_symbol: string | null }
+    >;
   }> {
-    const result: Record<string, { last_price: number | null }> = {};
+    const result: Record<
+      string,
+      { last_price: number | null; canonical_symbol: string | null }
+    > = {};
 
     if (!ids?.length) return { success: true, data: result };
 

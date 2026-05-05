@@ -152,25 +152,11 @@ export class StockQuotesController {
       const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true';
 
       let quotes: any = {};
-      const provider = req.headers?.['x-provider'];
-
-      if (provider === 'falcon' || provider === 'kite') {
-        quotes = await this.stockService.getKiteQuotes(
-          instruments,
-          req.headers?.['x-api-key'] || req.query?.['api_key'],
-        );
-      } else if (provider === 'vortex' || provider === 'vayu') {
-        quotes = await this.stockService.getVortexQuotes(
-          instruments,
-          req.headers?.['x-api-key'] || req.query?.['api_key'],
-        );
-      } else {
-        quotes = await this.stockService.getQuotes(
-          instruments,
-          req.headers,
-          req.headers?.['x-api-key'] || req.query?.['api_key'],
-        );
-      }
+      quotes = await this.stockService.getQuotes(
+        instruments,
+        req.headers,
+        req.headers?.['x-api-key'] || req.query?.['api_key'],
+      );
 
       // Optional filtering: only include tokens with a valid last_price
       if (ltpOnly && quotes && typeof quotes === 'object') {
