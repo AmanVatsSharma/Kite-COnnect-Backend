@@ -96,14 +96,14 @@ export class FalconController {
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async health() {
     try {
-      const probe = await this.falconAdapter.getLTP(['26000']); // SBIN as a common example token
-      const ok = Number.isFinite(probe?.['26000']?.last_price as any);
+      const probe = await this.falconAdapter.getLTP(['738561']); // RELIANCE as a common example token
+      const ok = Number.isFinite(probe?.['738561']?.last_price as any);
       return {
         success: true,
         provider: 'falcon',
         httpOk: true,
         sample_ok: ok,
-        sample_token: '26000',
+        sample_token: '738561',
       };
     } catch (e: any) {
       return {
