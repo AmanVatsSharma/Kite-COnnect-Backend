@@ -1789,21 +1789,22 @@ export class FalconInstrumentService implements OnModuleInit {
 
       if (tradingsymbol) {
         let baseSymbol = tradingsymbol;
-        let suffix = 'NS'; // Default to NSE for logos as it's most common
+        let suffix = 'NS'; // Default to NSE for logos
 
         if (exchange === 'NSE' || exchange === 'BSE') {
           suffix = exchange === 'NSE' ? 'NS' : 'BO';
         } else if (exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO')) {
-          // Extract base symbol for derivatives (e.g., "RELIANCE24MAYFUT" -> "RELIANCE")
-          // Matches the alphabetical prefix before numbers (expiry/strike)
-          const match = tradingsymbol.match(/^([A-Z&]+)/);
-          if (match) {
-            baseSymbol = match[1];
+          // Extract base symbol for derivatives.
+          // NFO/MCX symbols usually follow: {SYMBOL}{YY}{MONTH}{STRIKE}{TYPE}
+          // e.g., "RELIANCE24MAYFUT" -> "RELIANCE", "NIFTY2452322000CE" -> "NIFTY"
+          // We look for the first occurrence of a digit to find the end of the base symbol.
+          const digitIndex = tradingsymbol.search(/\d/);
+          if (digitIndex > 0) {
+            baseSymbol = tradingsymbol.substring(0, digitIndex);
           }
         }
 
         // Only generate logo URLs for Equity, Options, and Futures
-        // Indices (NIFTY, BANKNIFTY) often don't have standard logos in this API
         logo_url = `https://financialmodelingprep.com/image-stock/${baseSymbol}.${suffix}.png`;
       } else if (isin) {
         // Fallback to Groww ISIN pattern if available
