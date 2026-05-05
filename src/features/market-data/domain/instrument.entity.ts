@@ -33,7 +33,7 @@ export class Instrument {
   @Column()
   strike: number;
 
-  @Column()
+  @Column('decimal', { precision: 10, scale: 4 })
   tick_size: number;
 
   @Column()

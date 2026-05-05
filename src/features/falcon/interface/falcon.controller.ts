@@ -53,26 +53,7 @@ export class FalconController {
     private readonly redis: RedisService,
   ) {}
 
-  @Get('stats')
-  @ApiOperation({ summary: 'Falcon instrument statistics' })
-  async getFalconStatsTop() {
-    try {
-      const data = await this.falconInstruments.getFalconInstrumentStats();
-      return { success: true, data };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        {
-          success: false,
-          message: 'Falcon stats failed',
-          error: (error as any)?.message || 'unknown',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Get('instruments/falcon-stats')
+  @Get('instruments/stats')
   async stats() {
     try {
       const data = await this.falconInstruments.getFalconInstrumentStats();
@@ -365,7 +346,7 @@ export class FalconController {
       const token = Number(tokenRaw);
       if (!Number.isFinite(token)) {
         throw new HttpException(
-          { success: false, message: `Invalid token: ${tokenRaw}` },
+          { success: false, message: 'Invalid token' },
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -1089,7 +1070,7 @@ export class FalconController {
       const token = Number(tokenRaw);
       if (!Number.isFinite(token)) {
         throw new HttpException(
-          { success: false, message: `Invalid token: ${tokenRaw}` },
+          { success: false, message: 'Invalid token' },
           HttpStatus.BAD_REQUEST,
         );
       }
