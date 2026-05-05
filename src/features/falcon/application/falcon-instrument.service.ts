@@ -1783,12 +1783,28 @@ export class FalconInstrumentService implements OnModuleInit {
       // Pattern: https://financialmodelingprep.com/image-stock/{SYMBOL}.{EXCHANGE_SUFFIX}.png
       // NSE: .NS, BSE: .BO
       let logo_url: string | null = null;
-      const symbol = (item as any).tradingsymbol || (item as any).symbol;
+      const tradingsymbol = (item as any).tradingsymbol || (item as any).symbol;
       const exchange = ((item as any).exchange || '').toUpperCase();
+      const segment = ((item as any).segment || '').toUpperCase();
 
-      if (symbol && (exchange === 'NSE' || exchange === 'BSE')) {
-        const suffix = exchange === 'NSE' ? 'NS' : 'BO';
-        logo_url = `https://financialmodelingprep.com/image-stock/${symbol}.${suffix}.png`;
+      if (tradingsymbol) {
+        let baseSymbol = tradingsymbol;
+        let suffix = 'NS'; // Default to NSE for logos as it's most common
+
+        if (exchange === 'NSE' || exchange === 'BSE') {
+          suffix = exchange === 'NSE' ? 'NS' : 'BO';
+        } else if (exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO')) {
+          // Extract base symbol for derivatives (e.g., "RELIANCE24MAYFUT" -> "RELIANCE")
+          // Matches the alphabetical prefix before numbers (expiry/strike)
+          const match = tradingsymbol.match(/^([A-Z&]+)/);
+          if (match) {
+            baseSymbol = match[1];
+          }
+        }
+
+        // Only generate logo URLs for Equity, Options, and Futures
+        // Indices (NIFTY, BANKNIFTY) often don't have standard logos in this API
+        logo_url = `https://financialmodelingprep.com/image-stock/${baseSymbol}.${suffix}.png`;
       } else if (isin) {
         // Fallback to Groww ISIN pattern if available
         logo_url = `https://assets-netstorage.groww.in/stock-assets/logos/${isin}.png`;
