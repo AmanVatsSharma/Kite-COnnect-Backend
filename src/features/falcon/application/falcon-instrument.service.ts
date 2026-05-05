@@ -255,6 +255,10 @@ export class FalconInstrumentService implements OnModuleInit {
       );
 
       const payloads: FalconInstrument[] = [];
+      if (rows.length > 0) {
+        this.logger.debug(`[FalconInstrumentService] First row keys: ${Object.keys(rows[0]).join(', ')}`);
+        this.logger.debug(`[FalconInstrumentService] First row ISIN: ${rows[0].isin}`);
+      }
       for (const row of rows) {
         const token = Number(row.instrument_token);
         if (!Number.isFinite(token)) continue;
