@@ -804,6 +804,12 @@ export class FalconInstrumentService implements OnModuleInit {
     by_type: Record<string, number>;
     active: number;
     inactive: number;
+    uir_coverage: {
+      total_active: number;
+      mapped_count: number;
+      unmapped_count: number;
+      coverage_pct: number;
+    };
   }> {
     const total = await this.falconInstrumentRepo.count();
     const active = await this.falconInstrumentRepo.count({
@@ -828,7 +834,10 @@ export class FalconInstrumentService implements OnModuleInit {
     );
     const by_type: Record<string, number> = {};
     by_type_rows.forEach((r) => (by_type[r.instrument_type] = Number(r.count)));
-    return { total, by_exchange, by_type, active, inactive };
+
+    const uir_coverage = await this.getFalconUirCoverage();
+
+    return { total, by_exchange, by_type, active, inactive, uir_coverage };
   }
 
   async getEquities(filters: {
