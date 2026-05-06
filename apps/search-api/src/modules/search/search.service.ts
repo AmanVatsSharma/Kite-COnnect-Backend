@@ -119,6 +119,7 @@ export const PUBLIC_ALWAYS_INCLUDED: readonly string[] = [
   'last_price',
   'priceStatus',
   'streamProvider',
+  'logo_url',
 ] as const;
 
 /**

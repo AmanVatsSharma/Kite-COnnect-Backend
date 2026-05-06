@@ -80,6 +80,7 @@ type PublicSearchResultItem = {
   priceStatus: 'live' | 'stale';
   /** Public brand name: 'falcon' | 'vayu' | 'atlas' | 'drift' (mapped from internal). */
   streamProvider?: 'falcon' | 'vayu' | 'atlas' | 'drift';
+  logo_url: string | null;
   // …plus any fields whitelisted via PUBLIC_FIELD_ALLOWLIST and selected by ?fields=
   [k: string]: unknown;
 };
@@ -96,6 +97,17 @@ function buildResponseRow(
 ): PublicSearchResultItem {
   const live = Number.isFinite(last_price) && (last_price ?? 0) > 0;
 
+  // Free logo pattern: Financial Modeling Prep (public asset)
+  let logo_url: string | null = null;
+  const exchange = (raw.exchange || '').toUpperCase();
+  const symbol = raw.symbol; // For NFO/MCX, this is already the underlying symbol in Meilisearch
+  
+  if (symbol && (exchange === 'NSE' || exchange === 'BSE' || exchange === 'NFO' || exchange === 'MCX' || (raw.segment || '').toUpperCase().includes('FO'))) {
+    // We default to .NS (NSE) for logos as it is the most reliable for Indian stocks
+    const suffix = exchange === 'BSE' ? 'BO' : 'NS';
+    logo_url = `https://financialmodelingprep.com/image-stock/${symbol}.${suffix}.png`;
+  }
+
   // Anchor fields — always present regardless of ?fields=
   const out: PublicSearchResultItem = {
     id: raw.id,
@@ -106,6 +118,7 @@ function buildResponseRow(
     streamProvider: raw.streamProvider
       ? internalToPublicProvider(raw.streamProvider)
       : undefined,
+    logo_url,
   };
 
   // Public allow-listed fields — included when no ?fields= filter, or when the
