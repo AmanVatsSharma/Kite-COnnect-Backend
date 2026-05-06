@@ -716,7 +716,38 @@ export function FalconPage() {
                   {(instruments.data?.instruments ?? []).map((i: FalconInstrument) => (
                     <tr key={i.instrument_token}>
                       <td><span className="cell-key" style={{ maxWidth: 80 }}>{i.instrument_token}</span></td>
-                      <td style={{ fontWeight: 600 }}>{i.tradingsymbol}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {i.logo_url ? (
+                            <img
+                              src={i.logo_url}
+                              alt=""
+                              style={{
+                                width: 14,
+                                height: 14,
+                                borderRadius: 2,
+                                objectFit: 'contain',
+                                background: '#fff',
+                                padding: 1,
+                              }}
+                              onError={(e) => {
+                                (e.target as any).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: 14,
+                                height: 14,
+                                borderRadius: '50%',
+                                background: 'var(--surface-hover)',
+                                border: '1px solid var(--border)',
+                              }}
+                            />
+                          )}
+                          {i.tradingsymbol}
+                        </div>
+                      </td>
                       <td className="cell-muted">{i.exchange}</td>
                       <td>
                         <span className="reason-pill" style={{ background: 'rgba(124,158,255,0.1)', color: 'var(--accent)', borderColor: 'rgba(124,158,255,0.2)' }}>

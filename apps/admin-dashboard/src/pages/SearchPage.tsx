@@ -358,7 +358,38 @@ export function SearchPage() {
               <tbody>
                 {results.map((item) => (
                   <tr key={item.id}>
-                    <td style={{ fontWeight: 600 }}>{item.symbol}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {item.logo_url ? (
+                          <img
+                            src={item.logo_url}
+                            alt=""
+                            style={{
+                              width: 14,
+                              height: 14,
+                              borderRadius: 2,
+                              objectFit: 'contain',
+                              background: '#fff',
+                              padding: 1,
+                            }}
+                            onError={(e) => {
+                              (e.target as any).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: 14,
+                              height: 14,
+                              borderRadius: '50%',
+                              background: 'var(--surface-hover)',
+                              border: '1px solid var(--border)',
+                            }}
+                          />
+                        )}
+                        {item.symbol}
+                      </div>
+                    </td>
                     <td className="cell-muted" style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.name || '—'}
                     </td>

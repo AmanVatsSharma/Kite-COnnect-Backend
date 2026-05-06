@@ -106,6 +106,7 @@ export interface FalconInstrument {
   exchange: string;
   is_active: boolean;
   description: string | null;
+  logo_url: string | null;
 }
 
 export interface FalconStats {

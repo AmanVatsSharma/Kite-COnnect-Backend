@@ -93,6 +93,7 @@ export type SearchResultItem = {
   tickSize?: number;
   isDerivative?: boolean;
   underlyingSymbol?: string;
+  logo_url?: string | null;
   /** Public brand name. Always present for both public and admin responses. */
   streamProvider?: PublicProviderName;
   /** Alias of `id` — explicit "subscribe with this id via /ws" hint. */
