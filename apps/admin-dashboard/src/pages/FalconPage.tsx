@@ -116,7 +116,7 @@ export function FalconPage() {
     setValidatingSession(true);
     try {
       await falcon.getFalconProfile();
-      notify.ok('Kite session valid');
+      notify.ok('Falcon session valid');
     } catch (e) {
       notify.error(`Session invalid: ${(e as Error).message}`);
     } finally {
@@ -317,7 +317,7 @@ export function FalconPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%', overflow: 'hidden' }}>
       {/* ── Page header ────────────────────────────────────────── */}
       <div className="page-head">
-        <h1>FALCON (KITE)</h1>
+        <h1>FALCON</h1>
         <div style={{ display: 'flex', gap: 12 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10 }}>
             <span className={`dot ${isConnected && !isDegraded ? 'dot--live' : isDegraded ? 'dot--warn' : 'dot--off'}`} />
@@ -375,7 +375,7 @@ export function FalconPage() {
           className="btn-xs"
           onClick={() => restartTickerMut.mutate()}
           disabled={restartTickerMut.isPending}
-          title="Restart Kite ticker (all shards)"
+          title="Restart Falcon ticker (all shards)"
         >
           {restartTickerMut.isPending ? '…' : '⟳ Restart Ticker'}
         </button>
@@ -384,7 +384,7 @@ export function FalconPage() {
           className="btn-xs"
           onClick={() => syncMut.mutate()}
           disabled={syncMut.isPending}
-          title="Sync Falcon instruments from Kite"
+          title="Sync Falcon instruments from Falcon"
         >
           {syncMut.isPending ? 'Syncing…' : '↓ Sync Instruments'}
         </button>
@@ -402,7 +402,7 @@ export function FalconPage() {
           className="btn-xs"
           onClick={() => void handleValidateSession()}
           disabled={validatingSession}
-          title="Validate Kite session via profile endpoint"
+          title="Validate Falcon session via profile endpoint"
         >
           {validatingSession ? 'Validating…' : '↺ Validate Session'}
         </button>
@@ -471,7 +471,7 @@ export function FalconPage() {
                   onClick={() => setProvMut.mutate()}
                   disabled={setProvMut.isPending}
                 >
-                  {setProvMut.isPending ? 'Activating…' : 'ACTIVATE FALCON (KITE)'}
+                  {setProvMut.isPending ? 'Activating…' : 'ACTIVATE FALCON'}
                 </button>
               </div>
               <div className="panel-section-title" style={{ marginTop: 8 }}>STREAM CONTROLS</div>
@@ -579,7 +579,7 @@ export function FalconPage() {
                     </div>
                   ))}
                   {shards.length === 0 && (
-                    <div style={{ fontSize: 10, color: 'var(--muted)', padding: '4px 0' }}>No shard data — Kite ticker not initialized.</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', padding: '4px 0' }}>No shard data — Falcon ticker not initialized.</div>
                   )}
                 </div>
               </div>

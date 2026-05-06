@@ -174,7 +174,7 @@ export function ProviderPage() {
             ))}
             <div className="panel-section-title" style={{ marginTop: 8 }}>SWITCH HTTP PROVIDER</div>
             <div className="provider-btns" style={{ marginTop: 4 }}>
-              {([['kite', 'FALCON (KITE)'], ['vortex', 'VAYU (VORTEX)']] as const).map(([p, label]) => (
+              {([['kite', 'FALCON'], ['vortex', 'VAYU']] as const).map(([p, label]) => (
                 <button key={p} type="button"
                   className={`provider-btn ${providerLabel.toLowerCase() === p ? 'provider-btn--active' : ''}`}
                   onClick={() => setProv.mutate(p)} disabled={setProv.isPending}>
@@ -221,7 +221,7 @@ export function ProviderPage() {
         {/* Falcon (Kite) credentials */}
         <div className="panel">
           <div className="panel__head">
-            <span className="panel__title">FALCON (KITE) CREDENTIALS</span>
+            <span className="panel__title">FALCON CREDENTIALS</span>
             {kd?.accessToken?.masked && <span className="cc-chip cc-chip--ok" style={{ fontSize: 9 }}>TOKEN SET</span>}
           </div>
           <div className="panel__body">
@@ -261,7 +261,7 @@ export function ProviderPage() {
         {/* Vayu (Vortex) credentials */}
         <div className="panel">
           <div className="panel__head">
-            <span className="panel__title">VAYU (VORTEX) CREDENTIALS</span>
+            <span className="panel__title">VAYU CREDENTIALS</span>
             {vd?.hasAccessToken && <span className="cc-chip cc-chip--ok" style={{ fontSize: 9 }}>TOKEN SET</span>}
           </div>
           <div className="panel__body">
@@ -304,7 +304,7 @@ export function ProviderPage() {
         {/* Massive (Polygon) credentials */}
         <div className="panel">
           <div className="panel__head">
-            <span className="panel__title">MASSIVE (POLYGON) CREDENTIALS</span>
+            <span className="panel__title">ATLAS CREDENTIALS</span>
             {md && !md.degraded && <span className="cc-chip cc-chip--ok" style={{ fontSize: 9 }}>READY</span>}
             {md?.degraded && <span className="cc-chip cc-chip--bad" style={{ fontSize: 9 }}>DEGRADED</span>}
           </div>
@@ -354,7 +354,7 @@ export function ProviderPage() {
             <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
               <button type="button" className="btn-xs" onClick={() => massiveMut.mutate()}
                 disabled={massiveMut.isPending || (!mApiKey && !mAssetClass)}>
-                {massiveMut.isPending ? 'Saving…' : 'Save Massive Credentials'}
+                {massiveMut.isPending ? 'Saving…' : 'Save Atlas Credentials'}
               </button>
               {mMsg && <span style={{ color: 'var(--ok)', fontSize: 11 }}>{mMsg}</span>}
               {mErr && <span style={{ color: 'var(--bad)', fontSize: 11 }}>{mErr}</span>}

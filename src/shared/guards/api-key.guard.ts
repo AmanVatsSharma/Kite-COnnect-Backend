@@ -37,6 +37,19 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('Invalid API key');
     }
 
+    // Trial expiration check
+    if (keyRecord.is_test && keyRecord.expires_at) {
+      const now = new Date();
+      if (now > keyRecord.expires_at) {
+        throw new ForbiddenException({
+          success: false,
+          code: 'trial_expired',
+          message:
+            'Your trial period has expired. To continue using our services, please subscribe to a professional plan.',
+        });
+      }
+    }
+
     // Strict abuse / resell enforcement: block keys marked as abusive.
     try {
       const status = await this.abuseDetection.getStatusForApiKey(apiKey);

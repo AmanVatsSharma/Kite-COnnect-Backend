@@ -1,11 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { ApiKey } from '@features/auth/domain/api-key.entity';
 import { RedisService } from '@infra/redis/redis.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class ApiKeyService {
+  private readonly logger = new Logger(ApiKeyService.name);
+
   constructor(
     @InjectRepository(ApiKey) private apiKeyRepo: Repository<ApiKey>,
     private redisService: RedisService,
@@ -15,7 +18,42 @@ export class ApiKeyService {
     const record = await this.apiKeyRepo.findOne({
       where: { key, is_active: true },
     });
+
+    if (record && record.is_test && record.expires_at) {
+      const now = new Date();
+      if (now > record.expires_at) {
+        throw new ForbiddenException(
+          'Your trial period has expired. To continue using our services, please subscribe to a professional plan.',
+        );
+      }
+    }
+
     return record || null;
+  }
+
+  /**
+   * Automatically deletes test API keys that have been expired for more than 30 days.
+   * Runs daily at midnight.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async cleanupExpiredTestKeys() {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    this.logger.log('Starting cleanup of old expired test API keys...');
+
+    try {
+      const result = await this.apiKeyRepo.delete({
+        is_test: true,
+        expires_at: LessThan(thirtyDaysAgo),
+      });
+
+      this.logger.log(
+        `Cleanup completed. Deleted ${result.affected || 0} expired test keys.`,
+      );
+    } catch (err) {
+      this.logger.error('Failed to cleanup expired test keys', err as any);
+    }
   }
 
   async incrementHttpUsage(key: string, limitPerMinute: number): Promise<void> {

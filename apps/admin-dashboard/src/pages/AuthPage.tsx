@@ -48,7 +48,7 @@ function SessionCard({ onRevokeSuccess }: { onRevokeSuccess: () => void }) {
   const revokeMut = useMutation({
     mutationFn: revokeFalconSession,
     onSuccess: () => {
-      notify.ok('Kite session revoked');
+      notify.ok('Falcon session revoked');
       void qc.invalidateQueries({ queryKey: ['falcon-session'] });
       void qc.invalidateQueries({ queryKey: ['kite-session-pill'] });
       onRevokeSuccess();
@@ -60,7 +60,7 @@ function SessionCard({ onRevokeSuccess }: { onRevokeSuccess: () => void }) {
     setValidating(true);
     try {
       await getFalconProfile();
-      notify.ok('Kite session valid — profile fetched');
+      notify.ok('Falcon session valid — profile fetched');
     } catch (e) {
       notify.error(`Session invalid: ${(e as Error).message}`);
     } finally {
@@ -94,7 +94,7 @@ function SessionCard({ onRevokeSuccess }: { onRevokeSuccess: () => void }) {
   return (
     <div className="panel" style={{ marginBottom: 8 }}>
       <div className="panel__head">
-        <span className="panel__title">KITE SESSION STATUS</span>
+        <span className="panel__title">FALCON SESSION STATUS</span>
         {sessionQ.isFetching && <span className="muted" style={{ fontSize: 9 }}>refreshing…</span>}
       </div>
       <div className="panel__body">
@@ -233,14 +233,14 @@ function KiteAuthWizard() {
 
   const steps: { n: WizardStep; label: string }[] = [
     { n: 1, label: 'Open Login' },
-    { n: 2, label: 'Authorize on Kite' },
+    { n: 2, label: 'Authorize on Falcon' },
     { n: 3, label: 'Done' },
   ];
 
   return (
     <div className="panel">
       <div className="panel__head">
-        <span className="panel__title">FALCON (KITE) AUTH WIZARD</span>
+        <span className="panel__title">FALCON AUTH WIZARD</span>
         {step === 3 && <span className="cc-chip cc-chip--ok" style={{ fontSize: 9 }}>AUTHENTICATED</span>}
       </div>
       <div className="panel__body">
@@ -274,7 +274,7 @@ function KiteAuthWizard() {
         {step === 1 && (
           <div>
             <p style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.6 }}>
-              Opens Kite Connect OAuth in a popup. After you approve, the token is saved automatically.
+              Opens Falcon Connect OAuth in a popup. After you approve, the token is saved automatically.
             </p>
             <button
               type="button"
@@ -282,7 +282,7 @@ function KiteAuthWizard() {
               onClick={() => void handleOpenLogin()}
               disabled={kiteLoading}
             >
-              {kiteLoading ? 'Opening…' : '▶ Open Kite Login'}
+              {kiteLoading ? 'Opening…' : '▶ Open Falcon Login'}
             </button>
           </div>
         )}
@@ -292,7 +292,7 @@ function KiteAuthWizard() {
           <div>
             <p style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
               {popupOpened
-                ? 'Popup opened. Authorize your Kite account — this step will complete automatically once done.'
+                ? 'Popup opened. Authorize your Falcon account — this step will complete automatically once done.'
                 : 'Waiting for popup…'}
             </p>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -399,11 +399,11 @@ function VortexAuth() {
       const data = await apiFetch<{ success?: boolean }>(`/api/auth/vayu/callback?${q}`);
       setVortexMsg(data && typeof data === 'object' ? JSON.stringify(data) : 'OK');
       setVortexOk(true);
-      notify.ok('Vortex auth complete');
+      notify.ok('Vayu auth complete');
     } catch (e) {
       setVortexMsg((e as Error).message);
       setVortexOk(false);
-      notify.error(`Vortex auth failed: ${(e as Error).message}`);
+      notify.error(`Vayu auth failed: ${(e as Error).message}`);
     } finally {
       setVortexLoading(false);
     }
@@ -412,12 +412,12 @@ function VortexAuth() {
   return (
     <div className="panel">
       <div className="panel__head">
-        <span className="panel__title">VAYU (VORTEX) AUTH</span>
+        <span className="panel__title">VAYU AUTH</span>
         {vortexOk && <span className="cc-chip cc-chip--ok" style={{ fontSize: 9 }}>AUTH COMPLETE</span>}
       </div>
       <div className="panel__body">
         <p style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
-          1. Open Vortex login &nbsp;→&nbsp; 2. Approve access &nbsp;→&nbsp; 3. Copy the{' '}
+          1. Open Vayu login &nbsp;→&nbsp; 2. Approve access &nbsp;→&nbsp; 3. Copy the{' '}
           <code style={{ fontSize: 10 }}>auth</code> query param from the callback URL &nbsp;→&nbsp; 4. Paste &amp; submit.
         </p>
 
@@ -430,7 +430,7 @@ function VortexAuth() {
             className="btn-xs"
             style={{ textDecoration: 'none', display: 'inline-block' }}
           >
-            ↗ Open Vortex Login
+            ↗ Open Vayu Login
           </a>
         </div>
 
@@ -459,7 +459,7 @@ function VortexAuth() {
           onClick={() => void completeVortex()}
           disabled={vortexLoading || !vortexAuth.trim()}
         >
-          {vortexLoading ? 'Submitting…' : 'Complete Vortex Auth'}
+          {vortexLoading ? 'Submitting…' : 'Complete Vayu Auth'}
         </button>
 
         {vortexMsg && (
@@ -486,13 +486,22 @@ function VortexAuth() {
 
 export function AuthPage() {
   const [wizardKey, setWizardKey] = useState(0);
+  const token = getAdminToken();
+
+  if (!token) {
+    return (
+      <div className="page-head">
+        <p className="err">Add an admin token in Settings to manage authentication.</p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
       <div className="page-head">
         <h1>PROVIDER AUTHENTICATION</h1>
         <span style={{ fontSize: 10, color: 'var(--muted)' }}>
-          Kite OAuth wizard · session health · Vortex callback
+          Falcon OAuth wizard · session health · Vayu callback
         </span>
       </div>
 

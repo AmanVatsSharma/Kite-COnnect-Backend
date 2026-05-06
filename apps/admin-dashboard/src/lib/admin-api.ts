@@ -26,6 +26,7 @@ export function createApiKey(body: {
   ws_unsubscribe_rps?: number;
   ws_mode_rps?: number;
   allowed_exchanges?: string[];
+  is_test?: boolean;
 }) {
   return apiFetch<ApiKeyRow>('/api/admin/apikeys', {
     ...admin,

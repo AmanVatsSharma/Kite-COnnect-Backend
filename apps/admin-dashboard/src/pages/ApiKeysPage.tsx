@@ -82,6 +82,20 @@ export function ApiKeysPage() {
   usage.data?.items.forEach((u) => usageMap.set(u.key, u));
   const keyList: ApiKeyRow[] = Array.isArray(keys.data) ? keys.data : [];
 
+  function generateTrial() {
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const trialKey = `trial-${randomSuffix}`;
+    const trialTenant = `tenant-trial-${randomSuffix}`;
+    create.mutate({
+      key: trialKey,
+      tenant_id: trialTenant,
+      name: `Trial Key (${randomSuffix})`,
+      is_test: true,
+      rate_limit_per_minute: 100,
+      connection_limit: 10,
+    });
+  }
+
   function copyKey(k: string) {
     void navigator.clipboard.writeText(k).then(() => {
       setCopied(k);
@@ -160,13 +174,29 @@ export function ApiKeysPage() {
                   <td>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                       <span className="cell-key" title={k.key}>{truncKey(k.key)}</span>
+                      {k.is_test && (
+                        <span
+                          style={{
+                            fontSize: 8,
+                            padding: '1px 3px',
+                            borderRadius: 3,
+                            background: 'var(--warn-bg)',
+                            color: 'var(--warn-fg)',
+                            fontWeight: 700,
+                            lineHeight: 1,
+                          }}
+                          title={k.expires_at ? `Expires: ${new Date(k.expires_at).toLocaleString()}` : 'Trial key'}
+                        >
+                          TRIAL
+                        </span>
+                      )}
                       <button
                         type="button"
-                        className="copy-btn"
+                        className="btn-icon"
                         onClick={() => copyKey(k.key)}
-                        title="Copy key"
+                        title="Copy full key"
                       >
-                        {copied === k.key ? '✓' : '⎘'}
+                        {copied === k.key ? '✓' : '⧉'}
                       </button>
                     </span>
                   </td>
@@ -293,12 +323,29 @@ export function ApiKeysPage() {
               <input type="number" value={nk.connection_limit} onChange={(e) => setNk({ ...nk, connection_limit: Number(e.target.value) })} />
             </div>
           </div>
-          <button type="button" className="btn-xs" disabled={create.isPending || !nk.key} onClick={() => create.mutate(nk)}>
-            {create.isPending ? 'Creating…' : '+ Create key'}
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              className="btn-xs"
+              style={{ flex: 1 }}
+              disabled={create.isPending || !nk.key}
+              onClick={() => create.mutate({ ...nk, is_test: false })}
+            >
+              {create.isPending ? 'Creating…' : '+ Create key'}
+            </button>
+            <button
+              type="button"
+              className="btn-xs"
+              style={{ flex: 1, border: '1px solid var(--warn-fg)', color: 'var(--warn-fg)' }}
+              disabled={create.isPending}
+              onClick={generateTrial}
+              title="Generate a 7-day trial key with 1-click"
+            >
+              {create.isPending ? 'Working…' : '⚡ 7-Day Trial'}
+            </button>
+          </div>
           {create.isError && <p className="err" style={{ fontSize: 10, marginTop: 4 }}>{(create.error as Error).message}</p>}
-        </div>
-
+          </div>
         {/* Update limits */}
         <div className="keys-form-card">
           <div className="keys-form-card__title">UPDATE LIMITS (JSON)</div>
@@ -328,10 +375,10 @@ export function ApiKeysPage() {
               <label>Provider</label>
               <select value={prov} onChange={(e) => setProv(e.target.value as typeof prov)} style={{ fontSize: 11, padding: '4px 6px' }}>
                 <option value="inherit">inherit (null)</option>
-                <option value="kite">kite (Falcon)</option>
-                <option value="vortex">vortex (Vayu)</option>
-                <option value="massive">massive (Atlas)</option>
-                <option value="binance">binance (Drift)</option>
+                <option value="kite">Falcon</option>
+                <option value="vortex">Vayu</option>
+                <option value="massive">Atlas</option>
+                <option value="binance">Drift</option>
               </select>
             </div>
           </div>

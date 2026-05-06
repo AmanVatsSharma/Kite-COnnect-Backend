@@ -54,6 +54,12 @@ export class ApiKey {
   @Column({ type: 'varchar', length: 16, nullable: true })
   provider?: 'kite' | 'vortex' | 'massive' | 'binance' | null;
 
+  @Column({ default: false })
+  is_test: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  expires_at: Date | null;
+
   @CreateDateColumn()
   created_at: Date;
 

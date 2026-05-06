@@ -117,12 +117,17 @@ export class AdminController {
       ws_mode_rps?: number;
       ws_max_instruments?: number;
       allowed_exchanges?: string[];
+      is_test?: boolean;
     },
   ) {
     const metadata: any = {};
     if (body.allowed_exchanges && Array.isArray(body.allowed_exchanges)) {
       metadata.exchanges = body.allowed_exchanges;
     }
+
+    const expires_at = body.is_test
+      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      : null;
 
     const entity = this.apiKeyRepo.create({
       key: body.key,
@@ -144,6 +149,8 @@ export class AdminController {
         typeof body.ws_max_instruments === 'number'
           ? body.ws_max_instruments
           : null,
+      is_test: body.is_test ?? false,
+      expires_at,
       metadata: Object.keys(metadata).length > 0 ? metadata : null,
     });
     const saved = await this.apiKeyRepo.save(entity);

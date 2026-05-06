@@ -108,15 +108,15 @@ function StatusBar() {
           {sessionQuery.data && (() => {
             const ttl = sessionQuery.data.ttlSeconds;
             let pillClass = 'dot--live';
-            let label = 'KITE OK';
+            let label = 'FALCON OK';
             if (ttl < 0 || !sessionQuery.data.hasToken) {
               pillClass = 'dot--off';
-              label = 'KITE AUTH ✕';
+              label = 'FALCON AUTH ✕';
             } else if (ttl < 7200) {
               pillClass = 'dot--warn';
               const h = Math.floor(ttl / 3600);
               const m = Math.floor((ttl % 3600) / 60);
-              label = h > 0 ? `KITE ${h}H` : `KITE ${m}M`;
+              label = h > 0 ? `FALCON ${h}H` : `FALCON ${m}M`;
             }
             return (
               <>
@@ -125,7 +125,7 @@ function StatusBar() {
                   type="button"
                   className="sb-live-chip sb-live-chip--btn"
                   onClick={() => navigate('/auth')}
-                  title="Kite session status — click to manage auth"
+                  title="Falcon session status — click to manage auth"
                 >
                   <span className={`dot ${pillClass}`} />
                   {label}
@@ -199,34 +199,6 @@ export function TerminalLayout() {
           </button>
         </aside>
         <div className="terminal-main">
-          {unauthorized && (
-            <div
-              className="card terminal-alert"
-              style={{
-                marginTop: 12,
-                borderColor: 'var(--bad)',
-                background: 'rgba(255, 107, 107, 0.08)',
-              }}
-            >
-              <strong>401 Unauthorized</strong>
-              <p className="muted" style={{ margin: '8px 0' }}>
-                Admin token missing or wrong. Update it under{' '}
-                <NavLink to="/settings" onClick={() => setUnauthorized(false)}>
-                  Settings
-                </NavLink>
-                .
-              </p>
-              <button type="button" className="btn btn-ghost" onClick={() => setUnauthorized(false)}>
-                Dismiss
-              </button>
-            </div>
-          )}
-          {!hasToken && (
-            <p className="err terminal-token-banner">
-              Set your admin token under <NavLink to="/settings">Settings</NavLink> to enable protected actions and live
-              admin panels.
-            </p>
-          )}
           <Outlet />
         </div>
       </div>

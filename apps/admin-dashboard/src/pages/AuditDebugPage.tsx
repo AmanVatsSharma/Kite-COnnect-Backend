@@ -131,7 +131,7 @@ export function AuditDebugPage() {
         {/* ── Falcon debug ──────────────────────────────────── */}
         <div className="panel">
           <div className="panel__head">
-            <span className="panel__title">FALCON (KITE) DEBUG</span>
+            <span className="panel__title">FALCON DEBUG</span>
             <span
               className="panel__title-val"
               style={{ color: falconConnected ? 'var(--ok)' : 'var(--muted)' }}
@@ -165,7 +165,7 @@ export function AuditDebugPage() {
         {/* ── Vayu debug ────────────────────────────────────── */}
         <div className="panel">
           <div className="panel__head">
-            <span className="panel__title">VAYU (VORTEX) DEBUG</span>
+            <span className="panel__title">VAYU DEBUG</span>
             <span
               className="panel__title-val"
               style={{ color: vayuConnected ? 'var(--ok)' : 'var(--muted)' }}
