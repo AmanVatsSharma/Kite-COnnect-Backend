@@ -178,6 +178,9 @@ function buildMeiliAttrs(
     'id',
     'canonicalSymbol',
     'streamProvider', // needed for brand mapping even if client didn't request it
+    'symbol',         // needed to compute logo_url
+    'exchange',       // needed to compute logo_url
+    'segment',        // needed to compute logo_url
   ]);
   if (selectedFields) {
     for (const f of selectedFields) attrs.add(f);
