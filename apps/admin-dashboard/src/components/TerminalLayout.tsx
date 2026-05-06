@@ -11,7 +11,6 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getAdminToken } from '../lib/api-client';
-import { useAuthAlert } from '../hooks/useAuthAlert';
 import { useSystemAlerts } from '../hooks/useSystemAlerts';
 import type { PollPresetId } from '../lib/poll-presets';
 import { POLL_PRESET_ORDER } from '../lib/poll-presets';
@@ -156,8 +155,6 @@ function StatusBar() {
 }
 
 export function TerminalLayout() {
-  const hasToken = !!getAdminToken();
-  const { unauthorized, setUnauthorized } = useAuthAlert();
   const [paletteOpen, setPaletteOpen] = useState(false);
   useSystemAlerts();
 
