@@ -1807,10 +1807,14 @@ export class FalconInstrumentService implements OnModuleInit {
           }
         }
 
-        // Only generate logo URLs for Equity, Options, and Futures
-        logo_url = `https://financialmodelingprep.com/image-stock/${baseSymbol}.${suffix}.png`;
-      } else if (isin) {
-        // Fallback to Groww ISIN pattern if available
+        // Only generate logo URLs for valid tickers (no spaces allowed by FMP)
+        if (baseSymbol && !baseSymbol.includes(' ')) {
+          logo_url = `https://financialmodelingprep.com/image-stock/${encodeURIComponent(baseSymbol)}.${suffix}.png`;
+        }
+      }
+      
+      if (!logo_url && isin) {
+        // Fallback to Groww ISIN pattern if available (works for any instrument with an ISIN)
         logo_url = `https://assets-netstorage.groww.in/stock-assets/logos/${isin}.png`;
       }
 

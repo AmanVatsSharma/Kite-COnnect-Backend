@@ -102,10 +102,11 @@ function buildResponseRow(
   const exchange = (raw.exchange || '').toUpperCase();
   const symbol = raw.symbol; // For NFO/MCX, this is already the underlying symbol in Meilisearch
   
-  if (symbol && (exchange === 'NSE' || exchange === 'BSE' || exchange === 'NFO' || exchange === 'MCX' || (raw.segment || '').toUpperCase().includes('FO'))) {
+  if (symbol && !symbol.includes(' ') && (exchange === 'NSE' || exchange === 'BSE' || exchange === 'NFO' || exchange === 'MCX' || (raw.segment || '').toUpperCase().includes('FO'))) {
     // We default to .NS (NSE) for logos as it is the most reliable for Indian stocks
     const suffix = exchange === 'BSE' ? 'BO' : 'NS';
-    logo_url = `https://financialmodelingprep.com/image-stock/${symbol}.${suffix}.png`;
+    // FMP requires upper-case, no-space symbols
+    logo_url = `https://financialmodelingprep.com/image-stock/${encodeURIComponent(symbol)}.${suffix}.png`;
   }
 
   // Anchor fields — always present regardless of ?fields=
