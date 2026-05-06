@@ -100,13 +100,25 @@ function buildResponseRow(
   // Free logo pattern: Financial Modeling Prep (public asset)
   let logo_url: string | null = null;
   const exchange = (raw.exchange || '').toUpperCase();
-  const symbol = raw.symbol; // For NFO/MCX, this is already the underlying symbol in Meilisearch
+  const segment = (raw.segment || '').toUpperCase();
+  let baseSymbol = raw.symbol;
   
-  if (symbol && !symbol.includes(' ') && (exchange === 'NSE' || exchange === 'BSE' || exchange === 'NFO' || exchange === 'MCX' || (raw.segment || '').toUpperCase().includes('FO'))) {
+  if (exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO')) {
+    if (raw.name && raw.name.trim().length > 0) {
+      baseSymbol = raw.name.trim().toUpperCase();
+    } else if (raw.symbol) {
+      const digitMatch = raw.symbol.match(/\d{2}[A-Z]{3}/);
+      if (digitMatch && digitMatch.index !== undefined && digitMatch.index > 0) {
+        baseSymbol = raw.symbol.substring(0, digitMatch.index);
+      }
+    }
+  }
+
+  if (baseSymbol && !baseSymbol.includes(' ') && (exchange === 'NSE' || exchange === 'BSE' || exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO'))) {
     // We default to .NS (NSE) for logos as it is the most reliable for Indian stocks
     const suffix = exchange === 'BSE' ? 'BO' : 'NS';
     // FMP requires upper-case, no-space symbols
-    logo_url = `https://financialmodelingprep.com/image-stock/${encodeURIComponent(symbol)}.${suffix}.png`;
+    logo_url = `https://financialmodelingprep.com/image-stock/${encodeURIComponent(baseSymbol)}.${suffix}.png`;
   }
 
   // Anchor fields — always present regardless of ?fields=
@@ -179,6 +191,7 @@ function buildMeiliAttrs(
     'canonicalSymbol',
     'streamProvider', // needed for brand mapping even if client didn't request it
     'symbol',         // needed to compute logo_url
+    'name',           // needed to compute logo_url for derivatives
     'exchange',       // needed to compute logo_url
     'segment',        // needed to compute logo_url
   ]);
