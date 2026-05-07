@@ -97,28 +97,40 @@ function buildResponseRow(
 ): PublicSearchResultItem {
   const live = Number.isFinite(last_price) && (last_price ?? 0) > 0;
 
-  // Free logo pattern: Financial Modeling Prep (public asset)
+  // Free logo pattern: Financial Modeling Prep (public asset) + Crypto icons
   let logo_url: string | null = null;
   const exchange = (raw.exchange || '').toUpperCase();
   const segment = (raw.segment || '').toUpperCase();
+  const internalProvider = (raw.streamProvider || '').toLowerCase();
   let baseSymbol = raw.symbol;
-  
-  if (exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO')) {
-    if (raw.name && raw.name.trim().length > 0) {
-      baseSymbol = raw.name.trim().toUpperCase();
-    } else if (raw.symbol) {
-      const digitMatch = raw.symbol.match(/\d{2}[A-Z]{3}/);
-      if (digitMatch && digitMatch.index !== undefined && digitMatch.index > 0) {
-        baseSymbol = raw.symbol.substring(0, digitMatch.index);
+
+  if (internalProvider === 'binance' || segment === 'CRYPTO') {
+    // Crypto specific logos (BTC, ETH, etc.)
+    const cleanCrypto = (raw.symbol || '').replace(/USDT$|BUSD$|BTC$/, '').toUpperCase();
+    logo_url = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${encodeURIComponent(cleanCrypto.toLowerCase())}.png`;
+  } else {
+    // Equity and Commodity logos
+    if (exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO')) {
+      if (raw.name && raw.name.trim().length > 0) {
+        baseSymbol = raw.name.trim().toUpperCase();
+      } else if (raw.symbol) {
+        const digitMatch = raw.symbol.match(/\d{2}[A-Z]{3}/);
+        if (digitMatch && digitMatch.index !== undefined && digitMatch.index > 0) {
+          baseSymbol = raw.symbol.substring(0, digitMatch.index);
+        }
+      }
+
+      // Handle MCX specific suffixes (GOLDM -> GOLD, SILVERMIC -> SILVER)
+      if (exchange === 'MCX' && baseSymbol) {
+        baseSymbol = baseSymbol.replace(/M$|MIC$|GUINEA$|PETAL$|P$/, '');
       }
     }
-  }
 
-  if (baseSymbol && !baseSymbol.includes(' ') && (exchange === 'NSE' || exchange === 'BSE' || exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO'))) {
-    // We default to .NS (NSE) for logos as it is the most reliable for Indian stocks
-    const suffix = exchange === 'BSE' ? 'BO' : 'NS';
-    // FMP requires upper-case, no-space symbols
-    logo_url = `https://financialmodelingprep.com/image-stock/${encodeURIComponent(baseSymbol)}.${suffix}.png`;
+    if (baseSymbol && !baseSymbol.includes(' ') && (exchange === 'NSE' || exchange === 'BSE' || exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO'))) {
+      // For MCX, we don't use suffixes like .NS or .BO
+      const suffix = exchange === 'MCX' ? '' : (exchange === 'BSE' ? '.BO' : '.NS');
+      logo_url = `https://financialmodelingprep.com/image-stock/${encodeURIComponent(baseSymbol)}${suffix}.png`;
+    }
   }
 
   // Anchor fields — always present regardless of ?fields=
