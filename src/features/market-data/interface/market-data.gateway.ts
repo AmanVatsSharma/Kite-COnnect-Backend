@@ -78,6 +78,10 @@ export class MarketDataGateway
   private readonly logger = new Logger(MarketDataGateway.name);
   private statusSubscribed = false;
 
+  // In-memory bytes accumulator per API key — flushed to Redis every 10 seconds
+  private readonly bytesAccumulator = new Map<string, number>();
+  private bytesFlushTimer?: ReturnType<typeof setInterval>;
+
   constructor(
     private redisService: RedisService,
     private providerResolver: MarketDataProviderResolverService,
@@ -93,6 +97,11 @@ export class MarketDataGateway
   ) {}
 
   async onModuleInit() {
+    // Flush bytes accumulator to Redis every 10s (low-overhead, batched)
+    this.bytesFlushTimer = setInterval(() => {
+      void this.flushBytesAccumulator();
+    }, 10_000);
+
     // Subscribe to API key updates to enforce limits instantly across all instances
     try {
       await this.redisService.subscribe('api_key_updates', async (message) => {
@@ -306,6 +315,7 @@ export class MarketDataGateway
       );
       (client.data as any).apiKey = apiKey;
       (client.data as any).apiKeyRecord = record;
+      (client.data as any).connectedAt = new Date().toISOString();
 
       // Best-effort origin audit for WS connection
       try {
@@ -2010,13 +2020,21 @@ export class MarketDataGateway
         const mode: StreamTickMode =
           sub?.modeByInstrument?.get(identifier) || 'ltp';
         const payload = shapeMarketTickForMode(data, mode);
-        s.emit('market_data', {
+        const emitPayload = {
           instrumentToken: data?.instrument_token ?? identifier,
           uirId: identifier,
           data: payload,
           timestamp: ts,
           ...(emitOpts?.syntheticLast ? { syntheticLast: true } : {}),
-        });
+        };
+        s.emit('market_data', emitPayload);
+
+        // Accumulate approximate bytes per API key (flushed to Redis every 10s)
+        const apiKey = sub?.apiKey || (s.data as any)?.apiKey;
+        if (apiKey) {
+          const approxBytes = Buffer.byteLength(JSON.stringify(emitPayload));
+          this.bytesAccumulator.set(apiKey, (this.bytesAccumulator.get(apiKey) ?? 0) + approxBytes);
+        }
       }
 
       const broadcastTime = Date.now() - startTime;
@@ -2066,6 +2084,56 @@ export class MarketDataGateway
       ),
       byApiKey,
     };
+  }
+
+  getApiKeyLiveDetail(apiKey: string): {
+    liveConnections: number;
+    liveSubscriptions: number;
+    sockets: Array<{
+      socketId: string;
+      instruments: number;
+      connectedAt: string | null;
+      origin: string | null;
+      ip: string | null;
+      userAgent: string | null;
+    }>;
+  } {
+    const matchingSubs = Array.from(this.subscriptionRegistry.values()).filter(
+      (sub) => sub.apiKey === apiKey,
+    );
+
+    const sockets = matchingSubs.map((sub) => {
+      const s = this.server?.sockets?.sockets?.get(sub.socketId);
+      const data = (s?.data as any) ?? {};
+      const ctx = s ? this.extractWsOriginContext(s) : { ip: null, userAgent: null, origin: null };
+      return {
+        socketId: sub.socketId,
+        instruments: sub.instruments.length,
+        connectedAt: data.connectedAt ?? null,
+        origin: ctx.origin,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      };
+    });
+
+    return {
+      liveConnections: matchingSubs.length,
+      liveSubscriptions: matchingSubs.reduce((sum, s) => sum + s.instruments.length, 0),
+      sockets,
+    };
+  }
+
+  private async flushBytesAccumulator(): Promise<void> {
+    if (this.bytesAccumulator.size === 0) return;
+    const snapshot = new Map(this.bytesAccumulator);
+    this.bytesAccumulator.clear();
+    for (const [key, bytes] of snapshot) {
+      try {
+        await this.apiKeyService.incrementBytesSent(key, bytes);
+      } catch (err) {
+        this.logger.warn(`[Gateway] Failed to flush bytes for key=${key}`, err as any);
+      }
+    }
   }
 
   /**

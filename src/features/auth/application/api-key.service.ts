@@ -135,6 +135,54 @@ export class ApiKeyService {
     await this.redisService.decr(connKey);
   }
 
+  async incrementBytesSent(key: string, bytes: number): Promise<void> {
+    if (bytes <= 0) return;
+    const redisKey = this.buildDailyBytesKey(key);
+    try {
+      const newVal = await this.redisService.incrby(redisKey, bytes);
+      if (newVal <= bytes) {
+        // First write today — set 25h TTL so yesterday's key lives long enough for getBytesLast24h
+        await this.redisService.expire(redisKey, 90_000);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[ApiKeyService] Failed to increment bytes sent', { key, bytes, err: (err as any)?.message });
+    }
+  }
+
+  async getBytesLast24h(key: string): Promise<number> {
+    try {
+      const today = this.buildDailyBytesKey(key);
+      const yesterday = this.buildDailyBytesKey(key, -1);
+      const [a, b] = await Promise.all([
+        this.redisService.get<number>(today),
+        this.redisService.get<number>(yesterday),
+      ]);
+      return (a || 0) + (b || 0);
+    } catch {
+      return 0;
+    }
+  }
+
+  async getMultiBytesLast24h(keys: string[]): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    if (keys.length === 0) return result;
+    try {
+      const counts = await Promise.all(keys.map((k) => this.getBytesLast24h(k)));
+      keys.forEach((k, i) => result.set(k, counts[i] ?? 0));
+    } catch {
+      keys.forEach((k) => result.set(k, 0));
+    }
+    return result;
+  }
+
+  private buildDailyBytesKey(key: string, dayOffset = 0): string {
+    const d = new Date();
+    if (dayOffset !== 0) d.setDate(d.getDate() + dayOffset);
+    const tag = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+    return `ws:bytes:${key}:${tag}`;
+  }
+
   async getUsageReport(key: string) {
     const httpKey = this.buildMinuteBucketKey('http', key);
     const wsKey = `ws:connections:${key}`;

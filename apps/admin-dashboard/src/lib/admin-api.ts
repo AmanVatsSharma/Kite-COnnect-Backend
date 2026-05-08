@@ -1,6 +1,8 @@
 import { apiFetch } from './api-client';
 import type {
   ApiKeyRow,
+  ApiKeyLiveDetail,
+  ApiKeyLiveStatsBatch,
   AuditConfig,
   GlobalProviderRes,
   PaginatedAbuse,
@@ -372,4 +374,17 @@ export function getAdminEvents(limit = 20) {
   return apiFetch<AdminStreamEvent[]>(`/api/admin/events?limit=${limit}`, {
     ...admin,
   });
+}
+
+export function getApiKeyLiveStatsBatch() {
+  return apiFetch<ApiKeyLiveStatsBatch>('/api/admin/apikeys/live-stats', {
+    ...admin,
+  });
+}
+
+export function getApiKeyLiveDetail(key: string) {
+  return apiFetch<ApiKeyLiveDetail>(
+    `/api/admin/apikeys/${encodeURIComponent(key)}/live`,
+    { ...admin },
+  );
 }

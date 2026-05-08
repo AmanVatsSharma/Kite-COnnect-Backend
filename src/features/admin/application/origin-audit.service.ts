@@ -250,6 +250,40 @@ export class OriginAuditService {
     }
   }
 
+  async getTopOriginsForKey(
+    apiKey: string,
+    hoursBack = 24,
+    limit = 20,
+  ): Promise<Array<{ origin: string | null; hitCount: number; lastSeen: Date; kind: string }>> {
+    try {
+      const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000);
+      const rows = await this.auditRepo
+        .createQueryBuilder('log')
+        .select('log.origin', 'origin')
+        .addSelect('log.kind', 'kind')
+        .addSelect('COUNT(*)', 'hitCount')
+        .addSelect('MAX(log.ts)', 'lastSeen')
+        .where('log.api_key = :apiKey', { apiKey })
+        .andWhere('log.ts > :since', { since })
+        .groupBy('log.origin')
+        .addGroupBy('log.kind')
+        .orderBy('hitCount', 'DESC')
+        .limit(limit)
+        .getRawMany();
+
+      return rows.map((r) => ({
+        origin: r.origin ?? null,
+        hitCount: Number(r.hitCount),
+        lastSeen: new Date(r.lastSeen),
+        kind: r.kind,
+      }));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[OriginAuditService] getTopOriginsForKey failed', { apiKey, err: (err as any)?.message });
+      return [];
+    }
+  }
+
   private shouldLogHttp(params: HttpAuditParams): boolean {
     const status = params.status ?? 0;
 

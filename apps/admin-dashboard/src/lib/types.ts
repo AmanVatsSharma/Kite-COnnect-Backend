@@ -89,6 +89,50 @@ export interface PaginatedAbuse {
   items: AbuseFlag[];
 }
 
+// ─── Live metrics types ────────────────────────────────────────────────────
+
+export interface ApiKeyLiveStatsItem {
+  key: string;
+  is_active: boolean;
+  liveConnections: number;
+  liveSubscriptions: number;
+  bytesLast24h: number;
+}
+
+export interface ApiKeyLiveStatsBatch {
+  items: ApiKeyLiveStatsItem[];
+  totalLiveConnections: number;
+}
+
+export interface ApiKeySocketEntry {
+  socketId: string;
+  instruments: number;
+  connectedAt: string | null;
+  origin: string | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export interface ApiKeyOriginEntry {
+  origin: string | null;
+  hitCount: number;
+  lastSeen: string;
+  kind: string;
+}
+
+export interface ApiKeyLiveDetail {
+  key: string;
+  tenant_id: string;
+  is_active: boolean;
+  liveConnections: number;
+  liveSubscriptions: number;
+  bytesLast24h: number;
+  sockets: ApiKeySocketEntry[];
+  topOrigins: ApiKeyOriginEntry[];
+  httpRequestsThisMinute: number;
+  currentWsConnections: number;
+}
+
 // ─── Falcon (Kite) types ───────────────────────────────────────────────────
 
 export interface FalconInstrument {

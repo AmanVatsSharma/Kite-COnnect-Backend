@@ -325,6 +325,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Increment a key's integer value by delta. Returns 0 when unavailable.
+   */
+  async incrby(key: string, delta: number): Promise<number> {
+    const client = this.defaultClient as Redis | null;
+    if (!client) return 0;
+    return this.withCircuitBreaker('incrby', () => client.incrby(key, delta), 0);
+  }
+
+  /**
    * Set expiration on a key in seconds. Fails silently when unavailable.
    */
   async expire(key: string, seconds: number): Promise<void> {

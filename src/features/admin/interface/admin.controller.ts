@@ -38,6 +38,7 @@ import {
 } from '@shared/utils/provider-label.util';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
 import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
+import { OriginAuditService } from '@features/admin/application/origin-audit.service';
 
 @Controller('admin')
 @ApiTags('admin', 'admin-ws')
@@ -60,6 +61,7 @@ export class AdminController {
     private configService: ConfigService,
     private wsInterest: MarketDataWsInterestService,
     private instrumentRegistry: InstrumentRegistryService,
+    private originAudit: OriginAuditService,
   ) {}
 
   @Post('apikeys')
@@ -454,6 +456,74 @@ export class AdminController {
       pageSize: pageSizeNum,
       total,
       items,
+    };
+  }
+
+  @Get('apikeys/live-stats')
+  @ApiOperation({
+    summary: 'Batch live metrics for all API keys (Redis + gateway, no DB)',
+    description: 'Returns live connections, subscriptions, and bytes/24h for every key. Fast endpoint — safe to poll every 5s.',
+  })
+  async listApiKeysLiveStats() {
+    const gatewayStats = this.gateway.getConnectionStats();
+    const byApiKeyMap = new Map<string, { liveConnections: number; liveSubscriptions: number }>();
+    for (const entry of gatewayStats.byApiKey as Array<{ apiKey: string; connections: number; totalSubscribedInstruments: number }>) {
+      byApiKeyMap.set(entry.apiKey, {
+        liveConnections: entry.connections,
+        liveSubscriptions: entry.totalSubscribedInstruments,
+      });
+    }
+
+    const allKeys = await this.apiKeyRepo.find({ select: ['key', 'is_active'] });
+    const keysArr = allKeys.map((k) => k.key);
+    const bytesMap = await this.apiKeyService.getMultiBytesLast24h(keysArr);
+
+    const items = allKeys.map((k) => {
+      const live = byApiKeyMap.get(k.key) ?? { liveConnections: 0, liveSubscriptions: 0 };
+      return {
+        key: k.key,
+        is_active: k.is_active,
+        liveConnections: live.liveConnections,
+        liveSubscriptions: live.liveSubscriptions,
+        bytesLast24h: bytesMap.get(k.key) ?? 0,
+      };
+    });
+
+    return { items, totalLiveConnections: gatewayStats.totalConnections };
+  }
+
+  @Get('apikeys/:key/live')
+  @ApiOperation({
+    summary: 'Deep live stats for a single API key — sockets, origins, bytes',
+  })
+  @ApiParam({ name: 'key', required: true })
+  async getApiKeyLive(@Param('key') key: string) {
+    const entity = await this.apiKeyRepo.findOne({ where: { key } });
+    if (!entity) throw new NotFoundException(`API key not found: ${key}`);
+
+    const liveDetail = this.gateway.getApiKeyLiveDetail(key);
+    const [topOrigins, bytesLast24h, usageReport] = await Promise.all([
+      this.originAudit.getTopOriginsForKey(key, 24, 20),
+      this.apiKeyService.getBytesLast24h(key),
+      this.apiKeyService.getUsageReport(key),
+    ]);
+
+    return {
+      key: entity.key,
+      tenant_id: entity.tenant_id,
+      is_active: entity.is_active,
+      liveConnections: liveDetail.liveConnections,
+      liveSubscriptions: liveDetail.liveSubscriptions,
+      sockets: liveDetail.sockets,
+      topOrigins: topOrigins.map((o) => ({
+        origin: o.origin,
+        hitCount: o.hitCount,
+        lastSeen: o.lastSeen.toISOString(),
+        kind: o.kind,
+      })),
+      bytesLast24h,
+      httpRequestsThisMinute: usageReport.httpRequestsThisMinute,
+      currentWsConnections: usageReport.currentWsConnections,
     };
   }
 
