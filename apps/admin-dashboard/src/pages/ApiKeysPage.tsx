@@ -31,6 +31,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { getAdminToken } from '../lib/api-client';
 import { useRefreshInterval } from '../hooks/useRefreshInterval';
 import * as admin from '../lib/admin-api';
@@ -508,7 +509,9 @@ export function ApiKeysPage() {
                   {/* KEY */}
                   <td>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                      <span className="cell-key" title={k.key}>{truncKey(k.key)}</span>
+                      <Link to={`/keys/${encodeURIComponent(k.key)}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                        <span className="cell-key" title={k.key}>{truncKey(k.key)}</span>
+                      </Link>
                       {k.is_test && (
                         <span
                           style={{
@@ -579,10 +582,13 @@ export function ApiKeysPage() {
                         type="button"
                         className="btn-xs"
                         onClick={() => setDetailKey(detailKey === k.key ? '' : k.key)}
-                        title="View live detail"
+                        title="Quick inline detail"
                       >
-                        {detailKey === k.key ? '▲' : 'Detail'}
+                        {detailKey === k.key ? '▲' : 'Quick'}
                       </button>
+                      <Link to={`/keys/${encodeURIComponent(k.key)}`} className="btn-xs" style={{ textDecoration: 'none', background: 'var(--accent)', color: '#fff', display: 'inline-flex', alignItems: 'center', height: 18 }}>
+                        Ult
+                      </Link>
                       <button
                         type="button"
                         className="btn-xs"

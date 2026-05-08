@@ -16,6 +16,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { TerminalLayout } from './components/TerminalLayout';
 import { OverviewPage } from './pages/OverviewPage';
 import { WatchPage } from './pages/WatchPage';
+import { ApiKeyDetailPage } from './pages/ApiKeyDetailPage';
 import { WorkspacePage } from './pages/WorkspacePage';
 import { ApiKeysPage } from './pages/ApiKeysPage';
 import { ProviderPage } from './pages/ProviderPage';
@@ -41,8 +42,9 @@ export default function App() {
                 <Route path="/" element={<TerminalLayout />}>
                   <Route index element={<OverviewPage />} />
                   <Route path="watch" element={<WatchPage />} />
-                  <Route path="workspace" element={<WorkspacePage />} />
                   <Route path="keys" element={<ApiKeysPage />} />
+                  <Route path="keys/:key" element={<ApiKeyDetailPage />} />
+                  <Route path="workspace" element={<WorkspacePage />} />
                   <Route path="provider" element={<ProviderPage />} />
                   <Route path="ws" element={<WsAdminPage />} />
                   <Route path="abuse" element={<AbusePage />} />

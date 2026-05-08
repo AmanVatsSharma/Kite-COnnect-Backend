@@ -6,6 +6,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
 import { ErrorInline } from '../components/ErrorInline';
@@ -122,7 +123,11 @@ export function WatchPage() {
                     filteredSockets.map((s) => (
                       <tr key={s.socketId}>
                         <td className="cell-code" title={s.socketId}>{s.socketId.slice(0, 8)}…</td>
-                        <td className="cell-key" title={s.apiKey}>{trunc(s.apiKey, 12)}</td>
+                        <td className="cell-key" title={s.apiKey}>
+                          <Link to={`/keys/${encodeURIComponent(s.apiKey)}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                            {trunc(s.apiKey, 12)}
+                          </Link>
+                        </td>
                         <td className="cell-muted" title={s.origin || ''} style={{ fontSize: 10 }}>
                           {trunc(s.origin, 30)}
                         </td>
