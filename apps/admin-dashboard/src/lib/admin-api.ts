@@ -388,3 +388,37 @@ export function getApiKeyLiveDetail(key: string) {
     { ...admin },
   );
 }
+
+export interface WsWatchResponse {
+  success: boolean;
+  totalConnections: number;
+  sockets: Array<{
+    socketId: string;
+    apiKey: string;
+    instruments: number;
+    connectedAt: string | null;
+    origin: string | null;
+    ip: string | null;
+    userAgent: string | null;
+  }>;
+  topInstruments: Array<{
+    token: number;
+    subscribers: number;
+    symbol: string | null;
+  }>;
+  timestamp: string;
+}
+
+export function getWsWatch() {
+  return apiFetch<WsWatchResponse>('/api/admin/ws/watch', { ...admin });
+}
+
+export function disconnectSocket(socketId: string) {
+  return apiFetch<{ success: boolean; message: string }>(
+    `/api/admin/ws/sockets/${encodeURIComponent(socketId)}/disconnect`,
+    {
+      ...admin,
+      method: 'POST',
+    },
+  );
+}

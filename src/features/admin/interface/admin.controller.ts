@@ -679,6 +679,39 @@ export class AdminController {
     };
   }
 
+  @Get('ws/watch')
+  @ApiOperation({
+    summary: 'Consolidated real-time monitoring for all WS connections',
+    description: 'Returns all active sockets with their API keys, origins, and subscription counts.',
+  })
+  async wsWatch() {
+    const watchStats = (this.gateway as any)?.getAllWatchStats?.() || {
+      totalConnections: 0,
+      sockets: [],
+    };
+    const topInstruments = this.wsInterest.getTopInstruments(20).map((entry) => ({
+      ...entry,
+      symbol: this.instrumentRegistry.getCanonicalSymbol(entry.token) ?? null,
+    }));
+
+    return {
+      success: true,
+      totalConnections: watchStats.totalConnections,
+      sockets: watchStats.sockets,
+      topInstruments,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post('ws/sockets/:id/disconnect')
+  @ApiOperation({ summary: 'Forcefully disconnect a specific WS socket' })
+  @ApiParam({ name: 'id', required: true, description: 'Socket ID' })
+  async disconnectSocket(@Param('id') id: string) {
+    const success = await (this.gateway as any)?.disconnectSocket?.(id);
+    if (!success) throw new NotFoundException(`Socket ${id} not found or gateway not ready`);
+    return { success: true, message: `Socket ${id} disconnected` };
+  }
+
   @Get('ws/instruments/top')
   @ApiOperation({
     summary: 'Top N most-subscribed instruments by WS client ref count',

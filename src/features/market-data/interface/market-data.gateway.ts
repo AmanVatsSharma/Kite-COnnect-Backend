@@ -2123,6 +2123,46 @@ export class MarketDataGateway
     };
   }
 
+  /**
+   * Manually disconnect a socket by ID (Admin action).
+   */
+  async disconnectSocket(socketId: string): Promise<boolean> {
+    const socket = this.server?.sockets?.sockets?.get(socketId);
+    if (!socket) return false;
+    this.logger.log(`[Gateway] Admin-initiated disconnect for socket: ${socketId}`);
+    socket.emit('error', {
+      code: 'admin_disconnect',
+      message: 'Your connection was terminated by an administrator',
+    });
+    socket.disconnect(true);
+    return true;
+  }
+
+  /**
+   * Comprehensive stats for the Watch Page.
+   */
+  getAllWatchStats() {
+    const allSockets = Array.from(this.subscriptionRegistry.values()).map((sub) => {
+      const s = this.server?.sockets?.sockets?.get(sub.socketId);
+      const data = (s?.data as any) ?? {};
+      const ctx = s ? this.extractWsOriginContext(s) : { ip: null, userAgent: null, origin: null };
+      return {
+        socketId: sub.socketId,
+        apiKey: sub.apiKey || 'anonymous',
+        instruments: sub.instruments.length,
+        connectedAt: data.connectedAt ?? null,
+        origin: ctx.origin,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      };
+    });
+
+    return {
+      totalConnections: this.subscriptionRegistry.size,
+      sockets: allSockets,
+    };
+  }
+
   private async flushBytesAccumulator(): Promise<void> {
     if (this.bytesAccumulator.size === 0) return;
     const snapshot = new Map(this.bytesAccumulator);

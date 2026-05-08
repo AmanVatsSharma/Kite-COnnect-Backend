@@ -15,6 +15,7 @@ import { QueryProvider } from './providers/QueryProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { TerminalLayout } from './components/TerminalLayout';
 import { OverviewPage } from './pages/OverviewPage';
+import { WatchPage } from './pages/WatchPage';
 import { WorkspacePage } from './pages/WorkspacePage';
 import { ApiKeysPage } from './pages/ApiKeysPage';
 import { ProviderPage } from './pages/ProviderPage';
@@ -39,6 +40,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<TerminalLayout />}>
                   <Route index element={<OverviewPage />} />
+                  <Route path="watch" element={<WatchPage />} />
                   <Route path="workspace" element={<WorkspacePage />} />
                   <Route path="keys" element={<ApiKeysPage />} />
                   <Route path="provider" element={<ProviderPage />} />

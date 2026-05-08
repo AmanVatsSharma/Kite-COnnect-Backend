@@ -22,6 +22,7 @@ import { CommandPalette } from './CommandPalette';
 
 const navItems = [
   { to: '/', label: 'Command', abbr: 'CMD' },
+  { to: '/watch', label: 'Watch', abbr: 'WTCH' },
   { to: '/keys', label: 'API Keys', abbr: 'KEYS' },
   { to: '/provider', label: 'Provider', abbr: 'PROV' },
   { to: '/ws', label: 'WS Admin', abbr: 'WS' },
