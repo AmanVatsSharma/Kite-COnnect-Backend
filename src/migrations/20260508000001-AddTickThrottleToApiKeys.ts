@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddTickThrottleToApiKeys20260508 implements MigrationInterface {
-  name = 'AddTickThrottleToApiKeys20260508';
+export class AddTickThrottleToApiKeys1778258600000 implements MigrationInterface {
+  name = 'AddTickThrottleToApiKeys1778258600000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
