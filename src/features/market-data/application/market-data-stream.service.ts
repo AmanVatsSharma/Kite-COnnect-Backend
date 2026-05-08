@@ -30,6 +30,7 @@ import {
 } from '@shared/utils/provider-label.util';
 import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { denormalizeExchange } from '@shared/utils/exchange-normalizer';
+import { AppConfigService } from '@infra/app-config/app-config.service';
 
 @Injectable()
 export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
@@ -85,6 +86,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   private isStartingStreaming = false;
   /** Callbacks waiting for the in-progress auto-start to resolve. */
   private readonly streamingStartWaiters: Array<(ok: boolean) => void> = [];
+  /** Global WS tick broadcast throttle in ms. 0 = off (every tick forwarded). Loaded from AppConfig on init. */
+  private globalTickThrottleMs = 0;
+  /** Per-UIR coalescing timers — trailing-edge flush of the latest tick payload. */
+  private readonly coalesceTimers = new Map<number, NodeJS.Timeout>();
 
   constructor(
     private providerResolver: MarketDataProviderResolverService,
@@ -95,6 +100,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     private readonly wsInterest: MarketDataWsInterestService,
     private readonly configService: ConfigService,
     private readonly instrumentRegistry: InstrumentRegistryService,
+    private readonly appConfig: AppConfigService,
   ) {}
 
   get activeProviderName(): InternalProviderName {
@@ -108,6 +114,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     // Do not auto-start streaming; wait for admin trigger
     this.startSyntheticPulseIfConfigured();
+    await this.loadGlobalTickThrottle();
   }
 
   async onModuleDestroy() {
@@ -115,7 +122,39 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.syntheticPulseTimer);
       this.syntheticPulseTimer = null;
     }
+    for (const timer of this.coalesceTimers.values()) clearTimeout(timer);
+    this.coalesceTimers.clear();
     await this.stopStreaming();
+  }
+
+  private async loadGlobalTickThrottle() {
+    try {
+      const raw = await this.appConfig.get('tick_broadcast_throttle_ms');
+      const ms = raw !== null ? parseInt(raw, 10) : 0;
+      this.globalTickThrottleMs = Number.isFinite(ms) && ms >= 0 ? ms : 0;
+      if (this.globalTickThrottleMs > 0) {
+        this.logger.log(
+          `Tick broadcast throttle loaded: ${this.globalTickThrottleMs}ms`,
+        );
+      }
+    } catch {
+      this.globalTickThrottleMs = 0;
+    }
+  }
+
+  /** Update global tick throttle at runtime and persist to AppConfig. */
+  async setGlobalTickThrottle(ms: number): Promise<void> {
+    const safeMs = Number.isFinite(ms) && ms >= 0 ? Math.round(ms) : 0;
+    this.globalTickThrottleMs = safeMs;
+    await this.appConfig.set('tick_broadcast_throttle_ms', String(safeMs));
+    // Clear pending coalesce timers so they don't fire with the old window
+    for (const timer of this.coalesceTimers.values()) clearTimeout(timer);
+    this.coalesceTimers.clear();
+    this.logger.log(`Global tick throttle set to ${safeMs}ms`);
+  }
+
+  getGlobalTickThrottle(): number {
+    return this.globalTickThrottleMs;
   }
 
   private startSyntheticPulseIfConfigured() {
@@ -518,15 +557,39 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         this.lastTickPayload.set(uirId, { ...effectiveTick });
         this.lastUpstreamAt.set(uirId, Date.now());
 
-        try {
-          await this.stockService.forwardRealtimeTick(uirId, effectiveTick);
-        } catch (storeError: any) {
-          this.rateLimitedLog(
-            'debug',
-            `forward_tick_fail:${uirId}`,
-            `Failed to forward tick for UIR ${uirId}, continuing: ${storeError?.message || storeError}`,
-            30_000,
-          );
+        if (this.globalTickThrottleMs > 0) {
+          // Trailing-edge coalesce: schedule a flush only if one isn't already pending.
+          // The latest payload is always stored above, so the flush always sends the freshest tick.
+          if (!this.coalesceTimers.has(uirId)) {
+            const timer = setTimeout(() => {
+              this.coalesceTimers.delete(uirId);
+              const payload = this.lastTickPayload.get(uirId);
+              if (payload === undefined) return;
+              this.stockService
+                .forwardRealtimeTick(uirId, payload)
+                .catch((e: any) => {
+                  this.rateLimitedLog(
+                    'debug',
+                    `forward_tick_fail:${uirId}`,
+                    `Failed to forward coalesced tick for UIR ${uirId}: ${e?.message || e}`,
+                    30_000,
+                  );
+                });
+            }, this.globalTickThrottleMs);
+            this.coalesceTimers.set(uirId, timer);
+          }
+          // Tick suppressed — payload already stored above; timer will flush it.
+        } else {
+          try {
+            await this.stockService.forwardRealtimeTick(uirId, effectiveTick);
+          } catch (storeError: any) {
+            this.rateLimitedLog(
+              'debug',
+              `forward_tick_fail:${uirId}`,
+              `Failed to forward tick for UIR ${uirId}, continuing: ${storeError?.message || storeError}`,
+              30_000,
+            );
+          }
         }
         this.stockService.enqueuePersistMarketData(uirId, effectiveTick);
       }
@@ -631,11 +694,21 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             this.unsubscriptionQueue.add(token);
             this.subscribedUirModes.delete(token);
             this.forcedProviderByUir.delete(token);
+            const t = this.coalesceTimers.get(token);
+            if (t !== undefined) {
+              clearTimeout(t);
+              this.coalesceTimers.delete(token);
+            }
           }
         } else {
           this.unsubscriptionQueue.add(token);
           this.subscribedUirModes.delete(token);
           this.forcedProviderByUir.delete(token);
+          const t = this.coalesceTimers.get(token);
+          if (t !== undefined) {
+            clearTimeout(t);
+            this.coalesceTimers.delete(token);
+          }
         }
       });
       this.trimUnsubscriptionQueue();

@@ -82,6 +82,11 @@ export class MarketDataGateway
   private readonly bytesAccumulator = new Map<string, number>();
   private bytesFlushTimer?: ReturnType<typeof setInterval>;
 
+  // Per-key tick throttle cache (ms). Loaded from API key record on connect/update.
+  private readonly apiKeyThrottleMs = new Map<string, number>();
+  // Per-socket per-instrument last-sent timestamp for per-key throttle enforcement.
+  private readonly perSocketLastSent = new Map<string, Map<number, number>>();
+
   constructor(
     private redisService: RedisService,
     private providerResolver: MarketDataProviderResolverService,
@@ -152,6 +157,14 @@ export class MarketDataGateway
         }
       }
       return;
+    }
+
+    // Refresh per-key tick throttle from updated record
+    const updatedThrottle = (newRecord as any)?.live_tick_throttle_ms ?? 0;
+    if (updatedThrottle > 0) {
+      this.apiKeyThrottleMs.set(key, updatedThrottle);
+    } else {
+      this.apiKeyThrottleMs.delete(key);
     }
 
     // Update cached record and re-evaluate entitlements
@@ -316,6 +329,11 @@ export class MarketDataGateway
       (client.data as any).apiKey = apiKey;
       (client.data as any).apiKeyRecord = record;
       (client.data as any).connectedAt = new Date().toISOString();
+
+      // Cache per-key throttle from record (null means inherit global — treat as 0 here)
+      const keyThrottle = (record as any)?.live_tick_throttle_ms ?? 0;
+      if (keyThrottle > 0) this.apiKeyThrottleMs.set(apiKey, keyThrottle);
+      this.perSocketLastSent.set(client.id, new Map());
 
       // Best-effort origin audit for WS connection
       try {
@@ -484,6 +502,9 @@ export class MarketDataGateway
 
       this.subscriptionRegistry.delete(client.id);
     }
+
+    // Free per-socket throttle state
+    this.perSocketLastSent.delete(client.id);
 
     // Untrack WS connection for API key
     try {
@@ -2015,8 +2036,22 @@ export class MarketDataGateway
       if (sockets.length === 0) return;
 
       const ts = new Date().toISOString();
+      const now = Date.now();
       for (const s of sockets) {
         const sub = this.subscriptionRegistry.get(s.id);
+        const apiKey = sub?.apiKey || (s.data as any)?.apiKey;
+
+        // Per-key trailing-edge throttle (additional gate on top of global stream throttle)
+        const keyThrottleMs = apiKey
+          ? (this.apiKeyThrottleMs.get(apiKey) ?? 0)
+          : 0;
+        if (keyThrottleMs > 0) {
+          const socketMap = this.perSocketLastSent.get(s.id);
+          const lastSent = socketMap?.get(identifier) ?? 0;
+          if (now - lastSent < keyThrottleMs) continue;
+          socketMap?.set(identifier, now);
+        }
+
         const mode: StreamTickMode =
           sub?.modeByInstrument?.get(identifier) || 'ltp';
         const payload = shapeMarketTickForMode(data, mode);
@@ -2030,10 +2065,12 @@ export class MarketDataGateway
         s.emit('market_data', emitPayload);
 
         // Accumulate approximate bytes per API key (flushed to Redis every 10s)
-        const apiKey = sub?.apiKey || (s.data as any)?.apiKey;
         if (apiKey) {
           const approxBytes = Buffer.byteLength(JSON.stringify(emitPayload));
-          this.bytesAccumulator.set(apiKey, (this.bytesAccumulator.get(apiKey) ?? 0) + approxBytes);
+          this.bytesAccumulator.set(
+            apiKey,
+            (this.bytesAccumulator.get(apiKey) ?? 0) + approxBytes,
+          );
         }
       }
 
@@ -2105,7 +2142,9 @@ export class MarketDataGateway
     const sockets = matchingSubs.map((sub) => {
       const s = this.server?.sockets?.sockets?.get(sub.socketId);
       const data = (s?.data as any) ?? {};
-      const ctx = s ? this.extractWsOriginContext(s) : { ip: null, userAgent: null, origin: null };
+      const ctx = s
+        ? this.extractWsOriginContext(s)
+        : { ip: null, userAgent: null, origin: null };
       return {
         socketId: sub.socketId,
         instruments: sub.instruments.length,
@@ -2118,7 +2157,10 @@ export class MarketDataGateway
 
     return {
       liveConnections: matchingSubs.length,
-      liveSubscriptions: matchingSubs.reduce((sum, s) => sum + s.instruments.length, 0),
+      liveSubscriptions: matchingSubs.reduce(
+        (sum, s) => sum + s.instruments.length,
+        0,
+      ),
       sockets,
     };
   }
@@ -2129,7 +2171,9 @@ export class MarketDataGateway
   async disconnectSocket(socketId: string): Promise<boolean> {
     const socket = this.server?.sockets?.sockets?.get(socketId);
     if (!socket) return false;
-    this.logger.log(`[Gateway] Admin-initiated disconnect for socket: ${socketId}`);
+    this.logger.log(
+      `[Gateway] Admin-initiated disconnect for socket: ${socketId}`,
+    );
     socket.emit('error', {
       code: 'admin_disconnect',
       message: 'Your connection was terminated by an administrator',
@@ -2142,20 +2186,24 @@ export class MarketDataGateway
    * Comprehensive stats for the Watch Page.
    */
   getAllWatchStats() {
-    const allSockets = Array.from(this.subscriptionRegistry.values()).map((sub) => {
-      const s = this.server?.sockets?.sockets?.get(sub.socketId);
-      const data = (s?.data as any) ?? {};
-      const ctx = s ? this.extractWsOriginContext(s) : { ip: null, userAgent: null, origin: null };
-      return {
-        socketId: sub.socketId,
-        apiKey: sub.apiKey || 'anonymous',
-        instruments: sub.instruments.length,
-        connectedAt: data.connectedAt ?? null,
-        origin: ctx.origin,
-        ip: ctx.ip,
-        userAgent: ctx.userAgent,
-      };
-    });
+    const allSockets = Array.from(this.subscriptionRegistry.values()).map(
+      (sub) => {
+        const s = this.server?.sockets?.sockets?.get(sub.socketId);
+        const data = (s?.data as any) ?? {};
+        const ctx = s
+          ? this.extractWsOriginContext(s)
+          : { ip: null, userAgent: null, origin: null };
+        return {
+          socketId: sub.socketId,
+          apiKey: sub.apiKey || 'anonymous',
+          instruments: sub.instruments.length,
+          connectedAt: data.connectedAt ?? null,
+          origin: ctx.origin,
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
+        };
+      },
+    );
 
     return {
       totalConnections: this.subscriptionRegistry.size,
@@ -2171,7 +2219,10 @@ export class MarketDataGateway
       try {
         await this.apiKeyService.incrementBytesSent(key, bytes);
       } catch (err) {
-        this.logger.warn(`[Gateway] Failed to flush bytes for key=${key}`, err as any);
+        this.logger.warn(
+          `[Gateway] Failed to flush bytes for key=${key}`,
+          err as any,
+        );
       }
     }
   }

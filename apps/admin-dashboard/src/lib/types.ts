@@ -11,6 +11,7 @@ export interface ApiKeyRow {
   ws_subscribe_rps?: number | null;
   ws_unsubscribe_rps?: number | null;
   ws_mode_rps?: number | null;
+  live_tick_throttle_ms?: number | null;
   provider?: 'kite' | 'vortex' | 'massive' | 'binance' | null;
   is_test: boolean;
   expires_at?: string | null;

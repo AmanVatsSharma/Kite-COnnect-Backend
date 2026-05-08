@@ -27,6 +27,7 @@
  *
  * Author:      BharatERP
  * Last-updated: 2026-05-08
+ * Changelog:   2026-05-08 — Added per-key tick throttle quick-set in Limits tab
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -222,6 +223,14 @@ interface LiveDetailDrawerProps {
   usageError: string | null;
 }
 
+const TICK_PRESETS = [
+  { label: 'Off', ms: null },
+  { label: '250ms', ms: 250 },
+  { label: '500ms', ms: 500 },
+  { label: '1s', ms: 1000 },
+  { label: '2s', ms: 2000 },
+];
+
 function LiveDetailDrawer({
   detailKey,
   onClose,
@@ -232,6 +241,15 @@ function LiveDetailDrawer({
   usageError,
 }: LiveDetailDrawerProps) {
   const [tab, setTab] = useState<'live' | 'domains' | 'limits'>('live');
+  const qc = useQueryClient();
+  const patchThrottle = useMutation({
+    mutationFn: (ms: number | null) =>
+      admin.updateApiKeyLimits({ key: detailKey, live_tick_throttle_ms: ms }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin-key-limits', detailKey] });
+      void qc.invalidateQueries({ queryKey: ['admin-apikeys'] });
+    },
+  });
 
   useEffect(() => { setTab('live'); }, [detailKey]);
 
@@ -320,6 +338,36 @@ function LiveDetailDrawer({
                 rows={limitsToRows(limitsData).map((r) => ({ label: r.label, value: r.value }))}
               />
             )}
+            {/* Per-key tick throttle quick-set */}
+            <div style={{ marginTop: 10 }}>
+              <div className="panel-section-title" style={{ marginBottom: 4 }}>TICK THROTTLE</div>
+              <p style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 6, lineHeight: 1.4 }}>
+                null = inherit global · 0 = off · custom ms = key-specific cap
+              </p>
+              <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                {TICK_PRESETS.map((p) => {
+                  const current = (limitsData as any)?.limits?.live_tick_throttle_ms ?? null;
+                  const active = current === p.ms;
+                  return (
+                    <button
+                      key={String(p.ms)}
+                      type="button"
+                      className="btn-xs"
+                      style={{ opacity: active ? 1 : 0.55, fontSize: 9 }}
+                      disabled={patchThrottle.isPending}
+                      onClick={() => patchThrottle.mutate(p.ms)}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {patchThrottle.isError && (
+                <p className="err" style={{ fontSize: 9, marginTop: 3 }}>
+                  {(patchThrottle.error as Error).message}
+                </p>
+              )}
+            </div>
           </div>
           <div>
             <div className="panel-section-title">USAGE BUNDLE</div>

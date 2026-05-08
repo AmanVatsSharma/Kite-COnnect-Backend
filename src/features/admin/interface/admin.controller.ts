@@ -217,6 +217,11 @@ export class AdminController {
           description:
             'Max instruments per WS connection (null = global default)',
         },
+        live_tick_throttle_ms: {
+          type: 'number',
+          description:
+            'Per-key WS tick delivery interval in ms (null = global setting, 0 = no throttle)',
+        },
         allowed_exchanges: { type: 'array', items: { type: 'string' } },
       },
       required: ['key'],
@@ -232,6 +237,7 @@ export class AdminController {
       ws_unsubscribe_rps?: number | null;
       ws_mode_rps?: number | null;
       ws_max_instruments?: number | null;
+      live_tick_throttle_ms?: number | null;
       allowed_exchanges?: string[];
     },
   ) {
@@ -253,6 +259,9 @@ export class AdminController {
     }
     if (body.ws_max_instruments !== undefined) {
       patch.ws_max_instruments = body.ws_max_instruments;
+    }
+    if (body.live_tick_throttle_ms !== undefined) {
+      patch.live_tick_throttle_ms = body.live_tick_throttle_ms;
     }
 
     // Handle allowed_exchanges update via metadata
@@ -303,6 +312,7 @@ export class AdminController {
           ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
           ws_mode_rps: entity.ws_mode_rps,
           ws_max_instruments: entity.ws_max_instruments,
+          live_tick_throttle_ms: entity.live_tick_throttle_ms,
           allowed_exchanges: entity.metadata?.exchanges,
         }
       : patch;
@@ -323,6 +333,32 @@ export class AdminController {
     };
   }
 
+  @Get('tick-throttle')
+  @ApiOperation({ summary: 'Get global WS tick broadcast throttle (ms)' })
+  async getTickThrottle() {
+    return { ms: this.stream.getGlobalTickThrottle() };
+  }
+
+  @Post('tick-throttle')
+  @ApiOperation({
+    summary: 'Set global WS tick broadcast throttle (ms). 0 = off.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { ms: { type: 'number' } },
+      required: ['ms'],
+    },
+  })
+  async setTickThrottle(@Body() body: { ms: number }) {
+    const ms = Number(body.ms);
+    if (!Number.isFinite(ms) || ms < 0) {
+      throw new BadRequestException('ms must be a non-negative number');
+    }
+    await this.stream.setGlobalTickThrottle(ms);
+    return { ms: this.stream.getGlobalTickThrottle() };
+  }
+
   @Get('apikeys/:key/limits')
   @ApiOperation({
     summary: 'Get configured limits for a single API key',
@@ -341,6 +377,7 @@ export class AdminController {
       ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
       ws_mode_rps: entity.ws_mode_rps,
       ws_max_instruments: entity.ws_max_instruments,
+      live_tick_throttle_ms: entity.live_tick_throttle_ms,
       allowed_exchanges: entity.metadata?.exchanges,
     };
 
@@ -384,6 +421,7 @@ export class AdminController {
       ws_unsubscribe_rps: entity.ws_unsubscribe_rps,
       ws_mode_rps: entity.ws_mode_rps,
       ws_max_instruments: entity.ws_max_instruments,
+      live_tick_throttle_ms: entity.live_tick_throttle_ms,
       allowed_exchanges: entity.metadata?.exchanges,
     };
 
@@ -462,24 +500,37 @@ export class AdminController {
   @Get('apikeys/live-stats')
   @ApiOperation({
     summary: 'Batch live metrics for all API keys (Redis + gateway, no DB)',
-    description: 'Returns live connections, subscriptions, and bytes/24h for every key. Fast endpoint — safe to poll every 5s.',
+    description:
+      'Returns live connections, subscriptions, and bytes/24h for every key. Fast endpoint — safe to poll every 5s.',
   })
   async listApiKeysLiveStats() {
     const gatewayStats = this.gateway.getConnectionStats();
-    const byApiKeyMap = new Map<string, { liveConnections: number; liveSubscriptions: number }>();
-    for (const entry of gatewayStats.byApiKey as Array<{ apiKey: string; connections: number; totalSubscribedInstruments: number }>) {
+    const byApiKeyMap = new Map<
+      string,
+      { liveConnections: number; liveSubscriptions: number }
+    >();
+    for (const entry of gatewayStats.byApiKey as Array<{
+      apiKey: string;
+      connections: number;
+      totalSubscribedInstruments: number;
+    }>) {
       byApiKeyMap.set(entry.apiKey, {
         liveConnections: entry.connections,
         liveSubscriptions: entry.totalSubscribedInstruments,
       });
     }
 
-    const allKeys = await this.apiKeyRepo.find({ select: ['key', 'is_active'] });
+    const allKeys = await this.apiKeyRepo.find({
+      select: ['key', 'is_active'],
+    });
     const keysArr = allKeys.map((k) => k.key);
     const bytesMap = await this.apiKeyService.getMultiBytesLast24h(keysArr);
 
     const items = allKeys.map((k) => {
-      const live = byApiKeyMap.get(k.key) ?? { liveConnections: 0, liveSubscriptions: 0 };
+      const live = byApiKeyMap.get(k.key) ?? {
+        liveConnections: 0,
+        liveSubscriptions: 0,
+      };
       return {
         key: k.key,
         is_active: k.is_active,
@@ -682,17 +733,20 @@ export class AdminController {
   @Get('ws/watch')
   @ApiOperation({
     summary: 'Consolidated real-time monitoring for all WS connections',
-    description: 'Returns all active sockets with their API keys, origins, and subscription counts.',
+    description:
+      'Returns all active sockets with their API keys, origins, and subscription counts.',
   })
   async wsWatch() {
     const watchStats = (this.gateway as any)?.getAllWatchStats?.() || {
       totalConnections: 0,
       sockets: [],
     };
-    const topInstruments = this.wsInterest.getTopInstruments(20).map((entry) => ({
-      ...entry,
-      symbol: this.instrumentRegistry.getCanonicalSymbol(entry.token) ?? null,
-    }));
+    const topInstruments = this.wsInterest
+      .getTopInstruments(20)
+      .map((entry) => ({
+        ...entry,
+        symbol: this.instrumentRegistry.getCanonicalSymbol(entry.token) ?? null,
+      }));
 
     return {
       success: true,
@@ -708,7 +762,10 @@ export class AdminController {
   @ApiParam({ name: 'id', required: true, description: 'Socket ID' })
   async disconnectSocket(@Param('id') id: string) {
     const success = await (this.gateway as any)?.disconnectSocket?.(id);
-    if (!success) throw new NotFoundException(`Socket ${id} not found or gateway not ready`);
+    if (!success)
+      throw new NotFoundException(
+        `Socket ${id} not found or gateway not ready`,
+      );
     return { success: true, message: `Socket ${id} disconnected` };
   }
 

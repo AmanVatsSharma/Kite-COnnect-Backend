@@ -54,6 +54,10 @@ export class NativeWsService implements OnModuleDestroy {
   private server: WSServer | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private clientSubscriptions = new Map<string, ClientSubscription>();
+  // Per-client tick throttle in ms (cached from API key record at connect time).
+  private readonly clientThrottleMs = new Map<string, number>();
+  // Per-client per-instrument last-sent timestamp for throttle enforcement.
+  private readonly clientLastSent = new Map<string, Map<number, number>>();
 
   constructor(
     private readonly redisService: RedisService,
@@ -205,6 +209,11 @@ export class NativeWsService implements OnModuleDestroy {
       );
       client.apiKey = apiKey;
 
+      // Cache per-key tick throttle (null = inherit global, treat as 0 here)
+      const keyThrottle = (record as any)?.live_tick_throttle_ms ?? 0;
+      if (keyThrottle > 0) this.clientThrottleMs.set(clientId, keyThrottle);
+      this.clientLastSent.set(clientId, new Map());
+
       // Initialize subscription
       this.clientSubscriptions.set(clientId, {
         clientId,
@@ -257,6 +266,10 @@ export class NativeWsService implements OnModuleDestroy {
       }
       this.clientSubscriptions.delete(clientId);
     }
+
+    // Free per-client throttle state
+    this.clientThrottleMs.delete(clientId);
+    this.clientLastSent.delete(clientId);
 
     // Untrack connection
     try {
@@ -930,6 +943,8 @@ export class NativeWsService implements OnModuleDestroy {
       ).filter((sub) => sub.instruments.includes(identifier));
 
       if (subscribedClients.length > 0) {
+        const ts = new Date().toISOString();
+        const now = Date.now();
         // Broadcast to all clients in this service
         this.server.clients.forEach((client) => {
           const ws = client as HeartbeatWebSocket;
@@ -940,6 +955,17 @@ export class NativeWsService implements OnModuleDestroy {
               : undefined;
 
             if (subscription && subscription.instruments.includes(identifier)) {
+              // Per-client trailing-edge throttle
+              if (clientId) {
+                const throttleMs = this.clientThrottleMs.get(clientId) ?? 0;
+                if (throttleMs > 0) {
+                  const lastSentMap = this.clientLastSent.get(clientId);
+                  const lastSent = lastSentMap?.get(identifier) ?? 0;
+                  if (now - lastSent < throttleMs) return;
+                  lastSentMap?.set(identifier, now);
+                }
+              }
+
               const m: StreamTickMode =
                 subscription.modeByInstrument.get(identifier) || 'ltp';
               const payload = shapeMarketTickForMode(data, m);
@@ -947,7 +973,7 @@ export class NativeWsService implements OnModuleDestroy {
                 instrumentToken: data?.instrument_token ?? identifier,
                 uirId: identifier,
                 data: payload,
-                timestamp: new Date().toISOString(),
+                timestamp: ts,
                 ...(emitOpts?.syntheticLast ? { syntheticLast: true } : {}),
               });
             }

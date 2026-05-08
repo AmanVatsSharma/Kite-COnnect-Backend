@@ -47,6 +47,10 @@ export class ApiKey {
   @Column({ type: 'int', nullable: true })
   ws_max_instruments: number | null;
 
+  /** Per-key WS tick delivery interval in ms. null = use global tick_broadcast_throttle_ms setting. 0 = no throttle. */
+  @Column({ type: 'int', nullable: true })
+  live_tick_throttle_ms: number | null;
+
   @Column({ type: 'json', nullable: true })
   metadata: any;
 

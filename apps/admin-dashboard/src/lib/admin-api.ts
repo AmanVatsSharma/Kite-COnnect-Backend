@@ -52,6 +52,7 @@ export function updateApiKeyLimits(body: {
   ws_subscribe_rps?: number | null;
   ws_unsubscribe_rps?: number | null;
   ws_mode_rps?: number | null;
+  live_tick_throttle_ms?: number | null;
   allowed_exchanges?: string[];
 }) {
   return apiFetch<Record<string, unknown>>('/api/admin/apikeys/limits', {
@@ -421,4 +422,18 @@ export function disconnectSocket(socketId: string) {
       method: 'POST',
     },
   );
+}
+
+// ─── Tick throttle ────────────────────────────────────────────────────────────
+
+export function getTickThrottle() {
+  return apiFetch<{ ms: number }>('/api/admin/tick-throttle', { ...admin });
+}
+
+export function setTickThrottle(ms: number) {
+  return apiFetch<{ ms: number }>('/api/admin/tick-throttle', {
+    ...admin,
+    method: 'POST',
+    body: JSON.stringify({ ms }),
+  });
 }

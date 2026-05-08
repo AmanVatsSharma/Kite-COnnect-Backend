@@ -15,6 +15,7 @@ import { LtpMemoryCacheService } from './ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketDataWsInterestService } from './market-data-ws-interest.service';
 import { InstrumentRegistryService } from './instrument-registry.service';
+import { AppConfigService } from '@infra/app-config/app-config.service';
 
 describe('MarketDataStreamService', () => {
   let service: MarketDataStreamService;
@@ -106,6 +107,10 @@ describe('MarketDataStreamService', () => {
         {
           provide: ConfigService,
           useValue: { get: configGet },
+        },
+        {
+          provide: AppConfigService,
+          useValue: { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
