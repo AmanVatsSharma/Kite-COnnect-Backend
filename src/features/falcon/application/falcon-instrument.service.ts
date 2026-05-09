@@ -787,14 +787,20 @@ export class FalconInstrumentService implements OnModuleInit {
     return out;
   }
 
-  async searchFalconInstruments(q: string, limit = 20) {
+  async searchFalconInstruments(q: string, limit = 20, exchange?: string) {
     const normalized = (q || '').trim().toUpperCase();
     if (!normalized) return [];
-    const results = await this.falconInstrumentRepo
+    const qb = this.falconInstrumentRepo
       .createQueryBuilder('fi')
-      .where('UPPER(fi.tradingsymbol) LIKE :q', { q: `%${normalized}%` })
-      .orWhere('UPPER(fi.name) LIKE :q', { q: `%${normalized}%` })
-      .andWhere('fi.is_active = true')
+      .where('fi.is_active = true')
+      .andWhere(
+        '(UPPER(fi.tradingsymbol) LIKE :q OR UPPER(fi.name) LIKE :q)',
+        { q: `%${normalized}%` },
+      );
+    if (exchange) {
+      qb.andWhere('fi.exchange = :exchange', { exchange: exchange.toUpperCase() });
+    }
+    const results = await qb
       .limit(limit)
       .orderBy('fi.tradingsymbol', 'ASC')
       .getMany();

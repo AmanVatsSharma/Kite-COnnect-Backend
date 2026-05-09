@@ -9,7 +9,7 @@
  *   - ChartWatchPage — full-page chart grid component
  *
  * Depends on:
- *   - ../lib/falcon-api   — postFalconHistoricalBatch, searchFalconInstruments
+ *   - ../lib/falcon-api   — postFalconHistoricalBatch, searchFalconInstruments (exchange-filtered)
  *   - ../lib/api-client   — getAdminToken
  *   - ../lib/toast        — notify
  *   - ../lib/types        — FalconCandle, FalconInstrument
@@ -191,23 +191,39 @@ function CandlePanel({ candles }: { candles: FalconCandle[] }) {
 
 // ─── InstrumentSearch ────────────────────────────────────────────────────────
 
+const EXCHANGE_FILTERS = ['NSE', 'BSE', 'MCX', 'NFO', 'BFO'] as const;
+const EXCHANGE_COLOR: Record<string, string> = {
+  NSE: '#4a90e2', BSE: '#f5a623', MCX: '#9b59b6', NFO: '#2bd39b', BFO: '#e67e22',
+};
+
 function InstrumentSearch({ onSelect }: { onSelect: (inst: FalconInstrument) => void }) {
   const [q, setQ] = useState('');
+  const [exchange, setExchange] = useState<string | undefined>(undefined);
   const [results, setResults] = useState<FalconInstrument[]>([]);
   const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function onChange(v: string) {
-    setQ(v);
+  function runSearch(query: string, ex: string | undefined) {
     if (timer.current) clearTimeout(timer.current);
-    if (!v.trim()) { setResults([]); setOpen(false); return; }
+    if (!query.trim()) { setResults([]); setOpen(false); return; }
     timer.current = setTimeout(async () => {
       try {
-        const res = await falcon.searchFalconInstruments(v, 8);
+        const res = await falcon.searchFalconInstruments(query, 25, ex);
         setResults(Array.isArray(res) ? res : []);
         setOpen(true);
       } catch { /* silent */ }
-    }, 300);
+    }, 250);
+  }
+
+  function onQueryChange(v: string) {
+    setQ(v);
+    runSearch(v, exchange);
+  }
+
+  function toggleExchange(ex: string) {
+    const next = exchange === ex ? undefined : ex;
+    setExchange(next);
+    runSearch(q, next);
   }
 
   function pick(inst: FalconInstrument) {
@@ -216,39 +232,72 @@ function InstrumentSearch({ onSelect }: { onSelect: (inst: FalconInstrument) => 
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <input
-        placeholder="Search instrument…"
-        value={q}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        style={{ width: '100%', fontSize: 11, padding: '3px 7px', boxSizing: 'border-box' }}
-      />
-      {open && results.length > 0 && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-          background: '#0c1522', border: '1px solid #1a2232', borderRadius: 4,
-          maxHeight: 180, overflowY: 'auto',
-        }}>
-          {results.map((r) => (
-            <div
-              key={r.instrument_token}
-              onMouseDown={() => pick(r)}
-              style={{
-                padding: '5px 8px', cursor: 'pointer', fontSize: 11,
-                borderBottom: '1px solid #1a2232',
-                display: 'flex', gap: 6, alignItems: 'baseline',
-              }}
-            >
-              <span style={{ color: '#fff', fontWeight: 600 }}>{r.tradingsymbol}</span>
-              <span style={{ color: '#4a90e2', fontSize: 10 }}>{r.exchange}</span>
-              <span style={{ color: '#8899aa', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {r.name}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+    <div>
+      {/* Exchange filter strip */}
+      <div style={{ display: 'flex', gap: 3, marginBottom: 4 }}>
+        <button
+          type="button"
+          className={`btn-xs${!exchange ? ' btn-xs--ok' : ''}`}
+          style={{ fontSize: 9 }}
+          onMouseDown={(e) => { e.preventDefault(); toggleExchange(''); }}
+        >ALL</button>
+        {EXCHANGE_FILTERS.map((ex) => (
+          <button
+            key={ex}
+            type="button"
+            className={`btn-xs${exchange === ex ? ' btn-xs--ok' : ''}`}
+            style={{ fontSize: 9, color: exchange === ex ? undefined : EXCHANGE_COLOR[ex] }}
+            onMouseDown={(e) => { e.preventDefault(); toggleExchange(ex); }}
+          >{ex}</button>
+        ))}
+      </div>
+
+      {/* Search input + dropdown */}
+      <div style={{ position: 'relative' }}>
+        <input
+          placeholder={exchange ? `Search ${exchange} instruments…` : 'Search NSE / BSE / MCX / NFO…'}
+          value={q}
+          onChange={(e) => onQueryChange(e.target.value)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          style={{ width: '100%', fontSize: 11, padding: '3px 7px', boxSizing: 'border-box' }}
+        />
+        {open && results.length > 0 && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+            background: '#0c1522', border: '1px solid #1a2232', borderRadius: 4,
+            maxHeight: 220, overflowY: 'auto',
+          }}>
+            {results.map((r) => (
+              <div
+                key={r.instrument_token}
+                onMouseDown={() => pick(r)}
+                style={{
+                  padding: '5px 8px', cursor: 'pointer',
+                  borderBottom: '1px solid #1a2232',
+                  display: 'flex', gap: 5, alignItems: 'baseline',
+                }}
+              >
+                <span style={{ color: '#fff', fontWeight: 600, fontSize: 11 }}>{r.tradingsymbol}</span>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, flexShrink: 0,
+                  color: EXCHANGE_COLOR[r.exchange] ?? '#8899aa',
+                }}>{r.exchange}</span>
+                <span style={{
+                  fontSize: 9, flexShrink: 0,
+                  color: r.instrument_type === 'EQ' ? '#2bd39b' : '#f5a623',
+                }}>{r.instrument_type}</span>
+                {r.expiry && (
+                  <span style={{ fontSize: 9, color: '#8899aa', flexShrink: 0 }}>{r.expiry}</span>
+                )}
+                <span style={{
+                  color: '#8899aa', fontSize: 10,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{r.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

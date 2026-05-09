@@ -282,9 +282,11 @@ export class AdminFalconController {
   @ApiOperation({ summary: 'Full-text search Falcon instruments' })
   @ApiQuery({ name: 'q', required: true })
   @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'exchange', required: false, description: 'Filter by exchange: NSE, BSE, MCX, NFO, BFO, CDS' })
   async searchInstruments(
     @Query('q') q?: string,
     @Query('limit') limitRaw?: string,
+    @Query('exchange') exchange?: string,
   ) {
     if (!q) {
       throw new HttpException(
@@ -297,7 +299,7 @@ export class AdminFalconController {
         1,
         Math.min(200, parseInt(String(limitRaw || '20')) || 20),
       );
-      const data = await this.instruments.searchFalconInstruments(q, limit);
+      const data = await this.instruments.searchFalconInstruments(q, limit, exchange || undefined);
       return { success: true, data };
     } catch (error) {
       throw new HttpException(
@@ -407,7 +409,8 @@ export class AdminFalconController {
 
   @Get('instruments/uir-coverage')
   @ApiOperation({
-    summary: 'UIR coverage diagnostic: how many active Falcon instruments have a UIR mapping',
+    summary:
+      'UIR coverage diagnostic: how many active Falcon instruments have a UIR mapping',
   })
   async uirCoverage() {
     try {

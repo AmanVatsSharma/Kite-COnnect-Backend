@@ -81,8 +81,9 @@ export function getFalconInstruments(params: FalconInstrumentsParams = {}) {
   );
 }
 
-export function searchFalconInstruments(q: string, limit = 20) {
+export function searchFalconInstruments(q: string, limit = 20, exchange?: string) {
   const params = new URLSearchParams({ q, limit: String(limit) });
+  if (exchange) params.set('exchange', exchange);
   return apiFetch<FalconInstrument[]>(
     `/api/admin/falcon/instruments/search?${params}`,
     { ...admin },
