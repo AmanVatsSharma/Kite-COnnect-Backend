@@ -26,6 +26,9 @@
  *   - Max 6 slots — all fit in one batch call (batch cap = 10)
  *   - lightweight-charts owns the canvas DOM; React never mutates it after mount
  *   - Changing interval resets count to that interval's sensible default
+ *   - Kite SDK returns `{ data: [{date, open, high, low, close, volume, oi?}, ...] }` — objects in a `data` envelope.
+ *     normalizeCandles() handles all observed shapes (objects, tuples, .data wrapper, .candles wrapper).
+ *   - Intraday candles use UNIX-seconds time; daily uses 'YYYY-MM-DD' string. Mixing collapses the chart.
  *
  * Read order:
  *   1. SlotConfig / ChartSlot    — state shape
@@ -124,6 +127,49 @@ function isMarketOpen(): boolean {
   return mins >= 555 && mins < 930; // 09:15 → 15:30
 }
 
+/**
+ * Normalize whatever the historical batch endpoint returns into FalconCandle tuples.
+ * Kite SDK actually returns: { data: [{date: Date, open, high, low, close, volume, oi?}, ...] }.
+ * We also tolerate { candles: [...] }, raw arrays, and tuple form for safety.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeCandles(raw: any): FalconCandle[] {
+  if (!raw) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let arr: any[] = [];
+  if (Array.isArray(raw)) arr = raw;
+  else if (typeof raw === 'object') arr = raw.data ?? raw.candles ?? [];
+  if (!Array.isArray(arr)) return [];
+  return arr
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((c: any): FalconCandle | null => {
+      if (Array.isArray(c)) {
+        return [String(c[0]), Number(c[1]), Number(c[2]), Number(c[3]), Number(c[4]), Number(c[5]), c[6] != null ? Number(c[6]) : undefined];
+      }
+      if (c && typeof c === 'object' && c.date != null) {
+        return [
+          String(c.date),
+          Number(c.open),
+          Number(c.high),
+          Number(c.low),
+          Number(c.close),
+          Number(c.volume),
+          c.oi != null ? Number(c.oi) : undefined,
+        ];
+      }
+      return null;
+    })
+    .filter((c): c is FalconCandle => c != null && Number.isFinite(c[1]));
+}
+
+/** Pull the per-token error message out of a batch entry, if any. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractError(raw: any): string | null {
+  if (!raw || Array.isArray(raw)) return null;
+  if (typeof raw === 'object' && typeof raw.error === 'string') return raw.error;
+  return null;
+}
+
 function makeSlot(overrides?: Partial<SlotConfig>): ChartSlot {
   return {
     id: Math.random().toString(36).slice(2, 9),
@@ -141,7 +187,22 @@ function makeSlot(overrides?: Partial<SlotConfig>): ChartSlot {
 
 // ─── CandlePanel ─────────────────────────────────────────────────────────────
 
-function CandlePanel({ candles }: { candles: FalconCandle[] }) {
+/**
+ * lightweight-charts time format:
+ *   - daily candles: "YYYY-MM-DD" string is fine
+ *   - intraday candles: MUST be UNIX timestamp in seconds (number), otherwise multiple candles
+ *     per day collapse into one slot and the chart looks empty/wrong.
+ */
+function toChartTime(dateStr: string, isIntraday: boolean): number | string {
+  if (isIntraday) {
+    const ms = new Date(dateStr).getTime();
+    return Math.floor(ms / 1000);
+  }
+  // Daily — extract YYYY-MM-DD
+  return dateStr.length >= 10 ? dateStr.slice(0, 10) : dateStr;
+}
+
+function CandlePanel({ candles, isIntraday }: { candles: FalconCandle[]; isIntraday: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -151,7 +212,7 @@ function CandlePanel({ candles }: { candles: FalconCandle[] }) {
       height: 280,
       layout: { background: { type: ColorType.Solid, color: '#0c1522' }, textColor: '#8899aa' },
       grid: { vertLines: { color: '#1a2232' }, horzLines: { color: '#1a2232' } },
-      timeScale: { borderColor: '#1a2232', timeVisible: true },
+      timeScale: { borderColor: '#1a2232', timeVisible: isIntraday, secondsVisible: false },
       rightPriceScale: { borderColor: '#1a2232' },
     });
 
@@ -168,14 +229,22 @@ function CandlePanel({ candles }: { candles: FalconCandle[] }) {
     });
     chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ohlc = candles.map((c) => ({ time: c[0].slice(0, 10) as any, open: c[1], high: c[2], low: c[3], close: c[4] }));
-    cs.setData(ohlc);
-    vs.setData(candles.map((c, i) => ({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      time: c[0].slice(0, 10) as any,
-      value: c[5],
-      color: (ohlc[i]?.close ?? 0) >= (ohlc[i]?.open ?? 0) ? '#2bd39b33' : '#ff525233',
+    // Sort + dedupe by time — lightweight-charts requires strictly ascending unique times
+    const seen = new Set<string | number>();
+    const ohlc = candles
+      .map((c) => ({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        time: toChartTime(c[0], isIntraday) as any,
+        open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5],
+      }))
+      .filter((c) => { if (seen.has(c.time)) return false; seen.add(c.time); return true; })
+      .sort((a, b) => (a.time > b.time ? 1 : a.time < b.time ? -1 : 0));
+
+    cs.setData(ohlc.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
+    vs.setData(ohlc.map((c) => ({
+      time: c.time,
+      value: c.volume,
+      color: c.close >= c.open ? '#2bd39b66' : '#ff525266',
     })));
     chart.timeScale().fitContent();
 
@@ -184,7 +253,7 @@ function CandlePanel({ candles }: { candles: FalconCandle[] }) {
     });
     ro.observe(ref.current);
     return () => { ro.disconnect(); chart.remove(); };
-  }, [candles]);
+  }, [candles, isIntraday]);
 
   return <div ref={ref} style={{ width: '100%', height: 280 }} />;
 }
@@ -402,7 +471,7 @@ function SlotCard({ slot, onSelect, onInterval, onCount, onRefresh, onRemove }: 
           <div style={{ color: 'var(--bad)', fontSize: 11 }}>{slot.error}</div>
         )}
         {!slot.loading && !slot.error && slot.candles.length > 0 && (
-          <CandlePanel candles={slot.candles} />
+          <CandlePanel candles={slot.candles} isIntraday={slot.interval !== 'day'} />
         )}
         {!slot.loading && !slot.token && (
           <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 11, padding: '60px 0' }}>
@@ -473,11 +542,10 @@ export function ChartWatchPage() {
       setSlots((prev) =>
         prev.map((s) => {
           if (!toFetch.find((t) => t.id === s.id) || !s.token) return s;
-          const entry = raw[s.token];
-          // Adapter returns FalconCandle[] on success, { error: string } on per-token failure
-          const all: FalconCandle[] = Array.isArray(entry) ? entry : (entry?.candles ?? []);
+          const entry = raw?.[s.token];
+          const err = extractError(entry);
+          const all = normalizeCandles(entry);
           const candles = all.slice(-s.count); // trim to exactly the last N requested
-          const err: string | null = !Array.isArray(entry) ? (entry?.error ?? null) : null;
           return { ...s, loading: false, candles, error: err, lastFetched: err ? s.lastFetched : Date.now() };
         })
       );
@@ -510,10 +578,10 @@ export function ChartWatchPage() {
       const today = istToday();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const raw = await falcon.postFalconHistoricalBatch([{ token, from: computeFrom(interval, count), to: today, interval }]) as any;
-      const entry = raw[token];
-      const all: FalconCandle[] = Array.isArray(entry) ? entry : (entry?.candles ?? []);
+      const entry = raw?.[token];
+      const err = extractError(entry);
+      const all = normalizeCandles(entry);
       const candles = all.slice(-count);
-      const err: string | null = !Array.isArray(entry) ? (entry?.error ?? null) : null;
       setSlots((prev) =>
         prev.map((s) =>
           s.id === slotId ? { ...s, loading: false, candles, error: err, lastFetched: err ? s.lastFetched : Date.now() } : s
