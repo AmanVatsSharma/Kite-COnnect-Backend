@@ -5,7 +5,7 @@
  *   Redis caching, and exponential-backoff retries for all Falcon market data calls.
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-14
+ * @updated 2026-05-09
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
@@ -173,6 +173,16 @@ export class FalconProviderAdapter {
       await this.setToRedis(cacheKey, data, 5);
     }
     return data || {};
+  }
+
+  async getQuoteBatched(tokens: string[]): Promise<Record<string, any>> {
+    if (!tokens.length) return {};
+    const CHUNK = 500;
+    const chunks: string[][] = [];
+    for (let i = 0; i < tokens.length; i += CHUNK)
+      chunks.push(tokens.slice(i, i + CHUNK));
+    const results = await Promise.all(chunks.map((c) => this.getQuote(c)));
+    return Object.assign({}, ...results);
   }
 
   // ─── OHLC ─────────────────────────────────────────────────────────────────

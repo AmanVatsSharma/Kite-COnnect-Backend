@@ -28,7 +28,7 @@
  *   3. getEquities / getFutures / getOptions / getCommodities — read + enrich paths
  *
  * Author:      BharatERP
- * Last-updated: 2026-05-05
+ * Last-updated: 2026-05-09
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -1346,6 +1346,206 @@ export class FalconInstrumentService implements OnModuleInit {
   }
 
   /**
+   * Deep options chain: full market snapshot (OI, volume, OHLC, depth) per strike.
+   * Uses getQuoteBatched() to handle large chains (BANKNIFTY 2000+ instruments).
+   * Redis-cached: 15s during market hours, 300s otherwise.
+   */
+  async getDeepOptionsChain(
+    symbol: string,
+    expiry?: string,
+    strikesAroundAtm = 0,
+  ): Promise<{
+    success: boolean;
+    data: {
+      symbol: string;
+      underlying_ltp: number | null;
+      atm_strike: number | null;
+      fetched_at: string;
+      expiries: string[];
+      chain: Record<
+        string,
+        {
+          pcr: number | null;
+          total_ce_oi: number;
+          total_pe_oi: number;
+          strikes: Array<{
+            strike: number;
+            itm: 'CE' | 'PE' | 'ATM' | null;
+            CE?: Record<string, any>;
+            PE?: Record<string, any>;
+          }>;
+        }
+      >;
+    };
+  }> {
+    const sym = String(symbol || '').trim().toUpperCase();
+    const cacheKey = `falcon:options:chain:deep:${sym}:${expiry || 'all'}:${strikesAroundAtm}`;
+    try {
+      const cached = await this.redis.get<any>(cacheKey);
+      if (cached) return cached;
+    } catch {
+      /* non-fatal */
+    }
+
+    const qb = this.falconInstrumentRepo
+      .createQueryBuilder('fi')
+      .where('UPPER(fi.name) = :sym', { sym })
+      .andWhere("fi.instrument_type IN ('CE', 'PE')")
+      .andWhere('fi.is_active = true');
+
+    if (expiry) qb.andWhere('fi.expiry = :expiry', { expiry });
+
+    qb.orderBy('fi.expiry', 'ASC').addOrderBy('fi.strike', 'ASC');
+    const rawRows = await qb.getMany();
+    const rows = this.enrichWithUir(rawRows);
+
+    // Fetch full quotes for all option tokens
+    const tokens = rows.map((r) => String(r.instrument_token));
+    let quoteMap: Record<string, any> = {};
+    try {
+      if (tokens.length) quoteMap = await this.falconAdapter.getQuoteBatched(tokens);
+    } catch {
+      /* enrichment optional — degrade to metadata-only */
+    }
+
+    // Fetch underlying LTP (try EQ first, then nearest FUT)
+    let underlyingLtp: number | null = null;
+    try {
+      const underlying = await this.falconInstrumentRepo
+        .createQueryBuilder('fi')
+        .where('UPPER(fi.name) = :sym', { sym })
+        .andWhere("fi.instrument_type IN ('EQ', 'FUT')")
+        .andWhere('fi.is_active = true')
+        .orderBy("CASE WHEN fi.instrument_type = 'EQ' THEN 0 ELSE 1 END", 'ASC')
+        .addOrderBy('fi.expiry', 'ASC')
+        .limit(1)
+        .getOne();
+      if (underlying) {
+        const ltpData = await this.falconAdapter.getLTP([
+          String(underlying.instrument_token),
+        ]);
+        const lp = Number(ltpData?.[String(underlying.instrument_token)]?.last_price);
+        if (Number.isFinite(lp) && lp > 0) underlyingLtp = lp;
+      }
+    } catch {
+      /* non-fatal */
+    }
+
+    // Build expiry → strikeMap
+    const expirySet = new Set<string>();
+    const allStrikes = new Set<number>();
+    const rawChain: Record<string, Record<number, { CE?: any; PE?: any }>> = {};
+
+    for (const row of rows) {
+      const exp = row.expiry || '';
+      const strike = Number(row.strike);
+      const q = quoteMap[String(row.instrument_token)] || {};
+      const ltp = Number(q.last_price ?? 0) || null;
+      const depth = q.depth ?? null;
+      const entry = {
+        instrument_token: row.instrument_token,
+        tradingsymbol: row.tradingsymbol,
+        expiry: row.expiry,
+        strike,
+        lot_size: row.lot_size,
+        tick_size: row.tick_size,
+        uir_id: row.uir_id,
+        canonical_symbol: row.canonical_symbol,
+        ltp,
+        oi: q.oi ?? null,
+        oi_day_high: q.oi_day_high ?? null,
+        oi_day_low: q.oi_day_low ?? null,
+        volume: q.volume ?? null,
+        average_price: q.average_price ?? null,
+        buy_quantity: q.buy_quantity ?? null,
+        sell_quantity: q.sell_quantity ?? null,
+        ohlc: q.ohlc ?? null,
+        bid: depth?.buy?.[0]?.price ?? null,
+        ask: depth?.sell?.[0]?.price ?? null,
+        depth,
+      };
+      expirySet.add(exp);
+      allStrikes.add(strike);
+      if (!rawChain[exp]) rawChain[exp] = {};
+      if (!rawChain[exp][strike]) rawChain[exp][strike] = {};
+      rawChain[exp][strike][row.instrument_type as 'CE' | 'PE'] = entry;
+    }
+
+    const sortedExpiries = [...expirySet].sort();
+    let sortedStrikes = [...allStrikes].sort((a, b) => a - b);
+
+    // ATM = strike closest to underlying LTP
+    let atmStrike: number | null = null;
+    if (underlyingLtp != null && sortedStrikes.length) {
+      atmStrike = sortedStrikes.reduce((prev, curr) =>
+        Math.abs(curr - underlyingLtp!) < Math.abs(prev - underlyingLtp!)
+          ? curr
+          : prev,
+      );
+    }
+
+    // Optional: keep only N strikes around ATM
+    if (strikesAroundAtm > 0 && atmStrike != null) {
+      const atmIdx = sortedStrikes.indexOf(atmStrike);
+      sortedStrikes = sortedStrikes.slice(
+        Math.max(0, atmIdx - strikesAroundAtm),
+        atmIdx + strikesAroundAtm + 1,
+      );
+    }
+
+    const chain: Record<string, any> = {};
+    for (const exp of sortedExpiries) {
+      let totalCeOi = 0;
+      let totalPeOi = 0;
+      const strikes = sortedStrikes
+        .map((strike) => {
+          const row = rawChain[exp]?.[strike];
+          if (!row) return null;
+          const ceOi = Number(row.CE?.oi ?? 0);
+          const peOi = Number(row.PE?.oi ?? 0);
+          totalCeOi += ceOi;
+          totalPeOi += peOi;
+          let itm: 'CE' | 'PE' | 'ATM' | null = null;
+          if (underlyingLtp != null) {
+            if (strike === atmStrike) itm = 'ATM';
+            else if (strike < underlyingLtp) itm = 'CE'; // CE is ITM when strike < spot
+            else itm = 'PE'; // PE is ITM when strike > spot
+          }
+          return { strike, itm, ...(row.CE ? { CE: row.CE } : {}), ...(row.PE ? { PE: row.PE } : {}) };
+        })
+        .filter(Boolean);
+
+      chain[exp] = {
+        pcr: totalCeOi > 0 ? Number((totalPeOi / totalCeOi).toFixed(4)) : null,
+        total_ce_oi: totalCeOi,
+        total_pe_oi: totalPeOi,
+        strikes,
+      };
+    }
+
+    const result = {
+      success: true,
+      data: {
+        symbol: sym,
+        underlying_ltp: underlyingLtp,
+        atm_strike: atmStrike,
+        fetched_at: new Date().toISOString(),
+        expiries: sortedExpiries,
+        chain,
+      },
+    };
+
+    const ttl = this.isMarketHours() ? 15 : 300;
+    try {
+      await this.redis.set(cacheKey, result, ttl);
+    } catch {
+      /* non-fatal */
+    }
+
+    return result;
+  }
+
+  /**
    * All active futures for a specific underlying symbol.
    * Kite: underlying name stored in `name` field, instrument_type = 'FUT'.
    */
@@ -1793,7 +1993,11 @@ export class FalconInstrumentService implements OnModuleInit {
 
         if (exchange === 'NSE' || exchange === 'BSE') {
           suffix = exchange === 'NSE' ? 'NS' : 'BO';
-        } else if (exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO')) {
+        } else if (
+          exchange === 'NFO' ||
+          exchange === 'MCX' ||
+          segment.includes('FO')
+        ) {
           // For NFO and MCX, Kite conveniently provides the underlying symbol in the 'name' field
           const nameField = (item as any).name;
           if (nameField && nameField.trim().length > 0) {
@@ -1801,7 +2005,11 @@ export class FalconInstrumentService implements OnModuleInit {
           } else {
             // Fallback regex if name is empty: match up to the first expiry date pattern
             const digitMatch = tradingsymbol.match(/\d{2}[A-Z]{3}/);
-            if (digitMatch && digitMatch.index !== undefined && digitMatch.index > 0) {
+            if (
+              digitMatch &&
+              digitMatch.index !== undefined &&
+              digitMatch.index > 0
+            ) {
               baseSymbol = tradingsymbol.substring(0, digitMatch.index);
             }
           }
@@ -1812,7 +2020,7 @@ export class FalconInstrumentService implements OnModuleInit {
           logo_url = `https://financialmodelingprep.com/image-stock/${encodeURIComponent(baseSymbol)}.${suffix}.png`;
         }
       }
-      
+
       if (!logo_url && isin) {
         // Fallback to Groww ISIN pattern if available (works for any instrument with an ISIN)
         logo_url = `https://assets-netstorage.groww.in/stock-assets/logos/${isin}.png`;

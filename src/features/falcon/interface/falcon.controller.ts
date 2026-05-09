@@ -1154,6 +1154,37 @@ export class FalconController {
     }
   }
 
+  @Get('options/chain/:symbol/deep')
+  @ApiOperation({
+    summary:
+      'Deep options chain — full market snapshot (OI, volume, OHLC, bid/ask depth, PCR) per strike. Sensibull-style.',
+    description:
+      'Returns CE/PE market data for every strike grouped by expiry. Each entry includes ltp, oi, volume, ohlc, bid/ask, market depth, and per-expiry PCR. Cached 15s during market hours, 300s otherwise.',
+  })
+  @ApiQuery({ name: 'expiry', required: false, example: '2025-05-15', description: 'Filter to a single expiry (YYYY-MM-DD). Omit for all expiries.' })
+  @ApiQuery({ name: 'strikes_around_atm', required: false, example: 10, description: 'Return only N strikes above and below ATM. 0 (default) = all strikes.' })
+  @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
+  async deepOptionsChain(
+    @Param('symbol') symbol: string,
+    @Query('expiry') expiry?: string,
+    @Query('strikes_around_atm') strikesAroundAtmRaw?: string,
+  ) {
+    try {
+      const strikesAroundAtm = Math.max(0, parseInt(String(strikesAroundAtmRaw || '0')) || 0);
+      return await this.falconInstruments.getDeepOptionsChain(symbol, expiry, strikesAroundAtm);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Falcon deep options chain failed',
+          error: (error as any)?.message || 'unknown',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Get('underlyings/:symbol/futures')
   @ApiOperation({
     summary: 'All active futures for a specific Falcon underlying symbol',
