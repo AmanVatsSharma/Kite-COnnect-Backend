@@ -77,6 +77,12 @@ function CommandPaletteMounted({ onClose }: { onClose: () => void }) {
         action: () => navigate('/audit'),
       },
       {
+        id: 'charts',
+        label: 'Go to Chart Watch',
+        detail: '/charts',
+        action: () => navigate('/charts'),
+      },
+      {
         id: 'auth',
         label: 'Go to Auth',
         detail: '/auth',

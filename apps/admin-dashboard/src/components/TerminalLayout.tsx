@@ -29,6 +29,7 @@ const navItems = [
   { to: '/abuse', label: 'Security', abbr: 'SEC' },
   { to: '/audit', label: 'Audit', abbr: 'AUD' },
   { to: '/falcon', label: 'Falcon', abbr: 'FAL' },
+  { to: '/charts', label: 'Charts', abbr: 'CHT' },
   { to: '/search', label: 'Search', abbr: 'SRCH' },
   { to: '/search-admin', label: 'Search Admin', abbr: 'SADM' },
   { to: '/auth', label: 'Auth', abbr: 'AUTH' },
