@@ -4,9 +4,22 @@
  * @description DTOs for Falcon market data endpoints: Quote, OHLC, Historical candles, Batch historical, Cache flush.
  * @author BharatERP
  * @created 2026-04-14
- * @updated 2026-04-14 — added FalconBatchHistoricalDto, FalconCacheFlushDto
+ * @updated 2026-05-10 — added class-validator decorators to FalconBatchHistorical* (global ValidationPipe runs whitelist+forbidNonWhitelisted)
  */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
 
 const VALID_INTERVALS = [
   'minute',
@@ -68,18 +81,23 @@ export class FalconHistoricalQueryDto {
 /** Single item in a batch historical request. */
 export class FalconBatchHistoricalItemDto {
   @ApiProperty({ description: 'Instrument token (numeric)', example: 738561 })
+  @IsInt()
   token!: number;
 
   @ApiProperty({
     description: "From date 'YYYY-MM-DD' or 'YYYY-MM-DD HH:mm:ss'",
     example: '2026-04-01',
   })
+  @IsString()
+  @IsNotEmpty()
   from!: string;
 
   @ApiProperty({
     description: "To date 'YYYY-MM-DD' or 'YYYY-MM-DD HH:mm:ss'",
     example: '2026-04-11',
   })
+  @IsString()
+  @IsNotEmpty()
   to!: string;
 
   @ApiProperty({
@@ -87,15 +105,20 @@ export class FalconBatchHistoricalItemDto {
     enum: VALID_INTERVALS,
     example: 'day',
   })
+  @IsIn(VALID_INTERVALS as readonly string[])
   interval!: HistoricalInterval;
 
   @ApiPropertyOptional({
     description: 'Continuous contract (F&O only)',
     example: false,
   })
+  @IsOptional()
+  @IsBoolean()
   continuous?: boolean;
 
   @ApiPropertyOptional({ description: 'Include OI (F&O only)', example: false })
+  @IsOptional()
+  @IsBoolean()
   oi?: boolean;
 }
 
@@ -106,6 +129,11 @@ export class FalconBatchHistoricalDto {
       'Array of historical requests (max 10). Each must include token, from, to, interval.',
     type: [FalconBatchHistoricalItemDto],
   })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => FalconBatchHistoricalItemDto)
   requests!: FalconBatchHistoricalItemDto[];
 }
 
