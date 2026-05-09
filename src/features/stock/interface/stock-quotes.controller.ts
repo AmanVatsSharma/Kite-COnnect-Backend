@@ -423,4 +423,49 @@ export class StockQuotesController {
       );
     }
   }
+
+  @Get('candles/:token')
+  @ApiOperation({ summary: 'Get last N candles for an instrument token (date range auto-computed)' })
+  @ApiQuery({ name: 'limit', required: false, example: 500, description: 'Number of candles to return (max 1000)' })
+  @ApiQuery({ name: 'interval', required: false, example: 'minute', description: 'Kite interval: minute, 3minute, 5minute, 15minute, 30minute, 60minute, day' })
+  async getCandles(
+    @Param('token') tokenRaw: string,
+    @Query('limit') limitRaw?: string,
+    @Query('interval') interval?: string,
+  ) {
+    try {
+      const token = Number(tokenRaw);
+      if (!Number.isFinite(token)) {
+        return { success: false, message: 'Invalid token' };
+      }
+      const limit = Math.min(Number(limitRaw) || 500, 1000);
+      const resolvedInterval = interval || 'minute';
+
+      // IST date helpers — no external dep, no timezone lib
+      const istNow = new Date(Date.now() + 5.5 * 3_600_000);
+      const toDate = istNow.toISOString().slice(0, 10);
+      const fromDate = new Date(istNow.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
+
+      const raw = await this.stockService.getHistoricalData(token, fromDate, toDate, resolvedInterval);
+
+      const allCandles = (Array.isArray(raw) ? raw : []).map((c: any) => {
+        const time = Math.floor(new Date(c.date).getTime() / 1000);
+        return {
+          candle: { time, open: c.open, high: c.high, low: c.low, close: c.close },
+          volume: { time, value: c.volume ?? 0 },
+        };
+      });
+
+      const sliced = allCandles.slice(-limit);
+      return {
+        success: true,
+        instrument_token: token,
+        candles: sliced.map((x) => x.candle),
+        volumes: sliced.map((x) => x.volume),
+      };
+    } catch (error) {
+      // Never throw — browser falls back to synthetic seed silently
+      return { success: false, message: (error as Error).message };
+    }
+  }
 }
