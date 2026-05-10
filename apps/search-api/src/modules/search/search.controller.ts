@@ -106,7 +106,9 @@ function buildResponseRow(
 
   if (internalProvider === 'binance' || segment === 'CRYPTO') {
     // Crypto specific logos (BTC, ETH, etc.)
-    const cleanCrypto = (raw.symbol || '').replace(/USDT$|BUSD$|BTC$/, '').toUpperCase();
+    const cleanCrypto = (raw.symbol || '')
+      .replace(/USDT$|BUSD$|BTC$/, '')
+      .toUpperCase();
     logo_url = `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${encodeURIComponent(cleanCrypto.toLowerCase())}.png`;
   } else {
     // Equity and Commodity logos
@@ -115,7 +117,11 @@ function buildResponseRow(
         baseSymbol = raw.name.trim().toUpperCase();
       } else if (raw.symbol) {
         const digitMatch = raw.symbol.match(/\d{2}[A-Z]{3}/);
-        if (digitMatch && digitMatch.index !== undefined && digitMatch.index > 0) {
+        if (
+          digitMatch &&
+          digitMatch.index !== undefined &&
+          digitMatch.index > 0
+        ) {
           baseSymbol = raw.symbol.substring(0, digitMatch.index);
         }
       }
@@ -126,9 +132,18 @@ function buildResponseRow(
       }
     }
 
-    if (baseSymbol && !baseSymbol.includes(' ') && (exchange === 'NSE' || exchange === 'BSE' || exchange === 'NFO' || exchange === 'MCX' || segment.includes('FO'))) {
+    if (
+      baseSymbol &&
+      !baseSymbol.includes(' ') &&
+      (exchange === 'NSE' ||
+        exchange === 'BSE' ||
+        exchange === 'NFO' ||
+        exchange === 'MCX' ||
+        segment.includes('FO'))
+    ) {
       // For MCX, we don't use suffixes like .NS or .BO
-      const suffix = exchange === 'MCX' ? '' : (exchange === 'BSE' ? '.BO' : '.NS');
+      const suffix =
+        exchange === 'MCX' ? '' : exchange === 'BSE' ? '.BO' : '.NS';
       logo_url = `https://financialmodelingprep.com/image-stock/${encodeURIComponent(baseSymbol)}${suffix}.png`;
     }
   }
@@ -202,10 +217,10 @@ function buildMeiliAttrs(
     'id',
     'canonicalSymbol',
     'streamProvider', // needed for brand mapping even if client didn't request it
-    'symbol',         // needed to compute logo_url
-    'name',           // needed to compute logo_url for derivatives
-    'exchange',       // needed to compute logo_url
-    'segment',        // needed to compute logo_url
+    'symbol', // needed to compute logo_url
+    'name', // needed to compute logo_url for derivatives
+    'exchange', // needed to compute logo_url
+    'segment', // needed to compute logo_url
   ]);
   if (selectedFields) {
     for (const f of selectedFields) attrs.add(f);

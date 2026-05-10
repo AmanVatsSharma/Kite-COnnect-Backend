@@ -66,11 +66,11 @@ const CANDLES_PER_DAY: Record<Interval, number> = {
 
 /** Sensible default candle count when an interval is first selected. */
 const DEFAULT_COUNT: Record<Interval, number> = {
-  minute: 375,    // 1 trading day
-  '5minute': 100,
-  '15minute': 100,
-  '30minute': 100,
-  '60minute': 100,
+  minute: 200,
+  '5minute': 200,
+  '15minute': 200,
+  '30minute': 200,
+  '60minute': 200,
   day: 200,
 };
 
@@ -609,11 +609,13 @@ export function ChartWatchPage() {
   function handleInterval(id: string, iv: Interval) {
     const slot = slots.find((s) => s.id === id);
     if (!slot) return;
-    const newCount = DEFAULT_COUNT[iv]; // reset count to a sensible default for the new interval
+    const newCount = slot.count || 200;
     setSlots((prev) =>
       prev.map((s) => (s.id === id ? { ...s, interval: iv, count: newCount, candles: [], loading: !!slot.token, error: null } : s))
     );
-    if (slot.token) void fetchOne(id, slot.token, iv, newCount);
+    if (slot.token) {
+      void fetchOne(id, slot.token, iv, newCount);
+    }
   }
 
   function handleCount(id: string, n: number) {
@@ -622,7 +624,9 @@ export function ChartWatchPage() {
     setSlots((prev) =>
       prev.map((s) => (s.id === id ? { ...s, count: n, candles: [], loading: !!slot.token, error: null } : s))
     );
-    if (slot.token) void fetchOne(id, slot.token, slot.interval, n);
+    if (slot.token) {
+      void fetchOne(id, slot.token, slot.interval, n);
+    }
   }
 
   function addSlot() {

@@ -94,7 +94,10 @@ async function bootstrap() {
         // Allow them through — they're not subject to browser CORS anyway.
         if (!origin) return callback(null, true);
         if (allowedOrigins.has(origin)) return callback(null, true);
-        return callback(new Error(`CORS: origin not allowed (${origin})`), false);
+        return callback(
+          new Error(`CORS: origin not allowed (${origin})`),
+          false,
+        );
       },
       methods: ['GET', 'POST', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'x-admin-token'],

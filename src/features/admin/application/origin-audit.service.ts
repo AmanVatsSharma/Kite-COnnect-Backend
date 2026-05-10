@@ -254,7 +254,14 @@ export class OriginAuditService {
     apiKey: string,
     hoursBack = 24,
     limit = 20,
-  ): Promise<Array<{ origin: string | null; hitCount: number; lastSeen: Date; kind: string }>> {
+  ): Promise<
+    Array<{
+      origin: string | null;
+      hitCount: number;
+      lastSeen: Date;
+      kind: string;
+    }>
+  > {
     try {
       const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000);
       const rows = await this.auditRepo
@@ -279,7 +286,10 @@ export class OriginAuditService {
       }));
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('[OriginAuditService] getTopOriginsForKey failed', { apiKey, err: (err as any)?.message });
+      console.error('[OriginAuditService] getTopOriginsForKey failed', {
+        apiKey,
+        err: (err as any)?.message,
+      });
       return [];
     }
   }

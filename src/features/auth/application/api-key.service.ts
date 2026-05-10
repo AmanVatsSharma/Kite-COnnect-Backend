@@ -146,7 +146,11 @@ export class ApiKeyService {
       }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('[ApiKeyService] Failed to increment bytes sent', { key, bytes, err: (err as any)?.message });
+      console.error('[ApiKeyService] Failed to increment bytes sent', {
+        key,
+        bytes,
+        err: (err as any)?.message,
+      });
     }
   }
 
@@ -168,7 +172,9 @@ export class ApiKeyService {
     const result = new Map<string, number>();
     if (keys.length === 0) return result;
     try {
-      const counts = await Promise.all(keys.map((k) => this.getBytesLast24h(k)));
+      const counts = await Promise.all(
+        keys.map((k) => this.getBytesLast24h(k)),
+      );
       keys.forEach((k, i) => result.set(k, counts[i] ?? 0));
     } catch {
       keys.forEach((k) => result.set(k, 0));

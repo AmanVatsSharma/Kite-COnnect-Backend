@@ -330,7 +330,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async incrby(key: string, delta: number): Promise<number> {
     const client = this.defaultClient as Redis | null;
     if (!client) return 0;
-    return this.withCircuitBreaker('incrby', () => client.incrby(key, delta), 0);
+    return this.withCircuitBreaker(
+      'incrby',
+      () => client.incrby(key, delta),
+      0,
+    );
   }
 
   /**
