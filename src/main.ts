@@ -136,10 +136,26 @@ async function bootstrap() {
     }
 
     // CORS configuration (admin dashboard sends x-admin-token / x-api-key)
-    // credentials: false — auth is via x-api-key header, not cookies.
-    // With origin:'*', browsers reject credentials:true (RFC 6454 rule), causing CORS failures.
+    // credentials: true — allowed only for specific non-wildcard origins.
+    const allowedOrigins = [
+      'https://tradebazar.live',
+      'https://www.tradebazar.live',
+      'https://marketdata.vedpragya.com',
+    ];
+    const extraOrigins = configService.get('CORS_ORIGIN', '');
+    if (extraOrigins && extraOrigins !== '*') {
+      extraOrigins.split(',').forEach((o) => allowedOrigins.push(o.trim()));
+    }
+
     app.enableCors({
-      origin: configService.get('CORS_ORIGIN', '*'),
+      origin: (origin, callback) => {
+        // Allow if no origin (like mobile apps or curl) or if in our allowed list
+        if (!origin || allowedOrigins.includes(origin) || extraOrigins === '*') {
+          callback(null, true);
+        } else {
+          callback(null, false);
+        }
+      },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
       allowedHeaders: [
         'Content-Type',
@@ -148,7 +164,7 @@ async function bootstrap() {
         'x-api-key',
         'x-provider',
       ],
-      credentials: false,
+      credentials: true,
     });
 
     // Redis Adapter for Socket.IO
