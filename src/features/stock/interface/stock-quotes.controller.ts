@@ -69,6 +69,35 @@ export class StockQuotesController {
   }
 
   /**
+   * Ultimate resolution: identifier → { token, provider }
+   * Identifier can be a Canonical Symbol (NSE:RELIANCE), Underlying (NIFTY 50), UIR ID (42), or Raw Token (256265).
+   */
+  private resolveFlexibleToken(id: string): { token: number; provider: string } {
+    // 1. Try flexible symbol resolution (e.g. "NSE:SBIN", "NIFTY 50")
+    const flex = this.registry.resolveFlexSymbol(id);
+    if (flex.status === 'resolved') {
+      const provider = this.registry.getBestProviderForUirId(flex.uirId) || 'kite';
+      const token = this.registry.getProviderToken(flex.uirId, provider);
+      if (token) return { token: Number(token), provider };
+    }
+
+    // 2. Try resolving as UIR ID (numeric check)
+    const numericId = Number(id);
+    if (Number.isFinite(numericId) && numericId > 0) {
+      // Check if this number exists as a UIR ID
+      const canonical = this.registry.getCanonicalSymbol(numericId);
+      if (canonical) {
+        const provider = this.registry.getBestProviderForUirId(numericId) || 'kite';
+        const token = this.registry.getProviderToken(numericId, provider);
+        if (token) return { token: Number(token), provider };
+      }
+    }
+
+    // 3. Fallback: Assume it is a raw provider token (prefer kite)
+    return { token: Number(id), provider: 'kite' };
+  }
+
+  /**
    * POST /api/stock/universal/ltp
    * Provider-agnostic LTP resolution by universal instrument ID.
    * Prefers vortex; falls back to kite for instruments without a vortex token.
@@ -379,21 +408,24 @@ export class StockQuotesController {
   }
 
   @Get('historical/:token')
-  @ApiOperation({ summary: 'Get historical data for an instrument token' })
+  @ApiOperation({
+    summary: 'Get historical data for an instrument (Flexible ID)',
+    description: 'Identifier can be a raw Token, UIR ID, or Symbol (e.g. NIFTY 50).',
+  })
   @ApiQuery({ name: 'from', required: true, example: '2026-04-01' })
   @ApiQuery({ name: 'to', required: true, example: '2026-04-11' })
   @ApiQuery({ name: 'interval', required: true, example: 'day' })
   async getHistorical(
-    @Param('token') tokenRaw: string,
+    @Param('token') id: string,
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('interval') interval: string,
   ) {
     try {
-      const token = Number(tokenRaw);
+      const { token, provider } = this.resolveFlexibleToken(id);
       if (!Number.isFinite(token)) {
         throw new HttpException(
-          { success: false, message: 'Invalid token' },
+          { success: false, message: 'Invalid identifier' },
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -402,6 +434,7 @@ export class StockQuotesController {
         from,
         to,
         interval,
+        { 'x-provider': provider },
       );
       // Historical data is an array of candles, we don't enrich individual candles with UIR
       // but we could wrap the response if needed. For now, keep as-is or enrich top-level.
@@ -425,18 +458,21 @@ export class StockQuotesController {
   }
 
   @Get('candles/:token')
-  @ApiOperation({ summary: 'Get last N candles for an instrument token (date range auto-computed)' })
+  @ApiOperation({
+    summary: 'Get last N candles for an instrument (Flexible ID)',
+    description: 'Identifier can be a raw Token, UIR ID, or Symbol (e.g. NIFTY 50).',
+  })
   @ApiQuery({ name: 'limit', required: false, example: 500, description: 'Number of candles to return (max 1000)' })
   @ApiQuery({ name: 'interval', required: false, example: 'minute', description: 'Kite interval: minute, 3minute, 5minute, 15minute, 30minute, 60minute, day' })
   async getCandles(
-    @Param('token') tokenRaw: string,
+    @Param('token') id: string,
     @Query('limit') limitRaw?: string,
     @Query('interval') interval?: string,
   ) {
     try {
-      const token = Number(tokenRaw);
+      const { token, provider } = this.resolveFlexibleToken(id);
       if (!Number.isFinite(token)) {
-        return { success: false, message: 'Invalid token' };
+        return { success: false, message: 'Invalid identifier' };
       }
       const limit = Math.min(Number(limitRaw) || 500, 1000);
       const resolvedInterval = interval || 'minute';
@@ -446,7 +482,7 @@ export class StockQuotesController {
       const toDate = istNow.toISOString().slice(0, 10);
       const fromDate = new Date(istNow.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
 
-      const raw = await this.stockService.getHistoricalData(token, fromDate, toDate, resolvedInterval);
+      const raw = await this.stockService.getHistoricalData(token, fromDate, toDate, resolvedInterval, { 'x-provider': provider });
 
       const allCandles = (Array.isArray(raw) ? raw : []).map((c: any) => {
         const time = Math.floor(new Date(c.date).getTime() / 1000);
