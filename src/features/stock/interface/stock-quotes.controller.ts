@@ -477,10 +477,19 @@ export class StockQuotesController {
       const limit = Math.min(Number(limitRaw) || 500, 1000);
       const resolvedInterval = interval || 'minute';
 
-      // IST date helpers — no external dep, no timezone lib
+      // Compute a date window large enough to cover `limit` candles of `resolvedInterval`.
+      // NSE has 375 trading minutes/day; add 60% buffer for weekends + holidays.
+      const MINS: Record<string, number> = {
+        minute: 1, '3minute': 3, '5minute': 5, '10minute': 10,
+        '15minute': 15, '30minute': 30, '60minute': 60, day: 375,
+      };
+      const minsPerCandle = MINS[resolvedInterval] ?? 1;
+      const tradingDaysNeeded = Math.ceil((minsPerCandle * limit) / 375);
+      const calendarDaysNeeded = Math.ceil(tradingDaysNeeded * 1.6) + 5;
+
       const istNow = new Date(Date.now() + 5.5 * 3_600_000);
       const toDate = istNow.toISOString().slice(0, 10);
-      const fromDate = new Date(istNow.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
+      const fromDate = new Date(istNow.getTime() - calendarDaysNeeded * 86_400_000).toISOString().slice(0, 10);
 
       const raw = await this.stockService.getHistoricalData(token, fromDate, toDate, resolvedInterval, { 'x-provider': provider });
 
