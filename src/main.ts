@@ -136,9 +136,11 @@ async function bootstrap() {
     }
 
     // CORS configuration (admin dashboard sends x-admin-token / x-api-key)
+    // credentials: false — auth is via x-api-key header, not cookies.
+    // With origin:'*', browsers reject credentials:true (RFC 6454 rule), causing CORS failures.
     app.enableCors({
       origin: configService.get('CORS_ORIGIN', '*'),
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
       allowedHeaders: [
         'Content-Type',
         'Authorization',
@@ -146,7 +148,7 @@ async function bootstrap() {
         'x-api-key',
         'x-provider',
       ],
-      credentials: true,
+      credentials: false,
     });
 
     // Redis Adapter for Socket.IO
