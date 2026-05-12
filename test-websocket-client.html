@@ -271,6 +271,7 @@
         <span>Messages: <b id="msgCount">0</b></span>
         <span>Rate: <b id="dataRate">0/s</b></span>
         <span>Last: <b id="lastUp">—</b></span>
+        <span style="font-size:10px;color:#888;margin-left:auto">(—" = not provided in this mode)</span>
     </div>
     <div class="tbl-wrap">
         <table>
@@ -278,7 +279,10 @@
                 <tr>
                     <th>Token</th><th>uirId</th><th>Mode</th>
                     <th>Last</th><th>Open</th><th>High</th><th>Low</th><th>Close</th>
-                    <th>Volume</th><th>Best Bid</th><th>Best Ask</th><th>Updated</th>
+                    <th>Vol</th>
+                    <th>BidPx</th><th>BidQty</th><th>BidOrd</th>
+                    <th>AskPx</th><th>AskQty</th><th>AskOrd</th>
+                    <th>Updated</th>
                 </tr>
             </thead>
             <tbody id="tickBody">
@@ -635,7 +639,10 @@ function handleTick(raw) {
     lastMsgTs = now;
 
     var d = raw.data || raw;
-    ticks[token] = { token: token, uirId: raw.uirId || '', d: d, ts: new Date().toLocaleTimeString() };
+    // Merge with existing tick to preserve OHLC/depth from previous full-tick
+    var prev = ticks[token];
+    var merged = prev && prev.d ? { ...prev.d, ...d } : d;
+    ticks[token] = { token: token, uirId: raw.uirId || '', d: merged, ts: new Date().toLocaleTimeString() };
     renderTick(token);
 }
 
@@ -643,17 +650,22 @@ function fmt(v) { return (v != null) ? (typeof v === 'number' ? v.toFixed(2) : S
 
 function renderTick(token) {
     var t = ticks[token], d = t.d;
+    // Vortex: depth.buy/sell, OHLC in ohlc object; Kite: best_bid/best_ask, open/close top-level
     var bid = (d.depth && d.depth.buy  && d.depth.buy[0])  || d.best_bid  || null;
     var ask = (d.depth && d.depth.sell && d.depth.sell[0]) || d.best_ask  || null;
-    var bidTxt = bid ? String(bid.quantity||'?') + '@' + fmt(bid.price) : '—';
-    var askTxt = ask ? String(ask.quantity||'?') + '@' + fmt(ask.price) : '—';
-    var mode   = d.depth ? 'full' : (d.open != null ? 'ohlcv' : 'ltp');
+    // OHLC from ohlc object (Vortex) or top-level (Kite)
+    var open  = d.ohlc ? d.ohlc.open  : d.open;
+    var high  = d.ohlc ? d.ohlc.high  : d.high;
+    var low   = d.ohlc ? d.ohlc.low   : d.low;
+    var close = d.ohlc ? d.ohlc.close : d.close;
+    // Mode: full (depth/5-level) > ohlcv (OHLC) > ltp
+    var mode  = d.depth ? 'full' : (d.ohlc || d.open != null ? 'ohlcv' : 'ltp');
 
     var row = document.getElementById('tick-' + token);
     if (!row) {
         row = document.createElement('tr');
         row.id = 'tick-' + token;
-        for (var i = 0; i < 12; i++) row.insertCell();
+        for (var i = 0; i < 16; i++) row.insertCell();
         var em = document.getElementById('emptyRow');
         if (em) em.parentNode.removeChild(em);
         document.getElementById('tickBody').appendChild(row);
@@ -671,20 +683,28 @@ function renderTick(token) {
 
     cells[3].textContent  = fmt(d.last_price || d.ltp);
     cells[3].style.fontWeight = 'bold';
-    cells[4].textContent  = fmt(d.open);
-    cells[5].textContent  = fmt(d.high);
+    cells[4].textContent  = fmt(open);
+    cells[4].style.color  = '#888';
+    cells[5].textContent  = fmt(high);
     cells[5].style.color  = '#2e7d32';
-    cells[6].textContent  = fmt(d.low);
+    cells[6].textContent  = fmt(low);
     cells[6].style.color  = '#c62828';
-    cells[7].textContent  = fmt(d.close);
+    cells[7].textContent  = fmt(close);
+    cells[7].style.color  = '#888';
     cells[8].textContent  = fmt(d.volume || d.volume_traded);
-    cells[9].textContent  = bidTxt;
+    // Bid columns (9, 10, 11)
+    cells[9].textContent  = bid ? fmt(bid.price) : '—';
     cells[9].style.color  = '#1565c0';
-    cells[10].textContent = askTxt;
-    cells[10].style.color = '#c62828';
-    cells[11].textContent = t.ts;
-    cells[11].style.color = '#aaa';
-    cells[11].style.fontSize = '11px';
+    cells[10].textContent = bid ? String(bid.quantity||bid.qty||'') : '—';
+    cells[11].textContent = bid ? String(bid.orders||'') : '';
+    // Ask columns (12, 13, 14) - add headers if needed
+    cells[12].textContent = ask ? fmt(ask.price) : '—';
+    cells[12].style.color = '#c62828';
+    cells[13].textContent = ask ? String(ask.quantity||ask.qty||'') : '—';
+    cells[14].textContent = ask ? String(ask.orders||'') : '';
+    cells[15].textContent = t.ts;
+    cells[15].style.color = '#aaa';
+    cells[15].style.fontSize = '11px';
 
     row.classList.remove('flash');
     void row.offsetWidth;
@@ -788,7 +808,7 @@ function clearTicks() {
     var emptyRow = document.createElement('tr');
     emptyRow.id = 'emptyRow';
     var td = document.createElement('td');
-    td.colSpan = 12;
+    td.colSpan = 16;
     td.textContent = 'No ticks yet';
     td.style.cssText = 'text-align:center;color:#aaa;padding:18px';
     emptyRow.appendChild(td);

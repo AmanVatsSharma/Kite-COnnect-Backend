@@ -865,10 +865,15 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           }
 
           // Group by mode then chunk-subscribe
+          // CRITICAL: Always use FULL mode for upstream subscriptions
+          // Downstream shapeMarketTickForMode filters per-client mode
+          // This ensures FULL clients always get OHLC + depth data
           const modeGroups = new Map<string, number[]>();
           for (const [uirId, sub] of subscriptions) {
-            if (!modeGroups.has(sub.mode)) modeGroups.set(sub.mode, []);
-            modeGroups.get(sub.mode)!.push(uirId);
+            // Treat all modes as FULL for upstream - downstream filters per-client
+            const effectiveMode = 'full';
+            if (!modeGroups.has(effectiveMode)) modeGroups.set(effectiveMode, []);
+            modeGroups.get(effectiveMode)!.push(uirId);
           }
 
           for (const [mode, uirIds] of modeGroups) {
@@ -884,7 +889,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               }
             }
             this.logger.log(
-              `[StreamBatching][${providerName}] Subscribing ${providerTokens.length} tokens (${uirIds.length} UIR IDs) mode=${mode}`,
+              `[StreamBatching][${providerName}] Subscribing ${providerTokens.length} tokens (${uirIds.length} UIR IDs) mode=FULL (upstream, per-client mode filtered downstream)`,
             );
             for (
               let i = 0;
@@ -895,7 +900,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
                 i,
                 i + this.SUBSCRIBE_CHUNK_SIZE,
               );
-              state.ticker.subscribe(chunk, mode as 'ltp' | 'ohlcv' | 'full');
+              state.ticker.subscribe(chunk, 'full');
             }
             uirIds.forEach((uirId) => {
               state.subscribedUirIds.add(uirId);
@@ -992,6 +997,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   }
 
   async setMode(mode: string, instrumentTokens: number[]) {
+    // CRITICAL: Upstream always stays in FULL mode
+    // Client's modeByInstrument is updated for downstream filtering
+    // but we never downgrade the upstream to LTP/OHLCV
+    const upstreamMode = 'full';
     try {
       for (const [providerName, state] of this.activeProviderState) {
         if (!state.isConnected) continue;
@@ -1000,9 +1009,9 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         );
         if (relevant.length === 0) continue;
         try {
-          state.ticker.setMode(mode, relevant);
+          state.ticker.setMode(upstreamMode, relevant);
           this.logger.log(
-            `[${providerName}] Set mode ${mode} for ${relevant.length} instruments`,
+            `[${providerName}] setMode: upstream=${upstreamMode} for ${relevant.length} instruments (client mode=${mode} filtered downstream)`,
           );
         } catch (e) {
           this.logger.warn(`[${providerName}] setMode failed`, e as any);
