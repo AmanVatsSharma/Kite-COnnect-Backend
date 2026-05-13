@@ -253,13 +253,13 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
     return out;
   }
 
-  private async setCachedLtp(token: string | number, price: number | null) {
+  private async setCachedLtp(token: string | number, price: number | null, change?: number | null, pchange?: number | null) {
     try {
       if (Number.isFinite(price) && (price as any) > 0) {
         this.ltpCache.set(token, price as any);
         await this.redisService.set(
           `ltp:${token}`,
-          { last_price: price, ts: Date.now() },
+          { last_price: price, change: change ?? null, pchange: pchange ?? null, ts: Date.now() },
           10,
         );
         this.noteHotset(token);
@@ -610,7 +610,7 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         out[tokenPart] = {
           last_price: Number.isFinite(raw) && raw > 0 ? raw : null,
         };
-        await this.setCachedLtp(tokenPart, out[tokenPart].last_price);
+        await this.setCachedLtp(tokenPart, out[tokenPart].last_price, data?.change ?? null, data?.pchange ?? null);
       }
       // Ensure all requested tokens present in output
       for (const t of tokens) {
@@ -644,8 +644,12 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
       token: string | number;
     }>,
     options?: { bypassCache?: boolean; backgroundRefresh?: boolean },
-  ): Promise<Record<string, { last_price: number | null }>> {
-    const result: Record<string, { last_price: number | null }> = {};
+  ): Promise<Record<string, {
+    last_price: number | null;
+    change?: number | null;
+    pchange?: number | null;
+  }>> {
+    const result: Record<string, { last_price: number | null; change?: number | null; pchange?: number | null }> = {};
     try {
       await this.ensureTokenLoaded();
       if (!this.http) {
@@ -697,7 +701,11 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
         for (const [pairKey, tok] of tokenByKey.entries()) {
           const lp = cached[String(tok)]?.last_price;
           if (Number.isFinite(lp as any) && (lp as any) > 0) {
-            result[pairKey] = { last_price: lp as any };
+            result[pairKey] = {
+              last_price: lp as any,
+              change: (cached as any)?.[String(tok)]?.change ?? null,
+              pchange: (cached as any)?.[String(tok)]?.pchange ?? null,
+            };
           }
         }
       }
@@ -733,9 +741,13 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
             );
             const lp = Number.isFinite(raw) && raw > 0 ? raw : null;
             if (lp !== null) withLtp++;
-            result[exToken] = { last_price: lp };
+            result[exToken] = {
+              last_price: lp,
+              change: quote?.change ?? null,
+              pchange: quote?.pchange ?? null,
+            };
             const tok = Number(String(exToken.split('-').pop()));
-            if (Number.isFinite(tok)) await this.setCachedLtp(tok, lp);
+            if (Number.isFinite(tok)) await this.setCachedLtp(tok, lp, quote?.change ?? null, quote?.pchange ?? null);
           }
         } catch (e) {
           this.logger.error('[Vortex] getLTPByPairs HTTP error', e as any);

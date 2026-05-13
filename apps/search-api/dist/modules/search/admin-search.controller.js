@@ -32,7 +32,10 @@ let AdminSearchController = class AdminSearchController {
     assertAdmin(headerVal) {
         const expected = process.env.ADMIN_TOKEN || '';
         if (!expected) {
-            throw new common_1.HttpException({ success: false, message: 'admin disabled (ADMIN_TOKEN not set on search-api)' }, common_1.HttpStatus.SERVICE_UNAVAILABLE);
+            throw new common_1.HttpException({
+                success: false,
+                message: 'admin disabled (ADMIN_TOKEN not set on search-api)',
+            }, common_1.HttpStatus.SERVICE_UNAVAILABLE);
         }
         if (!headerVal || String(headerVal).trim() !== expected) {
             throw new common_1.HttpException({ success: false, message: 'unauthorized' }, common_1.HttpStatus.UNAUTHORIZED);

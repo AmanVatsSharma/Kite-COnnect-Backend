@@ -76,6 +76,10 @@ export type SearchResultItem = {
    * Precomputed by the indexer from `exchange` via EXCHANGE_TO_PROVIDER.
    */
   streamProvider?: StreamProviderName;
+  /** Price change from previous close (absolute value). */
+  change?: number | null;
+  /** Price change from previous close (percentage). */
+  pchange?: number | null;
 };
 
 // ─── Field projection allow-lists ─────────────────────────────────────────────

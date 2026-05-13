@@ -91,6 +91,9 @@ type MeiliDoc = {
    * Ensures NSE:RELIANCE sorts before BSE:RELIANCE when relevance is equal.
    */
   exchangeRank: number;
+  /** Unix timestamp of expiry — enables numeric sort for nearest-expiry first.
+   *  Non-derivatives get 9999999999 (sorts last). */
+  expiryTs: number;
 };
 
 /**
@@ -301,6 +304,13 @@ function toDoc(r: UniversalRow): MeiliDoc {
     assetClass: r.asset_class || 'equity',
     optionType: r.option_type || null,
     expiry: r.expiry ? String(r.expiry).slice(0, 10) : null,
+    expiryTs: r.expiry
+      ? Math.floor(
+          new Date(
+            String(r.expiry).slice(0, 10) + 'T09:15:00Z',
+          ).getTime() / 1000,
+        )
+      : 9999999999,
     strike: r.strike !== null ? Number(r.strike) : null,
     lotSize: r.lot_size || 1,
     tickSize: Number(r.tick_size) || 0.05,
@@ -319,7 +329,10 @@ function toDoc(r: UniversalRow): MeiliDoc {
       const isCrypto =
         r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto';
       if (!isCrypto)
-        return { searchKeywords: [symbol, r.name].filter(Boolean) as string[] };
+        return {
+          searchKeywords: [symbol, r.name].filter(Boolean) as string[],
+          exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
+        };
       const base = extractCoinBase(symbol);
       const fullName = CRYPTO_BASE_NAMES[base];
       const kw: string[] = [symbol, r.name].filter(Boolean) as string[];
@@ -338,6 +351,7 @@ function toDoc(r: UniversalRow): MeiliDoc {
       return {
         searchKeywords: kw,
         coinFullName: fullName && isUsdtQuoted ? fullName : undefined,
+        exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
       };
     })(),
   };
@@ -358,10 +372,11 @@ async function applySettings(
         'coinFullName', // P0: crypto full name (Bitcoin/Ethereum/Solana) — only Binance docs have this;
         // ranks crypto tickers above US equity funds that happen to mention the coin
         'symbol', // P1: direct ticker (RELIANCE, NIFTY, BTCUSDT)
-        'canonicalSymbol', // P2: "NSE:RELIANCE"
-        'name', // P3: company/pair name
-        'underlyingSymbol', // P4: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
-        'searchKeywords', // P5: combined fallback bag
+        'exactName', // P2: normalized company name for exact match boost (e.g. "RELIANCEINDUSTRIES")
+        'name', // P3: company/pair name (moved above canonicalSymbol)
+        'canonicalSymbol', // P4: "NSE:RELIANCE"
+        'underlyingSymbol', // P5: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
+        'searchKeywords', // P6: combined fallback bag
       ],
       filterableAttributes: [
         'exchange',
@@ -384,6 +399,7 @@ async function applySettings(
         'rankOrder',
         'exchangeRank',
         'expiry',
+        'expiryTs', // numeric sort = nearest expiry first
         'strike',
         'optionType',
       ],

@@ -101,6 +101,10 @@ export type SearchResultItem = {
   last_price?: number | null;
   /** 'live' = last_price > 0; 'stale' = no live price (off-hours / no mapping / delisted). */
   priceStatus?: 'live' | 'stale';
+  /** Price change from previous close (absolute value). */
+  change?: number | null;
+  /** Price change from previous close (percentage). */
+  pchange?: number | null;
 
   // ── Admin-only fields (populated only when ?include=internal + x-admin-token) ──
   /** Raw internal provider name (kite/vortex/massive/binance) — admin only. */

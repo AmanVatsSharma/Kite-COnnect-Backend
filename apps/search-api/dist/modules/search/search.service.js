@@ -36,6 +36,7 @@ exports.PUBLIC_ALWAYS_INCLUDED = [
     'last_price',
     'priceStatus',
     'streamProvider',
+    'logo_url',
 ];
 exports.INTERNAL_ONLY_FIELDS = [
     'kiteToken',
@@ -88,9 +89,9 @@ let SearchService = SearchService_1 = class SearchService {
         this.logger = new common_1.Logger('SearchService');
         this.hydrationFailures = 0;
         this.hydrationBreakerUntil = 0;
-        const primaryHost = process.env.MEILI_HOST_PRIMARY
-            || process.env.MEILI_HOST
-            || 'http://meilisearch:7700';
+        const primaryHost = process.env.MEILI_HOST_PRIMARY ||
+            process.env.MEILI_HOST ||
+            'http://meilisearch:7700';
         const secondaryHost = process.env.MEILI_HOST_SECONDARY || '';
         const meiliKey = process.env.MEILI_MASTER_KEY || '';
         const meiliTimeout = Number(process.env.MEILI_TIMEOUT_MS || 1200);
@@ -124,12 +125,20 @@ let SearchService = SearchService_1 = class SearchService {
             ? Array.from(attributesToRetrieve)
             : Array.from(SearchService_1.DEFAULT_ATTRS_TO_RETRIEVE);
         const filterExpr = this.buildFilter(filters);
+        const brokerSort = [
+            'rankOrder:asc',
+            'exchangeRank:asc',
+            'expiry:asc',
+            'strike:asc',
+            'optionType:asc',
+        ];
         const precise = await this.meili.search(index, {
             q,
             limit,
             attributesToRetrieve: attrs,
             filter: filterExpr,
             matchingStrategy: 'all',
+            sort: brokerSort,
         });
         const primary = precise.hits || [];
         if (primary.length >= limit)
@@ -139,7 +148,8 @@ let SearchService = SearchService_1 = class SearchService {
             limit,
             attributesToRetrieve: attrs,
             filter: filterExpr,
-            matchingStrategy: 'last',
+            matchingStrategy: 'any',
+            sort: brokerSort,
         });
         return this.dedupeById([...primary, ...(broad.hits || [])]).slice(0, limit);
     }
@@ -150,7 +160,14 @@ let SearchService = SearchService_1 = class SearchService {
             q: '',
             limit: 0,
             filter: filterExpr,
-            facets: ['exchange', 'segment', 'instrumentType', 'optionType', 'assetClass', 'streamProvider'],
+            facets: [
+                'exchange',
+                'segment',
+                'instrumentType',
+                'optionType',
+                'assetClass',
+                'streamProvider',
+            ],
         });
         return (resp === null || resp === void 0 ? void 0 : resp.facetDistribution) || {};
     }
@@ -179,7 +196,9 @@ let SearchService = SearchService_1 = class SearchService {
         if (!toFetch.length)
             return result;
         try {
-            const url = mode === 'ltp' ? '/api/stock/vayu/ltp' : `/api/stock/quotes?mode=${mode}&ltp_only=true`;
+            const url = mode === 'ltp'
+                ? '/api/stock/vayu/ltp'
+                : `/api/stock/quotes?mode=${mode}&ltp_only=true`;
             const resp = await this.hydrator.post(url, { instruments: toFetch });
             const data = ((_a = resp.data) === null || _a === void 0 ? void 0 : _a.data) || {};
             Object.assign(result, data);
@@ -230,7 +249,9 @@ let SearchService = SearchService_1 = class SearchService {
         if (!toFetch.length)
             return result;
         try {
-            const resp = await this.hydrator.post('/api/stock/universal/ltp', { ids: toFetch });
+            const resp = await this.hydrator.post('/api/stock/universal/ltp', {
+                ids: toFetch,
+            });
             const data = ((_a = resp.data) === null || _a === void 0 ? void 0 : _a.data) || {};
             Object.assign(result, data);
             if (this.redis) {
@@ -257,15 +278,21 @@ let SearchService = SearchService_1 = class SearchService {
         try {
             if (!this.redis)
                 return;
-            const normQ = String(q || '').trim().toLowerCase();
-            const normSym = String(symbol || '').trim().toUpperCase();
+            const normQ = String(q || '')
+                .trim()
+                .toLowerCase();
+            const normSym = String(symbol || '')
+                .trim()
+                .toUpperCase();
             if (!normQ || !normSym)
                 return;
             const ttlSec = Number(process.env.SYNONYMS_TTL_DAYS || 14) * 86400;
             const keys = [
                 `syn:q:${normQ}:sym:${normSym}`,
                 `syn:sym:${normSym}`,
-                ...(Number.isFinite(universalId) ? [`syn:uid:${universalId}:q:${normQ}`] : []),
+                ...(Number.isFinite(universalId)
+                    ? [`syn:uid:${universalId}:q:${normQ}`]
+                    : []),
             ];
             for (const k of keys) {
                 await this.redis.incrby(k, 1);
@@ -320,11 +347,27 @@ let SearchService = SearchService_1 = class SearchService {
 };
 exports.SearchService = SearchService;
 SearchService.DEFAULT_ATTRS_TO_RETRIEVE = [
-    'id', 'canonicalSymbol', 'symbol', 'name', 'exchange', 'segment',
-    'instrumentType', 'assetClass', 'optionType', 'expiry', 'strike',
-    'lotSize', 'tickSize', 'isDerivative', 'underlyingSymbol',
-    'kiteToken', 'vortexToken', 'vortexExchange',
-    'massiveToken', 'binanceToken', 'streamProvider',
+    'id',
+    'canonicalSymbol',
+    'symbol',
+    'name',
+    'exchange',
+    'segment',
+    'instrumentType',
+    'assetClass',
+    'optionType',
+    'expiry',
+    'strike',
+    'lotSize',
+    'tickSize',
+    'isDerivative',
+    'underlyingSymbol',
+    'kiteToken',
+    'vortexToken',
+    'vortexExchange',
+    'massiveToken',
+    'binanceToken',
+    'streamProvider',
 ];
 exports.SearchService = SearchService = SearchService_1 = __decorate([
     (0, common_1.Injectable)(),

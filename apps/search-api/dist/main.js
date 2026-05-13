@@ -10,6 +10,8 @@ const timeout_interceptor_1 = require("./modules/common/timeout.interceptor");
 const DEFAULT_CORS_ORIGINS = [
     'https://tradebazar.live',
     'https://www.tradebazar.live',
+    'https://stocktrade.ltd',
+    'https://www.stocktrade.ltd',
     'https://tradingpro-platform.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001',

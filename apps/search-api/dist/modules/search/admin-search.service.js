@@ -16,9 +16,9 @@ const ioredis_1 = require("ioredis");
 let AdminSearchService = class AdminSearchService {
     constructor() {
         this.logger = new common_1.Logger('AdminSearchService');
-        const host = process.env.MEILI_HOST_PRIMARY
-            || process.env.MEILI_HOST
-            || 'http://meilisearch:7700';
+        const host = process.env.MEILI_HOST_PRIMARY ||
+            process.env.MEILI_HOST ||
+            'http://meilisearch:7700';
         const apiKey = process.env.MEILI_MASTER_KEY || '';
         this.meili = axios_1.default.create({
             baseURL: host,
@@ -49,18 +49,28 @@ let AdminSearchService = class AdminSearchService {
             this.fetchSelectionSignals(topN).catch((e) => {
                 var _a;
                 errors.push(`redis: ${(_a = e === null || e === void 0 ? void 0 : e.message) !== null && _a !== void 0 ? _a : 'unknown'}`);
-                return { scanned: 0, top: [] };
+                return {
+                    scanned: 0,
+                    top: [],
+                };
             }),
         ]);
         const queryAgg = new Map();
         for (const sig of signals.top) {
-            const cur = (_a = queryAgg.get(sig.q)) !== null && _a !== void 0 ? _a : { totalSelections: 0, symbols: new Set() };
+            const cur = (_a = queryAgg.get(sig.q)) !== null && _a !== void 0 ? _a : {
+                totalSelections: 0,
+                symbols: new Set(),
+            };
             cur.totalSelections += sig.count;
             cur.symbols.add(sig.symbol);
             queryAgg.set(sig.q, cur);
         }
         const popularQueries = Array.from(queryAgg.entries())
-            .map(([q, v]) => ({ q, totalSelections: v.totalSelections, uniqueSymbols: v.symbols.size }))
+            .map(([q, v]) => ({
+            q,
+            totalSelections: v.totalSelections,
+            uniqueSymbols: v.symbols.size,
+        }))
             .sort((a, b) => b.totalSelections - a.totalSelections)
             .slice(0, topN);
         return {
@@ -81,13 +91,21 @@ let AdminSearchService = class AdminSearchService {
         const settings = settingsResp.data || {};
         return {
             indexName,
-            numberOfDocuments: typeof stats.numberOfDocuments === 'number' ? stats.numberOfDocuments : null,
+            numberOfDocuments: typeof stats.numberOfDocuments === 'number'
+                ? stats.numberOfDocuments
+                : null,
             isIndexing: typeof stats.isIndexing === 'boolean' ? stats.isIndexing : null,
             fieldDistribution: (_a = stats.fieldDistribution) !== null && _a !== void 0 ? _a : null,
             settings: {
-                searchableAttributes: Array.isArray(settings.searchableAttributes) ? settings.searchableAttributes : null,
-                filterableAttributes: Array.isArray(settings.filterableAttributes) ? settings.filterableAttributes : null,
-                sortableAttributes: Array.isArray(settings.sortableAttributes) ? settings.sortableAttributes : null,
+                searchableAttributes: Array.isArray(settings.searchableAttributes)
+                    ? settings.searchableAttributes
+                    : null,
+                filterableAttributes: Array.isArray(settings.filterableAttributes)
+                    ? settings.filterableAttributes
+                    : null,
+                sortableAttributes: Array.isArray(settings.sortableAttributes)
+                    ? settings.sortableAttributes
+                    : null,
                 synonymCount: settings.synonyms && typeof settings.synonyms === 'object'
                     ? Object.keys(settings.synonyms).length
                     : null,

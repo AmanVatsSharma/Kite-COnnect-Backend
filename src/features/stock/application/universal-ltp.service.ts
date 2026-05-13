@@ -56,12 +56,12 @@ export class UniversalLtpService {
     success: true;
     data: Record<
       string,
-      { last_price: number | null; canonical_symbol: string | null }
+      { last_price: number | null; change?: number | null; pchange?: number | null; canonical_symbol: string | null }
     >;
   }> {
     const result: Record<
       string,
-      { last_price: number | null; canonical_symbol: string | null }
+      { last_price: number | null; change?: number | null; pchange?: number | null; canonical_symbol: string | null }
     > = {};
 
     if (!ids?.length) return { success: true, data: result };
@@ -132,7 +132,9 @@ export class UniversalLtpService {
                 const uirId = vortexTokenToUirId.get(exTok);
                 if (uirId != null) {
                   result[String(uirId)] = {
-                    ...val,
+                    last_price: (val as any).last_price,
+                    change: (val as any).change ?? null,
+                    pchange: (val as any).pchange ?? null,
                     canonical_symbol:
                       this.registry.getCanonicalSymbol(uirId) ?? null,
                   };
@@ -184,7 +186,9 @@ export class UniversalLtpService {
                   massiveTokenToUirId.get(tok) ?? massiveTokenToUirId.get(key);
                 if (uirId != null) {
                   result[String(uirId)] = {
-                    ...val,
+                    last_price: (val as any).last_price,
+                    change: (val as any).change ?? null,
+                    pchange: (val as any).pchange ?? null,
                     canonical_symbol:
                       this.registry.getCanonicalSymbol(uirId) ?? null,
                   };
@@ -210,7 +214,9 @@ export class UniversalLtpService {
                   binanceTokenToUirId.get(tok) ?? binanceTokenToUirId.get(key);
                 if (uirId != null) {
                   result[String(uirId)] = {
-                    ...val,
+                    last_price: (val as any).last_price,
+                    change: (val as any).change ?? null,
+                    pchange: (val as any).pchange ?? null,
                     canonical_symbol:
                       this.registry.getCanonicalSymbol(uirId) ?? null,
                   };

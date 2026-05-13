@@ -94,6 +94,8 @@ function buildResponseRow(
   last_price: number | null,
   selectedFields: ReadonlySet<string> | null,
   includeInternal: boolean,
+  change?: number | null,
+  pchange?: number | null,
 ): PublicSearchResultItem {
   const live = Number.isFinite(last_price) && (last_price ?? 0) > 0;
 
@@ -159,6 +161,8 @@ function buildResponseRow(
       ? internalToPublicProvider(raw.streamProvider)
       : undefined,
     logo_url,
+    change: change ?? null,
+    pchange: pchange ?? null,
   };
 
   // Public allow-listed fields — included when no ?fields= filter, or when the
@@ -375,6 +379,8 @@ export class SearchController {
         quotes?.[String(it.id)]?.last_price ?? null,
         selectedFields,
         includeInternal,
+        quotes?.[String(it.id)]?.change ?? null,
+        quotes?.[String(it.id)]?.pchange ?? null,
       ),
     );
 
@@ -472,6 +478,8 @@ export class SearchController {
         quotes?.[String(it.id)]?.last_price ?? null,
         selectedFields,
         includeInternal,
+        quotes?.[String(it.id)]?.change ?? null,
+        quotes?.[String(it.id)]?.pchange ?? null,
       ),
     );
 

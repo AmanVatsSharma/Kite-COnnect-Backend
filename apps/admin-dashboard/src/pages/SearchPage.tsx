@@ -82,6 +82,20 @@ function LtpCell({ value, priceStatus }: { value?: number | null; priceStatus?: 
   );
 }
 
+/** Change cell: shows absolute change + percentage with green/red coloring. */
+function ChangeCell({ change, pchange }: { change?: number | null; pchange?: number | null }) {
+  if (!Number.isFinite(change)) return <span className="cell-muted">—</span>;
+  const ch = change ?? 0;
+  const pc = pchange ?? 0;
+  const color = ch >= 0 ? 'var(--ok)' : 'var(--bad)';
+  const sign = ch >= 0 ? '+' : '';
+  return (
+    <span style={{ color, fontWeight: 600, fontSize: 11 }}>
+      {sign}{ch.toFixed(2)} ({sign}{pc.toFixed(2)}%)
+    </span>
+  );
+}
+
 function Badge({ label }: { label?: string | null }) {
   if (!label) return <span className="cell-muted">—</span>;
   return (
@@ -350,6 +364,7 @@ export function SearchPage() {
                   <th>EXPIRY</th>
                   <th className="cell-num">STRIKE</th>
                   <th className="cell-num">LTP</th>
+                  <th className="cell-num">CHANGE</th>
                   <th className="cell-num">LOT</th>
                   <th className="cell-num">UID</th>
                   <th title="Copy WS subscribe payload to clipboard"></th>
@@ -400,6 +415,7 @@ export function SearchPage() {
                     <td className="cell-muted">{item.expiry ? item.expiry.substring(0, 10) : '—'}</td>
                     <td className="cell-num">{item.strike ? fmt(item.strike, 0) : '—'}</td>
                     <td className="cell-num"><LtpCell value={item.last_price} priceStatus={item.priceStatus} /></td>
+                    <td className="cell-num"><ChangeCell change={item.change} pchange={item.pchange} /></td>
                     <td className="cell-num cell-muted">{item.lotSize ?? '—'}</td>
                     <td className="cell-num cell-muted" style={{ fontSize: 9 }}>{item.id}</td>
                     <td><CopyWsPayloadButton uirId={item.id} /></td>
