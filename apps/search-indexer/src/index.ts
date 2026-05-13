@@ -388,9 +388,9 @@ async function applySettings(
         'optionType',
       ],
       rankingRules: [
-        'words',
-        'typo',
+        'typo', // P0: typo-tolerant (makes "nifty" match "NIFTY 50")
         'proximity',
+        'words', // P2: all words must be present (fallback)
         'attribute', // respects searchableAttributes priority order
         'exactness', // exact symbol match must beat partial name matches (e.g. "RELIANCE" beats "RELIANCE COMMS")
         'sort', // broker sort: rankOrder(equity→fut→options) → exchangeRank(NSE→BSE) → expiry → strike → CE/PE

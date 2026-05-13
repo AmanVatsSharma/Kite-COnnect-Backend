@@ -321,13 +321,13 @@ export class SearchService {
     const primary: SearchResultItem[] = precise.hits || [];
     if (primary.length >= limit) return primary.slice(0, limit);
 
-    // Fallback: last-word matching (broader, catches partial queries)
+    // Fallback: any-word matching (catches single-token queries like "nifty" → "NIFTY 50")
     const broad = await this.meili.search(index, {
       q,
       limit,
       attributesToRetrieve: attrs,
       filter: filterExpr,
-      matchingStrategy: 'last',
+      matchingStrategy: 'any',
       sort: brokerSort,
     });
 
