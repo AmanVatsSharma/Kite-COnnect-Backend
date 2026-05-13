@@ -143,6 +143,8 @@ async function bootstrap() {
       'https://stocktrade.ltd',
       'https://www.stocktrade.ltd',
       'https://marketdata.vedpragya.com',
+      'https://marketpulse360.live',
+      'https://www.marketpulse360.live',
     ];
     const extraOrigins = configService.get('CORS_ORIGIN', '');
     if (extraOrigins && extraOrigins !== '*') {
