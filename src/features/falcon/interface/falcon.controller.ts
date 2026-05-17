@@ -34,6 +34,7 @@ import {
   ApiResponse,
   ApiSecurity,
   ApiTags,
+  ApiParam,
 } from '@nestjs/swagger';
 import { ApiKeyGuard } from '@shared/guards/api-key.guard';
 import {
@@ -41,6 +42,10 @@ import {
   FalconHistoricalQueryDto,
   FalconBatchHistoricalDto,
 } from './dto/falcon-market-data.dto';
+import {
+  FalconOptionsChainResponseDto,
+  FalconDeepOptionsChainResponseDto,
+} from './dto/options-chain.dto';
 
 @ApiTags('falcon')
 @UseGuards(ApiKeyGuard)
@@ -1129,10 +1134,29 @@ export class FalconController {
 
   @Get('options/chain/:symbol')
   @ApiOperation({
-    summary:
-      'Falcon options chain for an underlying symbol (grouped by expiry/strike)',
+    summary: 'Falcon options chain for an underlying symbol (grouped by expiry/strike)',
+    description:
+      'Returns CE/PE strikes grouped by expiry. Each strike contains token, symbol, LTP, and UIR. Cached 60s during market hours (9:15–15:30 IST), 300s otherwise.',
   })
-  @ApiQuery({ name: 'ltp_only', required: false, example: false })
+  @ApiParam({
+    name: 'symbol',
+    required: true,
+    example: 'NIFTY',
+    description: 'Underlying symbol (case-insensitive, e.g., NIFTY, BANKNIFTY, RELIANCE)',
+  })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: false,
+    description: 'If true, only options with valid last_price are returned',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Options chain with expiries, strikes, CE/PE tokens and LTPs',
+    type: FalconOptionsChainResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid symbol' })
+  @ApiResponse({ status: 401, description: 'Invalid API key' })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async optionsChain(
     @Param('symbol') symbol: string,
@@ -1156,13 +1180,35 @@ export class FalconController {
 
   @Get('options/chain/:symbol/deep')
   @ApiOperation({
-    summary:
-      'Deep options chain — full market snapshot (OI, volume, OHLC, bid/ask depth, PCR) per strike. Sensibull-style.',
+    summary: 'Deep options chain — full market snapshot (OI, volume, OHLC, bid/ask depth, PCR) per strike. Sensibull-style.',
     description:
       'Returns CE/PE market data for every strike grouped by expiry. Each entry includes ltp, oi, volume, ohlc, bid/ask, market depth, and per-expiry PCR. Cached 15s during market hours, 300s otherwise.',
   })
-  @ApiQuery({ name: 'expiry', required: false, example: '2025-05-15', description: 'Filter to a single expiry (YYYY-MM-DD). Omit for all expiries.' })
-  @ApiQuery({ name: 'strikes_around_atm', required: false, example: 10, description: 'Return only N strikes above and below ATM. 0 (default) = all strikes.' })
+  @ApiParam({
+    name: 'symbol',
+    required: true,
+    example: 'NIFTY',
+    description: 'Underlying symbol (case-insensitive, e.g., NIFTY, BANKNIFTY, RELIANCE)',
+  })
+  @ApiQuery({
+    name: 'expiry',
+    required: false,
+    example: '2025-05-15',
+    description: 'Filter to a single expiry (YYYY-MM-DD). Omit for all expiries.',
+  })
+  @ApiQuery({
+    name: 'strikes_around_atm',
+    required: false,
+    example: 10,
+    description: 'Return only N strikes above and below ATM. 0 (default) = all strikes.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Deep options chain with OI, volume, OHLC, bid/ask depth, PCR per strike',
+    type: FalconDeepOptionsChainResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid symbol' })
+  @ApiResponse({ status: 401, description: 'Invalid API key' })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async deepOptionsChain(
     @Param('symbol') symbol: string,
@@ -1228,10 +1274,28 @@ export class FalconController {
 
   @Get('underlyings/:symbol/options')
   @ApiOperation({
-    summary:
-      'Options chain for a Falcon underlying symbol (alias for options/chain/:symbol)',
+    summary: 'Options chain for a Falcon underlying symbol (alias for options/chain/:symbol)',
+    description: 'Returns options chain grouped by expiry/strike. This is an alias for GET /options/chain/:symbol.',
   })
-  @ApiQuery({ name: 'ltp_only', required: false, example: false })
+  @ApiParam({
+    name: 'symbol',
+    required: true,
+    example: 'NIFTY',
+    description: 'Underlying symbol (case-insensitive, e.g., NIFTY, BANKNIFTY, RELIANCE)',
+  })
+  @ApiQuery({
+    name: 'ltp_only',
+    required: false,
+    example: false,
+    description: 'If true, only options with valid last_price are returned',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Options chain with expiries, strikes, CE/PE tokens and LTPs',
+    type: FalconOptionsChainResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid symbol' })
+  @ApiResponse({ status: 401, description: 'Invalid API key' })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
   async underlyingOptions(
     @Param('symbol') symbol: string,

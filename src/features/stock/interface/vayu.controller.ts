@@ -18,12 +18,14 @@ import {
   ApiBody,
   ApiProduces,
   ApiSecurity,
+  ApiParam,
 } from '@nestjs/swagger';
 import { ApiKeyGuard } from '@shared/guards/api-key.guard';
 import { BatchTokensDto } from '@features/stock/interface/dto/batch-tokens.dto';
 import { ValidateInstrumentsDto } from '@features/stock/interface/dto/validate-instruments.dto';
 import { LtpRequestDto } from '@features/stock/interface/dto/ltp.dto';
 import { ClearCacheDto } from '@features/stock/interface/dto/clear-cache.dto';
+import { VayuOptionsChainResponseDto } from '@features/stock/interface/dto/option-chain.dto';
 import { VayuEquityService } from '@features/stock/application/vayu-equity.service';
 import { VayuFutureService } from '@features/stock/application/vayu-future.service';
 import { VayuOptionService } from '@features/stock/application/vayu-option.service';
@@ -412,13 +414,31 @@ export class VayuController {
   }
 
   @Get('options/chain/:symbol')
-  @ApiOperation({ summary: 'Get options chain for a symbol' })
+  @ApiOperation({
+    summary: 'Get options chain for a Vayu underlying symbol',
+    description:
+      'Returns options chain with strikes grouped by expiry. Each strike contains CE (Call) and PE (Put) data with tokens and live LTPs. Cached in Redis.',
+  })
+  @ApiParam({
+    name: 'symbol',
+    required: true,
+    example: 'NIFTY',
+    description: 'Underlying symbol (e.g., NIFTY, BANKNIFTY, FINNIFTY)',
+  })
   @ApiQuery({
     name: 'ltp_only',
     required: false,
-    example: true,
+    example: false,
     description: 'If true, only options with valid last_price are returned',
   })
+  @ApiResponse({
+    status: 200,
+    description: 'Options chain with strikes grouped by expiry and CE/PE data',
+    type: VayuOptionsChainResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid symbol' })
+  @ApiResponse({ status: 401, description: 'Invalid API key' })
+  @ApiResponse({ status: 500, description: 'Failed to fetch options chain' })
   async getVortexOptionsChain(
     @Param('symbol') symbol: string,
     @Query('ltp_only') ltpOnlyRaw?: string | boolean,
