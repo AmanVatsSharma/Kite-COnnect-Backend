@@ -140,6 +140,12 @@ export class FalconDeepOptionExpiry {
   @ApiPropertyOptional({ description: 'Total Put OI', example: 1425000 })
   total_pe_oi?: number;
 
+  @ApiPropertyOptional({ description: 'Average IV across strikes', example: 16.2 })
+  avg_iv?: number | null;
+
+  @ApiPropertyOptional({ description: 'Max Pain strike price', example: 24000 })
+  max_pain?: number | null;
+
   @ApiPropertyOptional({ description: 'Call strikes in this expiry', type: () => FalconDeepOptionStrike, isArray: true })
   strikes?: FalconDeepOptionStrike[];
 }

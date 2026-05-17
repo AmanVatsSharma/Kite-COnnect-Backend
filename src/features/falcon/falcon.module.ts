@@ -13,6 +13,7 @@ import { FalconController } from './interface/falcon.controller';
 import { AdminFalconController } from './interface/admin-falcon.controller';
 import { FalconInstrument } from './domain/falcon-instrument.entity';
 import { FalconInstrumentService } from './application/falcon-instrument.service';
+import { OptionsGreeksService } from './application/options-greeks.service';
 import { FalconProviderAdapter } from './infra/falcon-provider.adapter';
 import { FalconAuthService } from './application/falcon-auth.service';
 import { AdminGuard } from '@features/admin/guards/admin.guard';
@@ -33,10 +34,11 @@ import { MarketDataModule } from '../market-data/market-data.module';
   controllers: [FalconController, AdminFalconController],
   providers: [
     FalconInstrumentService,
+    OptionsGreeksService,
     FalconProviderAdapter,
     FalconAuthService,
     AdminGuard,
   ],
-  exports: [FalconInstrumentService, FalconProviderAdapter],
+  exports: [FalconInstrumentService, OptionsGreeksService, FalconProviderAdapter],
 })
 export class FalconModule {}

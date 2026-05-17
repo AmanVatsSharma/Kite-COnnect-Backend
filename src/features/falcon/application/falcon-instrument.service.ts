@@ -43,6 +43,7 @@ import { UniversalInstrument } from '@features/market-data/domain/universal-inst
 import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { KiteProviderService } from '@features/kite-connect/infra/kite-provider.service';
 import { FalconProviderAdapter } from '@features/falcon/infra/falcon-provider.adapter';
+import { OptionsGreeksService } from './options-greeks.service';
 import { RedisService } from '@infra/redis/redis.service';
 import { normalizeExchange } from '@shared/utils/exchange-normalizer';
 import { computeCanonicalSymbol } from '@shared/utils/canonical-symbol';
@@ -111,6 +112,7 @@ export class FalconInstrumentService implements OnModuleInit {
     private readonly schedulerRegistry: SchedulerRegistry,
     private readonly redis: RedisService,
     private readonly instrumentRegistry: InstrumentRegistryService,
+    private readonly optionsGreeksService: OptionsGreeksService,
   ) {}
 
   onModuleInit(): void {
@@ -1540,6 +1542,21 @@ export class FalconInstrumentService implements OnModuleInit {
         chain,
       },
     };
+
+    // Enrich with Greeks (Black-Scholes)
+    try {
+      if (underlyingLtp != null && underlyingLtp > 0) {
+        result.data = this.optionsGreeksService.enrichChain(
+          result.data,
+          underlyingLtp,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to enrich chain with Greeks for ${sym}: ${(error as Error).message}`,
+      );
+      // Graceful degradation — return chain without Greeks
+    }
 
     const ttl = this.isMarketHours() ? 15 : 300;
     try {

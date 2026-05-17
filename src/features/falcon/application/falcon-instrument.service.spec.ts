@@ -65,6 +65,9 @@ describe('FalconInstrumentService', () => {
     const instrumentRegistry = {
       refresh: jest.fn().mockResolvedValue(undefined),
     } as any;
+    const optionsGreeksService = {
+      enrichChain: jest.fn((chain) => chain),
+    } as any;
     service = new FalconInstrumentService(
       falconRepo as unknown as Repository<FalconInstrument>,
       mappingRepo as unknown as Repository<InstrumentMapping>,
@@ -75,6 +78,7 @@ describe('FalconInstrumentService', () => {
       schedulerRegistry,
       redisService,
       instrumentRegistry,
+      optionsGreeksService,
     );
   });
 

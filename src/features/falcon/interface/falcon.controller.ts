@@ -1180,9 +1180,9 @@ export class FalconController {
 
   @Get('options/chain/:symbol/deep')
   @ApiOperation({
-    summary: 'Deep options chain — full market snapshot (OI, volume, OHLC, bid/ask depth, PCR) per strike. Sensibull-style.',
+    summary: 'Deep options chain — full market snapshot (OI, volume, OHLC, bid/ask depth, PCR, Greeks) per strike. Sensibull-style.',
     description:
-      'Returns CE/PE market data for every strike grouped by expiry. Each entry includes ltp, oi, volume, ohlc, bid/ask, market depth, and per-expiry PCR. Cached 15s during market hours, 300s otherwise.',
+      'Returns CE/PE market data for every strike grouped by expiry. Each entry includes ltp, oi, volume, ohlc, bid/ask, market depth, per-expiry PCR, and Black-Scholes Greeks (delta, gamma, theta, vega, IV). Cached 15s during market hours, 300s otherwise.',
   })
   @ApiParam({
     name: 'symbol',
@@ -1204,7 +1204,7 @@ export class FalconController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Deep options chain with OI, volume, OHLC, bid/ask depth, PCR per strike',
+    description: 'Deep options chain with OI, volume, OHLC, bid/ask depth, PCR, delta, gamma, theta, vega, IV per strike',
     type: FalconDeepOptionsChainResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Invalid symbol' })
