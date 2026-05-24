@@ -291,7 +291,7 @@ All inbound controller/gateway payloads go through DTOs with **class-validator**
 | `trading-search-indexer` | **Docker** | `kite-connect-backend-search-indexer`, incremental mode |
 | `trading-postgres` | **Docker** | `postgres:15-alpine`, port 5432 |
 | `trading-meilisearch` | **Docker** | `meilisearch:v1.8`, port 7700 |
-| `redis-server` | **systemd** | Local Redis 7.0, bind `127.0.0.1:6379` |
+| `redis-server` | **systemd** | Local Redis 7.0, bind `0.0.0.0:6379` (required for Docker containers to reach host Redis via `host.docker.internal` or Docker bridge `172.17.0.1`) |
 
 **Common operations:**
 
@@ -319,7 +319,7 @@ sudo systemctl restart redis-server  # if Redis bind fails: check /etc/redis/red
 # 3. pm2 restart trading-app
 ```
 
-**Known issue:** Redis was binding to `172.17.0.1` (Docker bridge) which is unreachable. Fix: `sudo sed -i 's/^bind .*/bind 127.0.0.1/' /etc/redis/redis.conf && sudo systemctl restart redis-server`
+**Known issue:** Redis must bind to `0.0.0.0` (not `127.0.0.1` or Docker bridge IP) for Docker containers to reach it. If containers can't connect: `sudo sed -i 's/^bind .*/bind 0.0.0.0/' /etc/redis/redis.conf && sudo systemctl restart redis-server`
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
