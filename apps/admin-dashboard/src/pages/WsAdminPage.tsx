@@ -2,14 +2,14 @@
  * @file WsAdminPage.tsx
  * @module admin-dashboard
  * @description WebSocket admin: live connections monitor, status/config, forms.
- * @updated 2026-04-14 — added Kite shard capacity display
+ * @updated 2026-05-24 — added provider health DEAD indicators (reconnect exhaustion)
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { getAdminToken } from '../lib/api-client';
 import * as admin from '../lib/admin-api';
-import * as falcon from '../lib/falcon-api';
+import type { QueueStatus, ProviderCapacitySnapshot } from '../lib/admin-api';
 import { ErrorInline } from '../components/ErrorInline';
 import { wsStatusSummaryRows } from '../lib/views/overview-views';
 import { wsConfigToRows } from '../lib/views/ws-config-views';
@@ -43,9 +43,23 @@ export function WsAdminPage() {
     enabled: !!token,
   });
 
-  const kiteShards = useQuery({
-    queryKey: ['admin-kite-shard-capacity'],
-    queryFn: falcon.getFalconShardStatus,
+  const queueStatus = useQuery({
+    queryKey: ['admin-queues'],
+    queryFn: admin.getQueues,
+    enabled: !!token,
+    refetchInterval: 5000,
+  });
+
+  const providerCapacity = useQuery({
+    queryKey: ['admin-provider-capacity'],
+    queryFn: admin.getProviderCapacity,
+    enabled: !!token,
+    refetchInterval: 5000,
+  });
+
+  const providerHealth = useQuery({
+    queryKey: ['admin-provider-health'],
+    queryFn: admin.getProviderHealth,
     enabled: !!token,
     refetchInterval: 5000,
   });
@@ -221,6 +235,68 @@ export function WsAdminPage() {
         )}
       </div>
 
+      {/* ── Queue Depths Panel ──────────────────────────── */}
+      <div className="panel">
+        <div className="panel__head">
+          <span className="panel__title">STREAM QUEUE DEPTHS</span>
+          {queueStatus.isLoading && <span style={{ fontSize: 9, color: 'var(--muted)' }}> loading…</span>}
+          {queueStatus.isError && <span style={{ fontSize: 9, color: 'var(--bad)' }}> failed</span>}
+        </div>
+        <div className="panel__body">
+          <ErrorInline message={queueStatus.isError ? (queueStatus.error as Error).message : null} />
+          {queueStatus.data && (() => {
+            const qs = queueStatus.data as QueueStatus;
+            const ALERT_PCT = 80;
+            const WARN_PCT = 50;
+            function barColor(pct: number) {
+              if (pct >= ALERT_PCT) return 'var(--bad)';
+              if (pct >= WARN_PCT) return 'var(--warn)';
+              return 'var(--ok)';
+            }
+            const rows: Array<{ label: string; d: admin.QueueDepth }> = [
+              { label: 'SUBSCRIBE QUEUE', d: qs.subscribe },
+              { label: 'UNSUBSCRIBE QUEUE', d: qs.unsubscribe },
+            ];
+            return (
+              <>
+                {rows.map(({ label, d }) => {
+                  const pct = d.percentUsed;
+                  const color = barColor(pct);
+                  return (
+                    <div key={label} style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+                        <span style={{ fontWeight: 600, letterSpacing: '0.04em' }}>{label}</span>
+                        <span style={{ color }}>
+                          {d.size.toLocaleString('en-IN')} / {d.max.toLocaleString('en-IN')}
+                          <span style={{ marginLeft: 6 }}>{pct}%</span>
+                        </span>
+                      </div>
+                      <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', overflow: 'hidden', marginBottom: 2 }}>
+                        <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: color, transition: 'width 0.4s', borderRadius: 4 }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: 12, fontSize: 9 }}>
+                        <span style={{ color: 'var(--muted)' }}>
+                          Evicted: <span style={{ color: d.evictedTotal > 0 ? 'var(--warn)' : 'var(--ok)' }}>{d.evictedTotal.toLocaleString('en-IN')}</span>
+                        </span>
+                        <span style={{ color: 'var(--muted)' }}>
+                          Max: {d.max.toLocaleString('en-IN')}
+                        </span>
+                        {pct >= ALERT_PCT && (
+                          <span style={{ color: 'var(--bad)', fontWeight: 700 }}>⚠ HIGH UTILIZATION</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
+          {!queueStatus.data && !queueStatus.isLoading && !queueStatus.isError && (
+            <p style={{ fontSize: 10, color: 'var(--muted)' }}>No queue data available</p>
+          )}
+        </div>
+      </div>
+
       {/* ── Config + Actions grid ─────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         {/* WS status + config */}
@@ -248,33 +324,135 @@ export function WsAdminPage() {
                 ))}
               </>
             )}
-            {/* Kite WS Capacity (from shard status) */}
-            {kiteShards.data && (() => {
-              const sd = kiteShards.data as falcon.FalconShardStatusResponse;
-              const pct = sd.utilizationPct ?? 0;
-              const barColor = pct >= 90 ? 'var(--bad)' : pct >= 70 ? 'var(--warn)' : 'var(--ok)';
+            {/* Provider upstream capacity from all active providers */}
+            {providerCapacity.data && (() => {
+              const cap = providerCapacity.data as ProviderCapacitySnapshot;
+              const entries = Object.entries(cap);
+              if (entries.length === 0) return null;
+              const ALERT_PCT = 90;
+              const WARN_PCT = 70;
+              function capBarColor(pct: number) {
+                if (pct >= ALERT_PCT) return 'var(--bad)';
+                if (pct >= WARN_PCT) return 'var(--warn)';
+                return 'var(--ok)';
+              }
               return (
                 <>
-                  <div className="panel-section-title" style={{ marginTop: 6 }}>KITE WS CAPACITY</div>
-                  <div style={{ marginTop: 4, marginBottom: 4 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
-                      <span style={{ color: 'var(--muted)' }}>{sd.shards.length} shard{sd.shards.length !== 1 ? 's' : ''} · {(sd.used ?? 0).toLocaleString()} / {(sd.totalCapacity ?? 3000).toLocaleString()}</span>
-                      <span style={{ color: barColor, fontWeight: 600 }}>{pct.toFixed(1)}%</span>
-                    </div>
-                    <div style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: barColor, transition: 'width 0.4s', borderRadius: 3 }} />
-                    </div>
-                    {sd.shards.length > 1 && (
-                      <details style={{ marginTop: 4 }}>
-                        <summary style={{ fontSize: 9, color: 'var(--muted)', cursor: 'pointer' }}>Shard breakdown</summary>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                          {sd.shards.map((s) => (
-                            <div key={s.index} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, border: '1px solid rgba(255,255,255,0.08)', color: s.isConnected ? 'var(--ok)' : 'var(--bad)' }}>
-                              S{s.index}: {(s.subscribedCount ?? 0).toLocaleString()}/3000 {s.isConnected ? '●' : '○'}
-                            </div>
-                          ))}
+                  <div className="panel-section-title" style={{ marginTop: 6 }}>PROVIDER CAPACITY</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                    {entries.map(([provName, prov]) => {
+                      const pct = prov.upstream.percentUsed ?? 0;
+                      const color = capBarColor(pct);
+                      return (
+                        <div key={provName}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 3 }}>
+                            <span style={{ fontWeight: 600, letterSpacing: '0.04em', color: prov.isConnected ? 'var(--ok)' : 'var(--muted)' }}>
+                              {provName.toUpperCase()} {prov.isConnected ? '●' : '○'}
+                            </span>
+                            <span style={{ color }}>
+                              {(prov.upstream.used ?? 0).toLocaleString('en-IN')} / {(prov.upstream.limit ?? 0).toLocaleString('en-IN')}
+                              <span style={{ marginLeft: 6 }}>{pct}%</span>
+                            </span>
+                          </div>
+                          <div style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: color, transition: 'width 0.4s', borderRadius: 3 }} />
+                          </div>
+                          {/* Per-shard breakdown (Vortex) */}
+                          {prov.shards && prov.shards.length > 0 && (
+                            <details style={{ marginTop: 4 }}>
+                              <summary style={{ fontSize: 9, color: 'var(--muted)', cursor: 'pointer' }}>
+                                {prov.shards.length} shard{prov.shards.length !== 1 ? 's' : ''} breakdown
+                              </summary>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                                {prov.shards.map((s) => {
+                                  const shardLimit = prov.upstream.limit / (prov.shards?.length ?? 1);
+                                  return (
+                                    <div key={s.index} style={{
+                                      fontSize: 9, padding: '2px 6px', borderRadius: 3,
+                                      border: `1px solid rgba(255,255,255,0.08)`,
+                                      color: s.isConnected ? 'var(--ok)' : 'var(--bad)',
+                                    }}>
+                                      S{s.index}: {(s.subscribedCount ?? 0).toLocaleString()}/{Math.round(shardLimit).toLocaleString()}
+                                      {' '}{s.isConnected ? '●' : '○'}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </details>
+                          )}
                         </div>
-                      </details>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
+            {/* Provider health: DEAD indicators */}
+            {providerHealth.data && (() => {
+              const health = providerHealth.data;
+              if (!health.providers || health.providers.length === 0) return null;
+              const deadProviders = health.providers.filter((p: any) => p.isDead);
+              return (
+                <>
+                  <div className="panel-section-title" style={{ marginTop: 6 }}>PROVIDER HEALTH</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                    {health.providers.map((prov: any, i: number) => (
+                      <div key={i} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '3px 6px',
+                        borderRadius: 4,
+                        background: prov.isDead
+                          ? 'rgba(255,55,55,0.12)'
+                          : prov.isConnected
+                            ? 'rgba(43,211,155,0.08)'
+                            : 'rgba(255,255,255,0.04)',
+                        border: prov.isDead
+                          ? '1px solid rgba(255,55,55,0.35)'
+                          : prov.isConnected
+                            ? '1px solid rgba(43,211,155,0.2)'
+                            : '1px solid rgba(255,255,255,0.06)',
+                      }}>
+                        {/* Status dot + name */}
+                        <span style={{
+                          width: 8, height: 8, borderRadius: '50%',
+                          background: prov.isDead ? 'var(--bad)' : prov.isConnected ? 'var(--ok)' : 'var(--muted)',
+                          flexShrink: 0,
+                        }} />
+                        <span style={{
+                          fontSize: 10, fontWeight: 700,
+                          color: prov.isDead ? 'var(--bad)' : prov.isConnected ? 'var(--ok)' : 'var(--muted)',
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
+                        }}>
+                          {prov.name.toUpperCase()}
+                        </span>
+                        {/* DEAD badge */}
+                        {prov.isDead && (
+                          <span style={{
+                            fontSize: 9, fontWeight: 700,
+                            padding: '1px 5px', borderRadius: 3,
+                            background: 'rgba(255,55,55,0.2)',
+                            color: 'var(--bad)',
+                            border: '1px solid rgba(255,55,55,0.4)',
+                          }}>
+                            DEAD
+                          </span>
+                        )}
+                        {/* Reconnect info */}
+                        <span style={{ fontSize: 9, color: 'var(--muted)', marginLeft: 'auto' }}>
+                          {prov.reconnectAttempts}/{prov.maxReconnectAttempts} reconn
+                        </span>
+                        <span style={{ fontSize: 9, color: prov.isConnected ? 'var(--ok)' : 'var(--muted)' }}>
+                          {prov.isConnected ? 'connected' : 'disconnected'}
+                        </span>
+                      </div>
+                    ))}
+                    {deadProviders.length > 0 && (
+                      <p style={{ fontSize: 9, color: 'var(--bad)', marginTop: 2 }}>
+                        ⚠ {deadProviders.length} provider{deadProviders.length !== 1 ? 's' : ''} exhausted reconnect attempts
+                      </p>
                     )}
                   </div>
                 </>

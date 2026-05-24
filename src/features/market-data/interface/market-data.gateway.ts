@@ -81,6 +81,9 @@ export class MarketDataGateway
   // In-memory bytes accumulator per API key — flushed to Redis every 10 seconds
   private readonly bytesAccumulator = new Map<string, number>();
   private bytesFlushTimer?: ReturnType<typeof setInterval>;
+  /** Consecutive failure count per key for bytes flush retry. Resets on success. */
+  private readonly bytesFlushRetryCount = new Map<string, number>();
+  private static readonly BYTES_FLUSH_MAX_RETRIES = 3;
 
   // Per-key tick throttle cache (ms). Loaded from API key record on connect/update.
   private readonly apiKeyThrottleMs = new Map<string, number>();
@@ -1181,7 +1184,11 @@ export class MarketDataGateway
       // Queue sizes for backpressure transparency
       let queues: { subscribe: number; unsubscribe: number } | undefined;
       try {
-        queues = this.streamService.getQueueStatus();
+        const qs = this.streamService.getQueueStatus();
+        queues = {
+          subscribe: qs.subscribe.size,
+          unsubscribe: qs.unsubscribe.size,
+        };
       } catch {}
 
       // Build symbol enrichment for included identifiers
@@ -2273,11 +2280,27 @@ export class MarketDataGateway
     for (const [key, bytes] of snapshot) {
       try {
         await this.apiKeyService.incrementBytesSent(key, bytes);
+        this.bytesFlushRetryCount.delete(key);
       } catch (err) {
-        this.logger.warn(
-          `[Gateway] Failed to flush bytes for key=${key}`,
-          err as any,
-        );
+        const retries = (this.bytesFlushRetryCount.get(key) ?? 0) + 1;
+        this.bytesFlushRetryCount.set(key, retries);
+        if (retries < MarketDataGateway.BYTES_FLUSH_MAX_RETRIES) {
+          // Re-queue for next flush cycle
+          const existing = this.bytesAccumulator.get(key) ?? 0;
+          this.bytesAccumulator.set(key, existing + bytes);
+          this.logger.warn(
+            `[Gateway] Failed to flush bytes for key=${key} (retry ${retries}/${MarketDataGateway.BYTES_FLUSH_MAX_RETRIES}), re-queued ${bytes} bytes`,
+            err instanceof Error ? err.message : String(err),
+          );
+        } else {
+          // Exhausted retries — log error and increment metric
+          this.logger.error(
+            `[Gateway] Exhausted bytes flush retries for key=${key} after ${retries} failures, dropping ${bytes} bytes`,
+            err instanceof Error ? err.stack : String(err),
+          );
+          this.metrics.marketDataBytesFlushFailedTotal.inc({ api_key: key });
+          this.bytesFlushRetryCount.delete(key);
+        }
       }
     }
   }

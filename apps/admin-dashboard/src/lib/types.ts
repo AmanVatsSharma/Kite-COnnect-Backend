@@ -238,3 +238,20 @@ export interface KiteMargins {
   equity?: KiteMarginDetail;
   commodity?: KiteMarginDetail;
 }
+
+// ─── Provider health types ───────────────────────────────────────────────────
+
+export interface ProviderHealthEntry {
+  name: string;
+  isConnected: boolean;
+  reconnectAttempts: number;
+  reconnectCount: number;
+  maxReconnectAttempts: number;
+  isDead: boolean;
+  lastConnectAt: string | null;
+  lastDisconnectAt: string | null;
+}
+
+export interface ProviderHealthResponse {
+  providers: ProviderHealthEntry[];
+}

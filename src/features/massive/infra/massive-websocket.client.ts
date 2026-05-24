@@ -7,7 +7,7 @@
  *   Translates Massive WS events → canonical tick objects keyed by symbol string.
  * @author BharatERP
  * @created 2026-04-18
- * @updated 2026-04-27
+ * @updated 2026-05-24
  */
 import { Injectable, Logger } from '@nestjs/common';
 import * as WebSocket from 'ws';
@@ -60,6 +60,8 @@ export class MassiveWebSocketClient {
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private authTimeoutTimer: NodeJS.Timeout | null = null;
+  private readonly AUTH_TIMEOUT_MS = 10_000;
   private shouldReconnect = false;
   private authFailed = false;
 
@@ -113,6 +115,7 @@ export class MassiveWebSocketClient {
 
   disconnect(): void {
     this.shouldReconnect = false;
+    this.clearAuthTimeout();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -188,6 +191,9 @@ export class MassiveWebSocketClient {
 
     this.ws.on('open', () => {
       this.logger.log('[Massive WS] Connection opened — sending auth');
+      this.authTimeoutTimer = setTimeout(() => {
+        this.handleAuthTimeout();
+      }, this.AUTH_TIMEOUT_MS);
     });
 
     this.ws.on('message', (raw: Buffer | string) => {
@@ -197,6 +203,7 @@ export class MassiveWebSocketClient {
     this.ws.on('close', (_code: number, reason: Buffer) => {
       const wasConnected = this.isConnected;
       this.isConnected = false;
+      this.clearAuthTimeout();
       this.isAuthenticated = false;
       this.logger.warn(
         `[Massive WS] Closed (reason=${reason?.toString() || 'none'})`,
@@ -248,6 +255,7 @@ export class MassiveWebSocketClient {
       this.isAuthenticated = true;
       this.isConnected = true;
       this.reconnectAttempts = 0;
+      this.clearAuthTimeout();
       this.logger.log('[Massive WS] Authenticated successfully');
       this.emit('connect');
 
@@ -264,6 +272,23 @@ export class MassiveWebSocketClient {
       this.shouldReconnect = false;
       this.emit('error', new Error('Massive WS auth failed'));
     }
+  }
+
+  private clearAuthTimeout(): void {
+    if (this.authTimeoutTimer) {
+      clearTimeout(this.authTimeoutTimer);
+      this.authTimeoutTimer = null;
+    }
+  }
+
+  private handleAuthTimeout(): void {
+    this.logger.error(
+      `[Massive WS] Auth timeout — no auth_success within ${this.AUTH_TIMEOUT_MS}ms`,
+    );
+    this.shouldReconnect = false;
+    this.authFailed = true;
+    this.emit('error', new Error('Massive WS auth timeout'));
+    this.scheduleReconnect();
   }
 
   private sendSubscribe(symbols: string[]): void {

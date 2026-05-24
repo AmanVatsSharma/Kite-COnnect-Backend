@@ -1,7 +1,7 @@
 /**
  * File:        src/infra/redis/redis.service.ts
  * Module:      infra/redis
- * Purpose:     Cache, pub/sub, and distributed-lock facade over named ioredis clients from RedisClientFactory. Adds circuit breaker, structured logging, and Prometheus metrics. All operations fail silently (safe defaults) when Redis is unavailable.
+ * Purpose:     Cache, pub/sub, and distributed-lock facade over named ioredis clients from RedisClientFactory. Adds circuit breaker, slow-consumer detection for pub/sub, structured logging, and Prometheus metrics. All operations fail silently (safe defaults) when Redis is unavailable.
  *
  * Exports:
  *   - RedisService — @Injectable() service with 28 public methods
@@ -505,17 +505,31 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  // ─── Pub/Sub (NOT circuit-breaker-wrapped) ────────────────────────────────
+  // ─── Pub/Sub (NOT circuit-breaker-wrapped, but slow-op monitored) ───────────
 
   /**
    * Publish a JSON-serialized message to a Redis channel.
    * Uses the dedicated pub client. Fails silently when unavailable.
+   * Slow-consumer: >100ms warn, >500ms error.
    */
   async publish(channel: string, message: any): Promise<void> {
     const client = this.pubClient as Redis | null;
     if (!client) return;
+    const start = Date.now();
     try {
       await client.publish(channel, JSON.stringify(message));
+      const elapsed = Date.now() - start;
+      if (elapsed > 500) {
+        this.logger.error(
+          `[RedisService] publish SLOW on channel ${channel}: ${elapsed}ms (>500ms threshold)`,
+        );
+        this.metrics.redisPubsubSlowOpsTotal.labels('publish').inc();
+      } else if (elapsed > 100) {
+        this.logger.warn(
+          `[RedisService] publish slow on channel ${channel}: ${elapsed}ms (>100ms threshold)`,
+        );
+        this.metrics.redisPubsubSlowOpsTotal.labels('publish').inc();
+      }
       this.emit('publish', 'success');
     } catch (err: any) {
       this.logger.error(
@@ -529,6 +543,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Subscribe to a Redis channel with a callback.
    * Deduplicates ioredis subscribe calls per channel — adds callback to dispatcher Set.
    * Fails silently when unavailable.
+   * Slow-consumer: >100ms warn.
    */
   async subscribe(
     channel: string,
@@ -536,6 +551,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const client = this.subClient as Redis | null;
     if (!client) return;
+    const start = Date.now();
     try {
       const alreadySubscribed = this.subscriptions.has(channel);
       if (!alreadySubscribed) {
@@ -543,6 +559,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         this.subscriptions.set(channel, new Set());
       }
       this.subscriptions.get(channel)!.add(callback);
+      const elapsed = Date.now() - start;
+      if (elapsed > 100) {
+        this.logger.warn(
+          `[RedisService] subscribe slow on channel ${channel}: ${elapsed}ms (>100ms threshold)`,
+        );
+        this.metrics.redisPubsubSlowOpsTotal.labels('subscribe').inc();
+      }
       this.emit('subscribe', 'success');
     } catch (err: any) {
       this.logger.error(
@@ -555,13 +578,22 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * Unsubscribe from a Redis channel, clearing all callbacks.
    * Fails silently when unavailable.
+   * Slow-consumer: >100ms warn.
    */
   async unsubscribe(channel: string): Promise<void> {
     const client = this.subClient as Redis | null;
     if (!client) return;
+    const start = Date.now();
     try {
       this.subscriptions.delete(channel);
       await client.unsubscribe(channel);
+      const elapsed = Date.now() - start;
+      if (elapsed > 100) {
+        this.logger.warn(
+          `[RedisService] unsubscribe slow on channel ${channel}: ${elapsed}ms (>100ms threshold)`,
+        );
+        this.metrics.redisPubsubSlowOpsTotal.labels('unsubscribe').inc();
+      }
       this.emit('unsubscribe', 'success');
     } catch (err: any) {
       this.logger.error(

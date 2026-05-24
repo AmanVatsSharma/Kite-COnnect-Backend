@@ -51,6 +51,9 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   /** Cap queued subscribe entries to limit memory under storms. */
   private readonly SUB_QUEUE_MAX = 50_000;
   private readonly UNSUB_QUEUE_MAX = 50_000;
+  /** Eviction counters for monitoring backpressure events. */
+  private subEvictionCount = 0;
+  private unsubEvictionCount = 0;
   /** Kite upstream WebSocket limit: max 3000 instruments per connection. */
   private readonly KITE_UPSTREAM_INSTRUMENT_LIMIT = 3000;
   /** Attach stream-level ticker handlers once per ticker instance (avoids duplicates on re-init). */
@@ -234,6 +237,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       const first = this.subscriptionQueue.keys().next().value;
       if (first === undefined) break;
       this.subscriptionQueue.delete(first);
+      this.subEvictionCount++;
       try {
         this.metrics.marketDataStreamQueueDroppedTotal
           .labels('subscribe_evict')
@@ -247,6 +251,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
       const first = this.unsubscriptionQueue.values().next().value;
       if (first === undefined) break;
       this.unsubscriptionQueue.delete(first);
+      this.unsubEvictionCount++;
       try {
         this.metrics.marketDataStreamQueueDroppedTotal
           .labels('unsubscribe_evict')
@@ -1155,6 +1160,76 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Per-provider upstream capacity snapshot for admin monitoring.
+   * Includes per-shard breakdown for Vortex (multi-shard).
+   */
+  async getProviderCapacitySnapshot(): Promise<
+    Record<
+      string,
+      {
+        isConnected: boolean;
+        upstream: {
+          used: number;
+          limit: number;
+          percentUsed: number;
+        };
+        shards?: Array<{
+          index: number;
+          isConnected: boolean;
+          subscribedCount: number;
+        }>;
+      }
+    >
+  > {
+    const result: Record<
+      string,
+      {
+        isConnected: boolean;
+        upstream: { used: number; limit: number; percentUsed: number };
+        shards?: Array<{
+          index: number;
+          isConnected: boolean;
+          subscribedCount: number;
+        }>;
+      }
+    > = {};
+    for (const [name, state] of this.activeProviderState) {
+      const provider = this.providerResolver.getProvider(name);
+      const limit =
+        (provider as any).getSubscriptionLimit?.() ??
+        this.KITE_UPSTREAM_INSTRUMENT_LIMIT;
+      const used = state.subscribedUirIds.size;
+      const entry: (typeof result)[string] = {
+        isConnected: state.isConnected,
+        upstream: {
+          used,
+          limit,
+          percentUsed: limit > 0 ? Math.round((used / limit) * 100) : 0,
+        },
+      };
+      // Vortex: expose per-shard usage from the provider's getShardStatus()
+      if (name === 'vortex' && typeof (provider as any).getShardStatus === 'function') {
+        try {
+          const shards = (provider as any).getShardStatus() as Array<{
+            index: number;
+            isConnected: boolean;
+            subscribedCount: number;
+          }>;
+          if (Array.isArray(shards)) {
+            entry.shards = shards.map((s) => ({
+              index: s.index,
+              isConnected: s.isConnected,
+              subscribedCount: s.subscribedCount,
+            }));
+          }
+        } catch {}
+      }
+      result[internalToPublicProviderName(name)] = entry;
+    }
+    return result;
+  }
+
+  /**
    * Health snapshot for /health and admin: streaming flags, queues, ticker presence.
    */
   async getMarketDataHealthSnapshot() {
@@ -1221,14 +1296,32 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     try {
       const subSize = this.subscriptionQueue.size;
       const unsubSize = this.unsubscriptionQueue.size;
+      const subPct = Math.round((subSize / this.SUB_QUEUE_MAX) * 100);
+      const unsubPct = Math.round((unsubSize / this.UNSUB_QUEUE_MAX) * 100);
       // Update metrics gauges
       try {
         this.metrics.providerQueueDepth.labels('ws_subscribe').set(subSize);
         this.metrics.providerQueueDepth.labels('ws_unsubscribe').set(unsubSize);
       } catch {}
-      return { subscribe: subSize, unsubscribe: unsubSize };
+      return {
+        subscribe: {
+          size: subSize,
+          max: this.SUB_QUEUE_MAX,
+          percentUsed: subPct,
+          evictedTotal: this.subEvictionCount,
+        },
+        unsubscribe: {
+          size: unsubSize,
+          max: this.UNSUB_QUEUE_MAX,
+          percentUsed: unsubPct,
+          evictedTotal: this.unsubEvictionCount,
+        },
+      };
     } catch (e) {
-      return { subscribe: 0, unsubscribe: 0 };
+      return {
+        subscribe: { size: 0, max: this.SUB_QUEUE_MAX, percentUsed: 0, evictedTotal: 0 },
+        unsubscribe: { size: 0, max: this.UNSUB_QUEUE_MAX, percentUsed: 0, evictedTotal: 0 },
+      };
     }
   }
 

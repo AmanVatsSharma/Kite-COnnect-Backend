@@ -7,6 +7,7 @@ import type {
   GlobalProviderRes,
   PaginatedAbuse,
   PaginatedUsage,
+  ProviderHealthResponse,
   StreamStatus,
   WsConfig,
   WsStatus,
@@ -149,6 +150,12 @@ export function stopStream() {
 
 export function getStreamStatus() {
   return apiFetch<StreamStatus>('/api/admin/stream/status', { ...admin });
+}
+
+export function getProviderHealth() {
+  return apiFetch<ProviderHealthResponse>('/api/admin/provider-health', {
+    ...admin,
+  });
 }
 
 export function getWsStatus() {
@@ -424,6 +431,30 @@ export function disconnectSocket(socketId: string) {
   );
 }
 
+// ─── Provider capacity ─────────────────────────────────────────────────────────
+
+export interface ProviderCapacityEntry {
+  isConnected: boolean;
+  upstream: {
+    used: number;
+    limit: number;
+    percentUsed: number;
+  };
+  shards?: Array<{
+    index: number;
+    isConnected: boolean;
+    subscribedCount: number;
+  }>;
+}
+
+export type ProviderCapacitySnapshot = Record<string, ProviderCapacityEntry>;
+
+export function getProviderCapacity() {
+  return apiFetch<ProviderCapacitySnapshot>('/api/admin/provider-capacity', {
+    ...admin,
+  });
+}
+
 // ─── Tick throttle ────────────────────────────────────────────────────────────
 
 export function getTickThrottle() {
@@ -436,4 +467,22 @@ export function setTickThrottle(ms: number) {
     method: 'POST',
     body: JSON.stringify({ ms }),
   });
+}
+
+// ─── Queue depths ──────────────────────────────────────────────────────────────
+
+export interface QueueDepth {
+  size: number;
+  max: number;
+  percentUsed: number;
+  evictedTotal: number;
+}
+
+export interface QueueStatus {
+  subscribe: QueueDepth;
+  unsubscribe: QueueDepth;
+}
+
+export function getQueues() {
+  return apiFetch<QueueStatus>('/api/admin/queues', { ...admin });
 }

@@ -39,6 +39,18 @@ import {
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
 import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { OriginAuditService } from '@features/admin/application/origin-audit.service';
+import { BinanceProviderService } from '@features/binance/infra/binance-provider.service';
+
+interface ProviderHealthEntry {
+  name: string;
+  isConnected: boolean;
+  reconnectAttempts: number;
+  reconnectCount: number;
+  maxReconnectAttempts: number;
+  isDead: boolean;
+  lastConnectAt: string | null;
+  lastDisconnectAt: string | null;
+}
 
 @Controller('admin')
 @ApiTags('admin', 'admin-ws')
@@ -62,6 +74,7 @@ export class AdminController {
     private wsInterest: MarketDataWsInterestService,
     private instrumentRegistry: InstrumentRegistryService,
     private originAudit: OriginAuditService,
+    private binanceProvider: BinanceProviderService,
   ) {}
 
   @Post('apikeys')
@@ -686,6 +699,113 @@ export class AdminController {
       success: true,
       message: 'Streaming stopped',
     };
+  }
+
+  @Get('queues')
+  @ApiOperation({
+    summary: 'Get streaming queue depths and eviction metrics',
+    description:
+      'Returns current size, max capacity, percent-used, and eviction counters for the subscribe and unsubscribe queues.',
+  })
+  async getQueues() {
+    return this.stream.getQueueStatus();
+  }
+
+  @Get('provider-capacity')
+  @ApiOperation({
+    summary:
+      'Get per-provider upstream capacity: used/limit/percent, and per-shard breakdown for Vortex',
+    description:
+      'Returns a map of provider name to capacity snapshot. Vortex includes per-shard used counts and connection state.',
+  })
+  async getProviderCapacity() {
+    return this.stream.getProviderCapacitySnapshot();
+  }
+
+  @Get('provider-health')
+  @ApiOperation({
+    summary: 'Get per-provider health including dead status from exhausted reconnects',
+    description:
+      'Returns an array of providers with their connection state, reconnect counts, and a dead flag when reconnect attempts have exceeded the maximum.',
+  })
+  async getProviderHealth() {
+    const providers: ProviderHealthEntry[] = [];
+
+    // Kite / Falcon
+    try {
+      const kiteStatus = (this.kiteProvider.getDebugStatus?.() ?? {}) as Record<string, unknown>;
+      const isConnected = Boolean(kiteStatus.connected);
+      const reconnectAttempts = (kiteStatus.reconnectAttempts as number) ?? 0;
+      const maxAttempts = (kiteStatus.maxReconnectAttempts as number) ?? 10;
+      providers.push({
+        name: 'kite',
+        isConnected,
+        reconnectAttempts,
+        reconnectCount: (kiteStatus.reconnectCount as number) ?? 0,
+        maxReconnectAttempts: maxAttempts,
+        isDead: reconnectAttempts >= maxAttempts,
+        lastConnectAt: null,
+        lastDisconnectAt: null,
+      });
+    } catch {}
+
+    // Vortex / Vayu
+    try {
+      const vortexStatus = (this.vortexProvider.getDebugStatus?.() ?? {}) as Record<string, unknown>;
+      const isConnected = Boolean(vortexStatus.connected);
+      const reconnectAttempts = (vortexStatus.reconnectAttempts as number) ?? 0;
+      const maxAttempts = (vortexStatus.maxReconnectAttempts as number) ?? 8;
+      providers.push({
+        name: 'vortex',
+        isConnected,
+        reconnectAttempts,
+        reconnectCount: (vortexStatus.reconnectCount as number) ?? 0,
+        maxReconnectAttempts: maxAttempts,
+        isDead: reconnectAttempts >= maxAttempts,
+        lastConnectAt: null,
+        lastDisconnectAt: null,
+      });
+    } catch {}
+
+    // Massive / Polygon
+    try {
+      const massiveStatus = this.massiveProvider.getShardStatus?.() ?? [];
+      for (const shard of massiveStatus) {
+        const reconnectAttempts = (shard as any).reconnectAttempts ?? 0;
+        const maxAttempts = (shard as any).maxReconnectAttempts ?? 10;
+        providers.push({
+          name: `massive:${shard.name ?? 'unknown'}`,
+          isConnected: Boolean(shard.isConnected),
+          reconnectAttempts,
+          reconnectCount: (shard as any).reconnectCount ?? 0,
+          maxReconnectAttempts: maxAttempts,
+          isDead: reconnectAttempts >= maxAttempts,
+          lastConnectAt: null,
+          lastDisconnectAt: null,
+        });
+      }
+    } catch {}
+
+    // Binance
+    try {
+      const binanceShards = this.binanceProvider.getShardStatus?.() ?? [];
+      for (const shard of binanceShards) {
+        const reconnectAttempts = (shard as any).reconnectAttempts ?? 0;
+        const maxAttempts = (shard as any).maxReconnectAttempts ?? 10;
+        providers.push({
+          name: 'binance',
+          isConnected: Boolean(shard.isConnected),
+          reconnectAttempts,
+          reconnectCount: (shard as any).reconnectCount ?? 0,
+          maxReconnectAttempts: maxAttempts,
+          isDead: reconnectAttempts >= maxAttempts,
+          lastConnectAt: null,
+          lastDisconnectAt: null,
+        });
+      }
+    } catch {}
+
+    return { providers };
   }
 
   @Get('stream/status')

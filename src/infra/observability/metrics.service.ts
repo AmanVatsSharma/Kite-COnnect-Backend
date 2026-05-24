@@ -61,12 +61,16 @@ export class MetricsService {
   readonly kiteTickerSubscribedInstruments: Gauge;
   /** Redis operations total by method name and result (success|failure|skipped). */
   readonly redisOpsTotal: Counter;
+  /** Redis pub/sub slow operations (>100ms warn, >500ms error for publish). Labels: operation. */
+  readonly redisPubsubSlowOpsTotal: Counter;
   /** Redis circuit breaker state: 0=CLOSED, 1=OPEN, 2=HALF_OPEN. */
   readonly redisCircuitState: Gauge;
   /** Per named-client connection readiness: 1=ready, 0=not-ready. Labels: client name. */
   readonly redisConnected: Gauge;
   /** Emitted when a provider's WebSocket hits max reconnect attempts and gives up. Labels: provider name. */
   readonly providerReconnectDeadTotal: Counter;
+  /** Bytes flush failures in MarketDataGateway (incrementBytesSent error). */
+  readonly marketDataBytesFlushFailedTotal: Counter;
 
   constructor() {
     collectDefaultMetrics({ register });
@@ -264,6 +268,14 @@ export class MetricsService {
       labelNames: [],
       registers: [register],
     });
+    // Redis pub/sub slow ops counter
+    this.redisPubsubSlowOpsTotal = new Counter({
+      name: 'redis_pubsub_slow_ops_total',
+      help: 'Slow Redis pub/sub operations (>100ms warn, >500ms error for publish)',
+      labelNames: ['operation'],
+      registers: [register],
+    });
+
     this.redisConnected = new Gauge({
       name: 'redis_connected',
       help: 'Redis client connection readiness (1=ready, 0=not)',
@@ -278,6 +290,13 @@ export class MetricsService {
       name: 'provider_reconnect_dead_total',
       help: 'Provider WebSocket gave up after max reconnect attempts',
       labelNames: ['provider'],
+      registers: [register],
+    });
+    // Bytes flush failure counter
+    this.marketDataBytesFlushFailedTotal = new Counter({
+      name: 'market_data_bytes_flush_failed_total',
+      help: 'MarketDataGateway incrementBytesSent failure count (retry exhausted)',
+      labelNames: ['api_key'],
       registers: [register],
     });
   }
