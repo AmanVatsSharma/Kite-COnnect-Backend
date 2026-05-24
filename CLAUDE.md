@@ -18,6 +18,7 @@ npm run test:cov             # Coverage report
 npm run test:e2e             # E2E tests (test/jest-e2e.json)
 npm run lint                 # ESLint --fix on src/apps/libs/test
 npm run check:cycles         # Madge circular import check (exits non-zero)
+npm run check:cycles:warn    # Print cycles but exit 0 (used in verify:pr)
 npm run verify:pr            # build + test + check:cycles:warn (run before any PR)
 ```
 
@@ -165,7 +166,7 @@ This runs: `build` → `test` → `check:cycles:warn` (madge). New circular impo
 
 ### File headers
 
-All new or substantially edited `.ts` / `.tsx` files require a JSDoc header:
+All new or substantially edited `.ts` / `.tsx` files require this JSDoc header at the **top** (before any imports):
 
 ```ts
 /**
@@ -175,25 +176,49 @@ All new or substantially edited `.ts` / `.tsx` files require a JSDoc header:
  * @author BharatERP
  * @created YYYY-MM-DD
  * @updated YYYY-MM-DD
+ *
+ * Notes:
+ * - <optional: behavior, side-effects, or read-order guidance>
  */
 ```
 
+For **React components** in `apps/`, `@description` should mention the UI role and main props/data source in one line. The `@updated` tag is included only when behavior or the public API changes.
+
+### PR checklist
+
+- [ ] Plan confirmed with SonuRam ji (the primary developer)
+- [ ] Module docs updated (`MODULE_DOC.md` changelog)
+- [ ] Top-of-file headers present on all edited files
+- [ ] Madge cycle check passed
+- [ ] Duplicate-file check passed
+- [ ] Changelog entry included
+
 ### MODULE_DOC.md
 
-Every `src/features/<name>/` directory must contain `MODULE_DOC.md`. After every meaningful edit to a feature, append a changelog entry to its `MODULE_DOC.md` with date and summary.
+Every `src/features/<name>/` directory must contain `MODULE_DOC.md`. After every meaningful edit to a feature, append a changelog entry (date + summary) to it.
 
 ### Logging
 
 - Backend `src/`: use `private readonly logger = new Logger(MyService.name);` — never `console.log`.
 - Log levels: `debug` for hot-path tracing, `log`/`warn`/`error` for operational signals.
-- Frontend `apps/`: use the small `lib/logger.ts` wrapper (no-ops in production).
+- Frontend `apps/`: use the small `lib/logger.ts` wrapper (no-ops in production). Never use raw `console.log` in production code paths.
 - TODOs: mark with `[SonuRamTODO]` for grep-ability.
+- **RequestId/correlation**: attach `requestId` to all HTTP and WebSocket flows via interceptors/guards.
+
+### Error handling
+
+Use Nest **`HttpException`** (and subclasses like `BadRequestException`, `UnauthorizedException`) with appropriate `HttpStatus` for both HTTP and WebSocket surfaces. User-safe messages go to the client; full detail (stack, upstream body if safe) logs at `error` level with `requestId` when available. Extend or add an `ExceptionFilter` to normalize error shape — Sentry/metrics hooks live in `src/infra/observability/`. Do not introduce `AppError` from `src/common/errors/` unless that layer is explicitly adopted.
+
+### DTOs and validation
+
+All inbound controller/gateway payloads go through DTOs with **class-validator** (and `ValidationPipe` where configured). Avoid raw untyped objects in service public APIs — use DTOs or explicit interfaces. Prefer **Zod** in tests to assert DTO/runtime shapes where useful.
 
 ### Database
 
 - TypeORM entities live in `domain/` of their feature.
 - Schema changes require a migration under `src/migrations/`.
 - New entities should use `@PrimaryGeneratedColumn('uuid')`.
+- Relations must define **cascade** rules explicitly when ORM-managed deletes matter.
 
 ### Redis
 
@@ -204,6 +229,21 @@ Every `src/features/<name>/` directory must contain `MODULE_DOC.md`. After every
 - Prometheus metrics at `GET /api/health/metrics`.
 - Sentry: set `SENTRY_DSN` to enable.
 - OpenTelemetry: `OTEL_ENABLED=true` and `OTEL_SERVICE_NAME`.
+
+### Naming conventions
+
+| Context | Convention | Examples |
+|---------|-----------|----------|
+| Backend `src/` files | kebab-case | `stock.controller.ts`, `kite-ticker.facade.ts` |
+| React pages/components | PascalCase | `OverviewPage.tsx`, `ProviderCard.tsx` |
+| React hooks/utils | camelCase | `useMarketData.ts`, `api-client.ts` |
+| Tests | `*.spec.ts` next to source | `stock.service.spec.ts` |
+
+### REST vs GraphQL decision matrix
+
+- **High-frequency transactional endpoints** (orders, modify, cancel, fills) → REST for minimal overhead and deterministic latency.
+- **Flexible cross-entity reads** (admin dashboards, analytics, positions) → GraphQL or REST with aggregation endpoints.
+- Both needed → separate REST gateway (`/api/rest`) and GraphQL admin gateway (`/api/graphql`) sharing the same services layer.
 
 ## Key environment variables
 
@@ -231,6 +271,55 @@ Every `src/features/<name>/` directory must contain `MODULE_DOC.md`. After every
 | `MEILI_HOST_PRIMARY`, `MEILI_MASTER_KEY`, `MEILI_INDEX` | MeiliSearch wiring for `apps/search-api` and `apps/search-indexer` |
 | `INDEXER_MODE` | `backfill` / `incremental` / `backfill-and-watch` (default) / `synonyms-apply` |
 | `SENTRY_DSN`, `OTEL_ENABLED` | Observability (optional) |
+
+### Production Server
+
+**Instance:** AWS EC2 `i-050ba09433461c10f` (ap-south-2 / Mumbai)
+
+| Detail | Value |
+|--------|-------|
+| Public DNS | `ec2-18-60-117-225.ap-south-2.compute.amazonaws.com` |
+| SSH user | `ubuntu` |
+| Key file | `~/Desktop/Key_Pairs/Ap-south-2.pem` (Mumbai key) |
+
+**Services running:**
+
+| Service | Manager | Details |
+|---------|---------|---------|
+| `trading-app` | **PM2** (`pm2 status`) | NestJS on port 3000, watch disabled |
+| `trading-search-api` | **Docker** | `kite-connect-backend-search-api`, port 3002 |
+| `trading-search-indexer` | **Docker** | `kite-connect-backend-search-indexer`, incremental mode |
+| `trading-postgres` | **Docker** | `postgres:15-alpine`, port 5432 |
+| `trading-meilisearch` | **Docker** | `meilisearch:v1.8`, port 7700 |
+| `redis-server` | **systemd** | Local Redis 7.0, bind `127.0.0.1:6379` |
+
+**Common operations:**
+
+```bash
+# SSH
+ssh -i ~/Desktop/Key_Pairs/Ap-south-2.pem ubuntu@ec2-18-60-117-225.ap-south-2.compute.amazonaws.com
+
+# PM2 (main NestJS app)
+pm2 status              # list all processes
+pm2 logs trading-app    # stream logs
+pm2 restart trading-app # restart after code deploy
+
+# Docker (search-api, search-indexer, postgres, meilisearch)
+sudo docker ps -a
+sudo docker logs trading-search-indexer --tail 50 -f  # watch indexer
+sudo docker restart trading-search-api
+
+# Redis
+sudo systemctl status redis-server
+sudo systemctl restart redis-server  # if Redis bind fails: check /etc/redis/redis.conf → bind 127.0.0.1
+
+# Deploy (from local)
+# 1. Build locally: npm run build
+# 2. scp dist to server, or git pull on server
+# 3. pm2 restart trading-app
+```
+
+**Known issue:** Redis was binding to `172.17.0.1` (Docker bridge) which is unreachable. Fix: `sudo sed -i 's/^bind .*/bind 127.0.0.1/' /etc/redis/redis.conf && sudo systemctl restart redis-server`
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
