@@ -40,6 +40,7 @@
  * Last-updated: 2026-04-27
  */
 import { Logger } from '@nestjs/common';
+import { MetricsService } from '@infra/observability/metrics.service';
 import {
   MassiveWebSocketClient,
   MassiveCanonicalTick,
@@ -311,17 +312,13 @@ type TickerHandler = (...args: any[]) => void;
 export class MassiveMultiStreamClient {
   private readonly logger = new Logger(MassiveMultiStreamClient.name);
 
-  readonly stocks = new MassiveWebSocketClient();
-  readonly forex = new MassiveWebSocketClient();
-  readonly crypto = new MassiveWebSocketClient();
+  readonly stocks: MassiveWebSocketClient;
+  readonly forex: MassiveWebSocketClient;
+  readonly crypto: MassiveWebSocketClient;
 
   private readonly subClients: ReadonlyArray<
     readonly [MassiveWebSocketClient, string]
-  > = [
-    [this.stocks, 'stocks'],
-    [this.forex, 'forex'],
-    [this.crypto, 'crypto'],
-  ] as const;
+  >;
 
   private handlers = new Map<TickerEvent, TickerHandler[]>();
 
@@ -335,7 +332,15 @@ export class MassiveMultiStreamClient {
     10,
   );
 
-  constructor() {
+  constructor(private readonly metricsService: MetricsService) {
+    this.stocks = new MassiveWebSocketClient(metricsService);
+    this.forex = new MassiveWebSocketClient(metricsService);
+    this.crypto = new MassiveWebSocketClient(metricsService);
+    this.subClients = [
+      [this.stocks, 'stocks'],
+      [this.forex, 'forex'],
+      [this.crypto, 'crypto'],
+    ] as const;
     for (const [client] of this.subClients) {
       client.on('ticks', (ticks) => this.emit('ticks', ticks));
       client.on('connect', () => this.emit('connect'));

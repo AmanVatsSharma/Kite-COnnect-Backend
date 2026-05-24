@@ -39,6 +39,8 @@ export class MetricsService {
   readonly marketDataStreamBatchSeconds: Histogram;
   /** 1 when upstream WS ticker is connected, 0 otherwise (low-cardinality). */
   readonly marketDataStreamTickerConnected: Gauge;
+  /** Coalesced tick forward failures (Redis emit, Socket.IO, etc.). */
+  readonly marketDataStreamCoalesceForwardFailures: Counter;
   /** 1 when active HTTP provider has no credentials / client (degraded), 0 otherwise. */
   readonly providerDegradedMode: Gauge;
   /** Vortex: subscribe dropped (per-shard cap or all shards full). */
@@ -47,6 +49,12 @@ export class MetricsService {
   readonly vortexWsShardsConnected: Gauge;
   /** Emitted last-tick refresh ticks when upstream is quiet (synthetic cadence). */
   readonly marketDataSyntheticTickTotal: Counter;
+  /** Synthetic pulse run failures (outer try/catch in runSyntheticPulse). */
+  readonly marketDataSyntheticPulseFailures: Counter;
+  /** market-data-stream.service.ts: handleTicks outer catch increment. */
+  readonly marketDataStreamTickLoopErrors: Counter;
+  /** enqueuePersistMarketData failures inside the tick loop. */
+  readonly marketDataStreamPersistErrors: Counter;
   /** Kite ticker reconnect events by reason: reconnecting | auth_error | max_attempts. */
   readonly kiteTickerReconnectTotal: Counter;
   /** Current number of instruments subscribed upstream on the Kite WebSocket (max 3000). */
@@ -57,6 +65,8 @@ export class MetricsService {
   readonly redisCircuitState: Gauge;
   /** Per named-client connection readiness: 1=ready, 0=not-ready. Labels: client name. */
   readonly redisConnected: Gauge;
+  /** Emitted when a provider's WebSocket hits max reconnect attempts and gives up. Labels: provider name. */
+  readonly providerReconnectDeadTotal: Counter;
 
   constructor() {
     collectDefaultMetrics({ register });
@@ -183,6 +193,12 @@ export class MetricsService {
       labelNames: ['provider'],
       registers: [register],
     });
+    this.marketDataStreamCoalesceForwardFailures = new Counter({
+      name: 'market_data_stream_coalesce_forward_failures',
+      help: 'Coalesced-tick forward failures (Redis pub/sub or Socket.IO emit errors)',
+      labelNames: ['provider'],
+      registers: [register],
+    });
     this.providerDegradedMode = new Gauge({
       name: 'provider_degraded_mode',
       help: 'Provider operating without full credentials or HTTP client (1=degraded)',
@@ -204,6 +220,23 @@ export class MetricsService {
     this.marketDataSyntheticTickTotal = new Counter({
       name: 'market_data_synthetic_tick_total',
       help: 'Synthetic last-tick pulses emitted to WS clients when upstream is quiet',
+      registers: [register],
+    });
+    this.marketDataSyntheticPulseFailures = new Counter({
+      name: 'market_data_synthetic_pulse_failures',
+      help: 'Synthetic pulse run failures (outer try/catch in runSyntheticPulse)',
+      registers: [register],
+    });
+    this.marketDataStreamTickLoopErrors = new Counter({
+      name: 'market_data_stream_tick_loop_errors',
+      help: 'Errors caught in the outer try/catch of handleTicks',
+      labelNames: ['provider'],
+      registers: [register],
+    });
+    this.marketDataStreamPersistErrors = new Counter({
+      name: 'market_data_stream_persist_errors',
+      help: 'enqueuePersistMarketData failures inside the handleTicks tick loop',
+      labelNames: ['provider'],
       registers: [register],
     });
     this.kiteTickerReconnectTotal = new Counter({
@@ -239,6 +272,14 @@ export class MetricsService {
     });
     // Initialize circuit state to 0 (CLOSED)
     this.redisCircuitState.set(0);
+
+    // Provider reconnect dead counter
+    this.providerReconnectDeadTotal = new Counter({
+      name: 'provider_reconnect_dead_total',
+      help: 'Provider WebSocket gave up after max reconnect attempts',
+      labelNames: ['provider'],
+      registers: [register],
+    });
   }
 
   getMetricsRegister() {

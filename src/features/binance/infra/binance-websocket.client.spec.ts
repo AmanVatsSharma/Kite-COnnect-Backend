@@ -55,11 +55,16 @@ jest.mock('ws', () => {
   return Object.assign(Ctor, { default: Ctor, WebSocket: Ctor, OPEN: 1 });
 });
 
+// Fake MetricsService for test
+const mockMetricsService = {
+  providerReconnectDeadTotal: { labels: () => ({ inc: jest.fn() }) },
+};
+
 describe('BinanceWebSocketClient', () => {
   let client: BinanceWebSocketClient;
 
   beforeEach(() => {
-    client = new BinanceWebSocketClient();
+    client = new BinanceWebSocketClient(mockMetricsService as any);
   });
 
   // ── Subscribe / unsubscribe wire format ────────────────────────────────

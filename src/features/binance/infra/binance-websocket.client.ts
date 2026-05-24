@@ -19,8 +19,9 @@
  *  - Reconnect with exponential backoff (1s → 60s, jittered), capped at
  *    BINANCE_WS_RECONNECT_MAX_ATTEMPTS (env, default 10). Re-subscribes all tracked symbols.
  */
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as WebSocket from 'ws';
+import { MetricsService } from '@infra/observability/metrics.service';
 import {
   BINANCE_CANONICAL_EXCHANGE,
   BINANCE_MAX_STREAMS_PER_CONNECTION,
@@ -56,7 +57,7 @@ export class BinanceWebSocketClient {
 
   private readonly handlers = new Map<TickerEvent, TickerHandler[]>();
 
-  constructor() {
+  constructor(private readonly metricsService: MetricsService) {
     const cap = Number(process.env.BINANCE_WS_RECONNECT_MAX_ATTEMPTS ?? '10');
     this.maxReconnectAttempts = Number.isFinite(cap) && cap > 0 ? cap : 10;
   }
@@ -329,8 +330,14 @@ export class BinanceWebSocketClient {
   private scheduleReconnect(): void {
     if (!this.shouldReconnect) return;
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      try {
+        this.metricsService.providerReconnectDeadTotal.labels('binance').inc();
+      } catch {
+        /* metrics unavailable */
+      }
       this.logger.error(
-        `[Binance WS] Max reconnect attempts (${this.maxReconnectAttempts}) reached — giving up`,
+        '[PROVIDER_DEAD] [Binance WS] Max reconnect attempts (' +
+          `${this.maxReconnectAttempts}) reached — giving up`,
       );
       return;
     }

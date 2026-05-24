@@ -20,6 +20,7 @@ import {
 import { MassiveRestClient } from './massive-rest.client';
 import { MassiveMultiStreamClient } from './massive-multi-stream.client';
 import { AppConfigService } from '@infra/app-config/app-config.service';
+import { MetricsService } from '@infra/observability/metrics.service';
 
 @Injectable()
 export class MassiveProviderService
@@ -31,16 +32,19 @@ export class MassiveProviderService
   private initialized = false;
 
   // Permanent composite WS facade — created once, reused across credential reloads.
-  private readonly multiStream = new MassiveMultiStreamClient();
-
-  // DB-persisted overrides (win over env vars)
-  private apiKeyOverride: string | null = null;
+  private readonly multiStream: MassiveMultiStreamClient;
 
   constructor(
     private readonly config: ConfigService,
     private readonly rest: MassiveRestClient,
     private readonly appConfig: AppConfigService,
-  ) {}
+    private readonly metricsService: MetricsService,
+  ) {
+    this.multiStream = new MassiveMultiStreamClient(metricsService);
+  }
+
+  // DB-persisted overrides (win over env vars)
+  private apiKeyOverride: string | null = null;
 
   async onModuleInit(): Promise<void> {
     await this.loadConfigOverrides();

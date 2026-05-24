@@ -87,6 +87,10 @@ export class MarketDataGateway
   // Per-socket per-instrument last-sent timestamp for per-key throttle enforcement.
   private readonly perSocketLastSent = new Map<string, Map<number, number>>();
 
+  // In-memory room membership — maps room name → socket IDs.
+  // Used in broadcastMarketData instead of Socket.IO's fetchSockets() (O(n) per room per tick).
+  private readonly roomMembers = new Map<string, Set<string>>();
+
   constructor(
     private redisService: RedisService,
     private providerResolver: MarketDataProviderResolverService,
@@ -100,6 +104,22 @@ export class MarketDataGateway
     private readonly subscriptionRegistry: MarketDataGatewaySubscriptionRegistry,
     private readonly instrumentRegistry: InstrumentRegistryService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // In-memory room membership helpers (used by broadcastMarketData hot path)
+  // ---------------------------------------------------------------------------
+  private addToRoom(room: string, socketId: string): void {
+    let members = this.roomMembers.get(room);
+    if (!members) {
+      members = new Set<string>();
+      this.roomMembers.set(room, members);
+    }
+    members.add(socketId);
+  }
+
+  private removeFromRoom(room: string, socketId: string): void {
+    this.roomMembers.get(room)?.delete(socketId);
+  }
 
   async onModuleInit() {
     // Flush bytes accumulator to Redis every 10s (low-overhead, batched)
@@ -229,6 +249,7 @@ export class MarketDataGateway
         await this.unsubscribeFromInstruments(forbiddenTokens, sub.socketId);
         forbiddenTokens.forEach((t) => {
           socket.leave(`instrument:${t}`);
+          this.removeFromRoom(`instrument:${t}`, sub.socketId);
           this.wsInterest.removeInterest(t);
         });
 
@@ -549,6 +570,17 @@ export class MarketDataGateway
         });
     } catch (e) {
       this.logger.warn('WS origin audit (disconnect) failed', e as any);
+    }
+
+    // Clean up room membership map — remove this socket from any rooms it was in
+    // ( Socket.IO tracks rooms on the socket object internally )
+    const rooms: string[] = (client as any).rooms
+      ? [...(client as any).rooms]
+      : [];
+    for (const room of rooms) {
+      if (room && room.startsWith('instrument:')) {
+        this.removeFromRoom(room, client.id);
+      }
     }
   }
 
@@ -1101,13 +1133,21 @@ export class MarketDataGateway
         );
         if (uirId != null) {
           client.join(`instrument:${uirId}`);
+          this.addToRoom(`instrument:${uirId}`, client.id);
         } else {
           client.join(`instrument:${token}`);
+          this.addToRoom(`instrument:${token}`, client.id);
         }
       });
       // Join rooms for direct UIR IDs (massive instruments) + forced provider-prefixed UIRs.
-      directUirIds.forEach((id) => client.join(`instrument:${id}`));
-      forcedUirIdsAll.forEach((id) => client.join(`instrument:${id}`));
+      directUirIds.forEach((id) => {
+        client.join(`instrument:${id}`);
+        this.addToRoom(`instrument:${id}`, client.id);
+      });
+      forcedUirIdsAll.forEach((id) => {
+        client.join(`instrument:${id}`);
+        this.addToRoom(`instrument:${id}`, client.id);
+      });
 
       for (const id of allIncludedUirIds) {
         if (!priorInstrumentSet.has(id)) {
@@ -1429,7 +1469,10 @@ export class MarketDataGateway
       }
 
       // Leave UIR-keyed rooms
-      requestedUirIds.forEach((id) => client.leave(`instrument:${id}`));
+      requestedUirIds.forEach((id) => {
+        client.leave(`instrument:${id}`);
+        this.removeFromRoom(`instrument:${id}`, client.id);
+      });
 
       const removed = Array.from(before).filter(
         (t) => !subscription.instruments.includes(t),
@@ -1900,7 +1943,10 @@ export class MarketDataGateway
       if (ids.length > 0) {
         ids.forEach((id) => this.wsInterest.removeInterest(id));
         await this.unsubscribeFromInstruments(ids, client.id);
-        ids.forEach((id) => client.leave(`instrument:${id}`));
+        ids.forEach((id) => {
+          client.leave(`instrument:${id}`);
+          this.removeFromRoom(`instrument:${id}`, client.id);
+        });
       }
       if (sub) {
         sub.instruments = [];
@@ -2032,7 +2078,16 @@ export class MarketDataGateway
     try {
       const startTime = Date.now();
       const room = `instrument:${identifier}`;
-      const sockets = await this.server.in(room).fetchSockets();
+
+      // O(1) lookup via in-memory Map instead of Socket.IO's O(n) fetchSockets()
+      const memberIds = this.roomMembers.get(room);
+      if (!memberIds?.size) return;
+
+      const sockets: Socket[] = [];
+      for (const socketId of memberIds) {
+        const s = this.server.sockets.sockets.get(socketId);
+        if (s) sockets.push(s);
+      }
       if (sockets.length === 0) return;
 
       const ts = new Date().toISOString();

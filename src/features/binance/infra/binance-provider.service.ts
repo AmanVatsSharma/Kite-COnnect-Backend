@@ -18,6 +18,7 @@ import {
 import { BinanceRestClient } from './binance-rest.client';
 import { BinanceWebSocketClient } from './binance-websocket.client';
 import { BINANCE_MAX_STREAMS_PER_CONNECTION } from '../binance.constants';
+import { MetricsService } from '@infra/observability/metrics.service';
 
 @Injectable()
 export class BinanceProviderService
@@ -29,9 +30,14 @@ export class BinanceProviderService
   private initialized = false;
 
   // Permanent WS facade — created once, reused across reconnects/restarts.
-  private readonly ws = new BinanceWebSocketClient();
+  private readonly ws: BinanceWebSocketClient;
 
-  constructor(private readonly rest: BinanceRestClient) {}
+  constructor(
+    private readonly rest: BinanceRestClient,
+    private readonly metricsService: MetricsService,
+  ) {
+    this.ws = new BinanceWebSocketClient(metricsService);
+  }
 
   async onModuleInit(): Promise<void> {
     await this.initialize();

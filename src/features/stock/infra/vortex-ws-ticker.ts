@@ -4,6 +4,7 @@
  * @description Rupeezy Vortex WebSocket sharded ticker: up to 3 sockets × 1000 instruments, mode upgrades, unified tick stream.
  * @author BharatERP
  * @created 2025-03-23
+ * @updated 2026-05-24
  *
  * Notes:
  * - Per Vortex docs: max 1000 instruments per WebSocket, max 3 concurrent WS per access_token.
@@ -40,6 +41,7 @@ export interface VortexWsShardDeps {
   onShardConnectedChange?: () => void;
   metrics?: {
     incSubscribeDropped: (reason: string) => void;
+    incReconnectDead: () => void;
   };
 }
 
@@ -500,7 +502,17 @@ export class VortexWebSocketShard {
   }
 
   private scheduleReconnect() {
-    if (this.reconnectAttempts >= this.deps.maxReconnectAttempts) return;
+    if (this.reconnectAttempts >= this.deps.maxReconnectAttempts) {
+      try {
+        this.deps.metrics?.incReconnectDead();
+      } catch {
+        /* metrics unavailable */
+      }
+      this.deps.logger.error(
+        `[PROVIDER_DEAD] [Vortex] shard=${this.deps.shardIndex} max reconnect attempts reached — giving up`,
+      );
+      return;
+    }
     this.deps.onReconnectAttempt?.();
     const base = 1000 * Math.pow(1.5, this.reconnectAttempts++);
     const jitter = Math.floor(Math.random() * 300);
@@ -594,6 +606,7 @@ export interface VortexShardedTickerDeps {
   onParentWsConnected?: (anyConnected: boolean) => void;
   metrics?: {
     incSubscribeDropped: (reason: string) => void;
+    incReconnectDead: () => void;
     setShardsConnected: (n: number) => void;
   };
 }

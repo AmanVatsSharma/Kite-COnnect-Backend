@@ -11,6 +11,7 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import * as WebSocket from 'ws';
+import { MetricsService } from '@infra/observability/metrics.service';
 import {
   MASSIVE_WS_REALTIME_BASE,
   MASSIVE_WS_DELAYED_BASE,
@@ -66,6 +67,8 @@ export class MassiveWebSocketClient {
   private subscribedSymbols: Set<string> = new Set();
 
   private handlers = new Map<TickerEvent, TickerHandler[]>();
+
+  constructor(private readonly metricsService: MetricsService) {}
 
   init(
     apiKey: string,
@@ -386,8 +389,13 @@ export class MassiveWebSocketClient {
   private scheduleReconnect(): void {
     if (!this.shouldReconnect) return;
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      try {
+        this.metricsService.providerReconnectDeadTotal.labels('massive').inc();
+      } catch {
+        /* metrics unavailable */
+      }
       this.logger.error(
-        '[Massive WS] Max reconnect attempts reached — giving up',
+        '[PROVIDER_DEAD] [Massive WS] Max reconnect attempts reached — giving up',
       );
       return;
     }

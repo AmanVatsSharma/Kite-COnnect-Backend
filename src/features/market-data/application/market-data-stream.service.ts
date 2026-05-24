@@ -198,12 +198,22 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
         }
       }
     } catch (e) {
-      this.logger.warn('Synthetic pulse failed', e as any);
+      try {
+        this.metrics.marketDataSyntheticPulseFailures.inc();
+      } catch {
+        /* ignore */
+      }
+      this.rateLimitedLog(
+        'error',
+        'syntheticPulseFailed',
+        `Synthetic pulse failed: ${(e as Error)?.message ?? e}`,
+        60_000,
+      );
     }
   }
 
   private rateLimitedLog(
-    level: 'debug' | 'warn',
+    level: 'debug' | 'warn' | 'error',
     key: string,
     message: string,
     minIntervalMs = 10_000,
@@ -212,6 +222,7 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     if (now - (this.rateLogAt.get(key) || 0) < minIntervalMs) return;
     this.rateLogAt.set(key, now);
     if (level === 'warn') this.logger.warn(message);
+    else if (level === 'error') this.logger.error(message);
     else this.logger.debug(message);
   }
 
@@ -568,8 +579,13 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
               this.stockService
                 .forwardRealtimeTick(uirId, payload)
                 .catch((e: any) => {
+                  try {
+                    this.metrics.marketDataStreamCoalesceForwardFailures
+                      .labels(this.activeProviderName)
+                      .inc();
+                  } catch {}
                   this.rateLimitedLog(
-                    'debug',
+                    'warn',
                     `forward_tick_fail:${uirId}`,
                     `Failed to forward coalesced tick for UIR ${uirId}: ${e?.message || e}`,
                     30_000,
@@ -591,9 +607,24 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
             );
           }
         }
-        this.stockService.enqueuePersistMarketData(uirId, effectiveTick);
+        try {
+          this.stockService.enqueuePersistMarketData(uirId, effectiveTick);
+        } catch (persistError: any) {
+          try {
+            this.metrics.marketDataStreamPersistErrors.labels(providerName).inc();
+          } catch {}
+          this.rateLimitedLog(
+            'warn',
+            `persist_error:${uirId}`,
+            `enqueuePersistMarketData failed for UIR ${uirId}, continuing: ${persistError?.message || persistError}`,
+            60_000,
+          );
+        }
       }
     } catch (error) {
+      try {
+        this.metrics.marketDataStreamTickLoopErrors.labels(providerName).inc();
+      } catch {}
       this.logger.error('Error handling ticks', error);
     }
   }

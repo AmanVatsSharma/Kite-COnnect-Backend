@@ -1035,6 +1035,13 @@ export class VortexProviderService implements OnModuleInit, MarketDataProvider {
             /* ignore */
           }
         },
+        incReconnectDead: () => {
+          try {
+            self.metrics.providerReconnectDeadTotal.labels('vortex').inc();
+          } catch {
+            /* ignore */
+          }
+        },
         setShardsConnected: (n: number) => {
           try {
             self.metrics.vortexWsShardsConnected.labels('vortex').set(n);
