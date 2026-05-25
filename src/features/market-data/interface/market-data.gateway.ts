@@ -2090,16 +2090,21 @@ export class MarketDataGateway
       const memberIds = this.roomMembers.get(room);
       if (!memberIds?.size) return;
 
-      const sockets: Socket[] = [];
+      // Resolve the sockets collection — Redis adapter may not expose server.sockets.sockets
+      // directly; always go through the namespace for compatibility.
+      const ns = this.server.of('/market-data');
+      const rawSockets: Socket[] = [];
       for (const socketId of memberIds) {
-        const s = this.server.sockets.sockets.get(socketId);
-        if (s) sockets.push(s);
+        const s = (ns as any).sockets?.get?.(socketId)
+          ?? (ns as any).adapter?.sockets?.get?.(socketId)
+          ?? (this.server as any).sockets?.sockets?.get?.(socketId);
+        if (s) rawSockets.push(s);
       }
-      if (sockets.length === 0) return;
+      if (rawSockets.length === 0) return;
 
       const ts = new Date().toISOString();
       const now = Date.now();
-      for (const s of sockets) {
+      for (const s of rawSockets) {
         const sub = this.subscriptionRegistry.get(s.id);
         const apiKey = sub?.apiKey || (s.data as any)?.apiKey;
 
@@ -2138,7 +2143,7 @@ export class MarketDataGateway
 
       const broadcastTime = Date.now() - startTime;
       this.logger.debug(
-        `[Gateway] Broadcasted tick UIR ${identifier} to ${sockets.length} clients in ${broadcastTime}ms`,
+        `[Gateway] Broadcasted tick UIR ${identifier} to ${rawSockets.length} clients in ${broadcastTime}ms`,
       );
     } catch (error) {
       this.logger.error('[Gateway] Error broadcasting market data', error);

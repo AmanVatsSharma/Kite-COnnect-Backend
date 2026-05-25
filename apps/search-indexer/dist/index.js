@@ -210,6 +210,9 @@ function toDoc(r) {
         assetClass: r.asset_class || 'equity',
         optionType: r.option_type || null,
         expiry: r.expiry ? String(r.expiry).slice(0, 10) : null,
+        expiryTs: r.expiry
+            ? Math.floor(new Date(String(r.expiry).slice(0, 10) + 'T09:15:00Z').getTime() / 1000)
+            : 9999999999,
         strike: r.strike !== null ? Number(r.strike) : null,
         lotSize: r.lot_size || 1,
         tickSize: Number(r.tick_size) || 0.05,
@@ -227,7 +230,10 @@ function toDoc(r) {
         ...(() => {
             const isCrypto = r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto';
             if (!isCrypto)
-                return { searchKeywords: [symbol, r.name].filter(Boolean) };
+                return {
+                    searchKeywords: [symbol, r.name].filter(Boolean),
+                    exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
+                };
             const base = extractCoinBase(symbol);
             const fullName = CRYPTO_BASE_NAMES[base];
             const kw = [symbol, r.name].filter(Boolean);
@@ -245,6 +251,7 @@ function toDoc(r) {
             return {
                 searchKeywords: kw,
                 coinFullName: fullName && isUsdtQuoted ? fullName : undefined,
+                exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
             };
         })(),
     };
@@ -257,10 +264,11 @@ async function applySettings(meiliBase, apiKey, index) {
             'coinFullName', // P0: crypto full name (Bitcoin/Ethereum/Solana) — only Binance docs have this;
             // ranks crypto tickers above US equity funds that happen to mention the coin
             'symbol', // P1: direct ticker (RELIANCE, NIFTY, BTCUSDT)
-            'canonicalSymbol', // P2: "NSE:RELIANCE"
-            'name', // P3: company/pair name
-            'underlyingSymbol', // P4: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
-            'searchKeywords', // P5: combined fallback bag
+            'exactName', // P2: normalized company name for exact match boost (e.g. "RELIANCEINDUSTRIES")
+            'name', // P3: company/pair name (moved above canonicalSymbol)
+            'canonicalSymbol', // P4: "NSE:RELIANCE"
+            'underlyingSymbol', // P5: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
+            'searchKeywords', // P6: combined fallback bag
         ],
         filterableAttributes: [
             'exchange',
@@ -283,6 +291,7 @@ async function applySettings(meiliBase, apiKey, index) {
             'rankOrder',
             'exchangeRank',
             'expiry',
+            'expiryTs', // numeric sort = nearest expiry first
             'strike',
             'optionType',
         ],

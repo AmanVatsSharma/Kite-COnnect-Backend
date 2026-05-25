@@ -92,6 +92,8 @@ Cross-feature imports are forbidden; share code only through `src/shared/` or `s
 | `kite-connect` | Kite Connect HTTP + WebSocket ticker; implements `MarketDataProvider`; wraps `KiteTicker` via `kite-ticker.facade.ts` |
 | `massive` | Massive (formerly Polygon.io) provider for US stocks/forex/crypto/options/indices: REST + WS client, daily ticker sync into `massive_instruments`, multi-stream WS sharding |
 | `binance` | Binance.com global Spot crypto provider: public unauthenticated REST + combined-stream WebSocket (JSON-RPC SUBSCRIBE/UNSUBSCRIBE on a single connection, 1024-stream cap), daily sync into `binance_instruments` filtered by `BINANCE_QUOTES` |
+| `market-movers` | NSE/BSE top gainers, losers, most active stocks: Alpha Vantage API with Yahoo Finance fallback, 1-hour Redis cache, hourly cron pre-warm |
+| `news` | Finnhub financial news aggregator: 5-min polling across general/forex/crypto/commodity, persistence in `news_items`, Redis ring buffer (latest 100), real-time WS push at `/news-ws` namespace |
 | `admin` | Admin endpoints (guarded by `ADMIN_TOKEN`), origin audit, abuse detection dashboard |
 | `auth` | JWT auth, API key management, abuse detection service |
 | `health` | `/api/health` and `/api/health/metrics` (Prometheus) |
@@ -270,6 +272,15 @@ All inbound controller/gateway payloads go through DTOs with **class-validator**
 | `BINANCE_WS_RECONNECT_MAX_ATTEMPTS` | Cap on WS exponential-backoff reconnects (default `10`) |
 | `MEILI_HOST_PRIMARY`, `MEILI_MASTER_KEY`, `MEILI_INDEX` | MeiliSearch wiring for `apps/search-api` and `apps/search-indexer` |
 | `INDEXER_MODE` | `backfill` / `incremental` / `backfill-and-watch` (default) / `synonyms-apply` |
+| `FUNDAMENTALS_CACHE_TTL_HOURS` | Cache TTL in hours for fundamentals data (default `24`) |
+| `YFINANCE_FALLBACK_ENABLED` | Enable Yahoo Finance free endpoints as fallback (default `true`) |
+| `ALPHA_VANTAGE_API_KEY` | Free key from alphavantage.co for market movers (TOP_GAINERS/TOP_LOSERS/TOP_AGGRESSIVE_CAPITAL_GAINERS). Falls back to Yahoo Finance index-level data if absent. |
+| `MARKET_MOVERS_CRON` | Cron expression for hourly cache warm (default `5 * * * *`) |
+| `MARKET_MOVERS_PREWARM` | Set `false` to skip on-module-init cache warm |
+| `FINNHUB_API_KEY` | Finnhub.io API key for news polling (free tier: 60 req/min) |
+| `NEWS_POLL_INTERVAL_MS` | News scheduler poll interval in ms (default `300000` = 5 min) |
+| `NEWS_CACHE_TTL_SECONDS` | Redis cache TTL for Finnhub responses (default `300`) |
+| `NEWS_POLLING_ENABLED` | Set `false` to disable the news scheduler |
 | `SENTRY_DSN`, `OTEL_ENABLED` | Observability (optional) |
 
 ### Production Server

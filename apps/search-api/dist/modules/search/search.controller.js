@@ -16,7 +16,7 @@ exports.SearchController = void 0;
 const common_1 = require("@nestjs/common");
 const search_service_1 = require("./search.service");
 const provider_aliases_1 = require("./provider-aliases");
-function buildResponseRow(raw, last_price, selectedFields, includeInternal) {
+function buildResponseRow(raw, last_price, selectedFields, includeInternal, change, pchange) {
     const live = Number.isFinite(last_price) && (last_price !== null && last_price !== void 0 ? last_price : 0) > 0;
     let logo_url = null;
     const exchange = (raw.exchange || '').toUpperCase();
@@ -67,6 +67,8 @@ function buildResponseRow(raw, last_price, selectedFields, includeInternal) {
             ? (0, provider_aliases_1.internalToPublicProvider)(raw.streamProvider)
             : undefined,
         logo_url,
+        change: change !== null && change !== void 0 ? change : null,
+        pchange: pchange !== null && pchange !== void 0 ? pchange : null,
     };
     for (const k of search_service_1.PUBLIC_FIELD_ALLOWLIST) {
         if (selectedFields && !selectedFields.has(k))
@@ -189,8 +191,8 @@ let SearchController = class SearchController {
         const items = await this.searchService.searchInstruments(q.trim(), probeLimit, filters, meiliAttrs);
         const quotes = await this.searchService.hydrateLtpByItems(items.slice(0, probeLimit));
         const enriched = items.map((it) => {
-            var _a, _b;
-            return buildResponseRow(it, (_b = (_a = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _a === void 0 ? void 0 : _a.last_price) !== null && _b !== void 0 ? _b : null, selectedFields, includeInternal);
+            var _a, _b, _c, _d, _e, _f;
+            return buildResponseRow(it, (_b = (_a = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _a === void 0 ? void 0 : _a.last_price) !== null && _b !== void 0 ? _b : null, selectedFields, includeInternal, (_d = (_c = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _c === void 0 ? void 0 : _c.change) !== null && _d !== void 0 ? _d : null, (_f = (_e = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _e === void 0 ? void 0 : _e.pchange) !== null && _f !== void 0 ? _f : null);
         });
         const data = (ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched).slice(0, limit);
         this.logger.log(`[Search] q="${q}" limit=${limit} probe=${probeLimit} ltp_only=${ltpOnly} ` +
@@ -233,8 +235,8 @@ let SearchController = class SearchController {
         const items = await this.searchService.searchInstruments(q.trim(), probeLimit, filters, meiliAttrs);
         const quotes = await this.searchService.hydrateLtpByItems(items.slice(0, probeLimit));
         const enriched = items.map((it) => {
-            var _a, _b;
-            return buildResponseRow(it, (_b = (_a = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _a === void 0 ? void 0 : _a.last_price) !== null && _b !== void 0 ? _b : null, selectedFields, includeInternal);
+            var _a, _b, _c, _d, _e, _f;
+            return buildResponseRow(it, (_b = (_a = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _a === void 0 ? void 0 : _a.last_price) !== null && _b !== void 0 ? _b : null, selectedFields, includeInternal, (_d = (_c = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _c === void 0 ? void 0 : _c.change) !== null && _d !== void 0 ? _d : null, (_f = (_e = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _e === void 0 ? void 0 : _e.pchange) !== null && _f !== void 0 ? _f : null);
         });
         const data = (ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched).slice(0, limit);
         this.logger.log(`[Suggest] q="${q}" limit=${limit} ltp_only=${ltpOnly} ` +

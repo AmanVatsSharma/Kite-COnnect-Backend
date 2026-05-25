@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Data Client</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; padding: 16px; color: #222; }
+        h1 { color: #1a237e; margin-bottom: 14px; font-size: 19px; }
+        h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+        .panel { background: white; border-radius: 8px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+        .panel-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding-bottom: 7px; border-bottom: 2px solid #eee; }
+        .panel-header h2 { margin: 0; }
+        .hdr-right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+        .p-conn  .panel-header { border-color: #1565c0; } .p-conn  h2 { color: #1565c0; }
+        .p-sub   .panel-header { border-color: #2e7d32; } .p-sub   h2 { color: #2e7d32; }
+        .p-tools .panel-header { border-color: #e65100; } .p-tools h2 { color: #e65100; }
+        .p-quote .panel-header { border-color: #00695c; } .p-quote h2 { color: #00695c; }
+        .p-ticks .panel-header { border-color: #1565c0; } .p-ticks h2 { color: #1565c0; }
+        .p-log   .panel-header { border-color: #37474f; } .p-log   h2 { color: #37474f; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 860px) { .grid-2 { grid-template-columns: 1fr; } }
+        label { font-size: 11px; color: #666; display: block; margin-bottom: 3px; }
+        input[type=text], input[type=number], select, textarea {
+            width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 4px;
+            font-size: 13px; font-family: inherit; margin-bottom: 8px;
+        }
+        textarea { resize: vertical; min-height: 56px; }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: #1976d2; }
+        .row { display: flex; gap: 8px; }
+        .row > * { flex: 1; }
+        button {
+            padding: 7px 13px; border: none; border-radius: 4px; cursor: pointer;
+            font-size: 12px; font-weight: 600; transition: filter .15s;
+        }
+        button:hover:not(:disabled) { filter: brightness(.9); }
+        button:disabled { opacity: .38; cursor: not-allowed; }
+        .btn-primary { background: #1976d2; color: #fff; }
+        .btn-danger  { background: #c62828; color: #fff; }
+        .btn-success { background: #2e7d32; color: #fff; }
+        .btn-warning { background: #f57c00; color: #fff; }
+        .btn-teal    { background: #00796b; color: #fff; }
+        .btn-gray    { background: #546e7a; color: #fff; }
+        .btn-sm      { padding: 5px 10px; font-size: 11px; }
+        .btn-group   { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .radio-pills { display: flex; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+        .radio-pills input[type=radio] { display: none; }
+        .radio-pills label {
+            flex: 1; text-align: center; padding: 7px 4px;
+            cursor: pointer; font-size: 12px; color: #444;
+            background: #f9f9f9; border: none; margin: 0;
+        }
+        .radio-pills input[type=radio]:checked + label { background: #1976d2; color: #fff; font-weight: 600; }
+        .proto-tabs { display: flex; margin-bottom: 10px; }
+        .proto-tab {
+            flex: 1; text-align: center; padding: 9px 6px;
+            border: 2px solid #ddd; cursor: pointer; font-size: 12px; background: #fff;
+        }
+        .proto-tab:first-child { border-radius: 4px 0 0 4px; }
+        .proto-tab:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
+        .proto-tab.active { border-color: #1976d2; background: #e3f2fd; color: #1565c0; font-weight: 700; }
+        .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+        .b-green  { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+        .b-red    { background: #ffebee; color: #b71c1c; border: 1px solid #ef9a9a; }
+        .b-orange { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+        .b-blue   { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
+        .b-gray   { background: #eceff1; color: #37474f; border: 1px solid #b0bec5; }
+        .b-purple { background: #f3e5f5; color: #6a1b9a; border: 1px solid #ce93d8; }
+        #statusBar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+                     padding: 7px 10px; background: #fafafa; border-radius: 4px; margin-bottom: 8px; }
+        #welcomeBlock { font-size: 12px; margin-top: 6px; display: none; }
+        .sio-only { transition: opacity .2s; }
+        .sio-only.off { opacity: .35; pointer-events: none; }
+        .tbl-wrap { overflow-x: auto; max-height: 320px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th { background: #37474f; color: #fff; padding: 6px 8px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+        td { padding: 5px 8px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+        tr:hover td { background: #f5f5f5; }
+        @keyframes flash { 0%{background:#c8e6c9} 100%{background:transparent} }
+        .flash { animation: flash .35s ease-out; }
+        #logWrap { background: #1b2631; border-radius: 4px; padding: 8px;
+                   max-height: 380px; overflow-y: auto;
+                   font-family: 'Consolas','Courier New',monospace; font-size: 11px; }
+        .le { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+        .ts  { color: #4a6170; }
+        .l-s { color: #81c784; }
+        .l-c { color: #64b5f6; }
+        .l-e { color: #ef9a9a; }
+        .l-y { color: #ffd54f; }
+        .rbox { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 4px;
+                padding: 8px; font-size: 12px; font-family: monospace;
+                white-space: pre-wrap; word-break: break-all;
+                max-height: 180px; overflow-y: auto; margin-top: 8px; display: none; }
+        .mono { font-family: monospace; background: rgba(0,0,0,.07); padding: 1px 4px; border-radius: 2px; font-size: 11px; }
+        .stats-row { display: flex; gap: 20px; font-size: 12px; color: #555; margin-bottom: 8px; }
+        .stats-row b { color: #1565c0; }
+    </style>
+</head>
+<body>
+<h1>Market Data Client</h1>
+
+<!-- CONNECTION PANEL -->
+<div class="panel p-conn">
+    <div class="panel-header"><h2>Connection</h2></div>
+    <div class="row">
+        <div>
+            <label>Server URL</label>
+            <input type="text" id="serverUrl" value="https://localhost" />
+        </div>
+        <div>
+            <label>API Key</label>
+            <input type="text" id="apiKey" placeholder="Your API key" />
+        </div>
+    </div>
+    <label>Protocol</label>
+    <div class="proto-tabs">
+        <div class="proto-tab active" id="tab-sio" onclick="selectProtocol('socketio')">
+            Socket.IO<br><small style="font-weight:400;font-size:10px">Auto-reconnect</small>
+        </div>
+        <div class="proto-tab" id="tab-ws" onclick="selectProtocol('native')">
+            Native WebSocket<br><small style="font-weight:400;font-size:10px">Lightweight</small>
+        </div>
+    </div>
+    <div class="btn-group">
+        <button class="btn-primary" id="connectBtn" onclick="connect()">Connect</button>
+        <button class="btn-danger"  id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+    </div>
+    <div id="statusBar">
+        <span id="connBadge" class="badge b-gray">Disconnected</span>
+        <span id="providerBadge" class="badge b-purple" style="display:none">—</span>
+        <span id="streamBadge" class="badge b-gray" style="display:none">stream: —</span>
+        <span id="protoBadge" class="badge b-blue">Socket.IO</span>
+        <span id="pingBadge" class="badge b-blue" style="display:none">— ms</span>
+    </div>
+    <div id="welcomeBlock">
+        <div id="welcomeProvider"></div>
+        <div id="welcomeExchanges" style="color:#555;margin-top:3px;font-size:11px"></div>
+        <div id="welcomeLimits" style="color:#777;margin-top:2px;font-size:11px"></div>
+    </div>
+</div>
+
+<!-- SUBSCRIBE + TOOLS -->
+<div class="grid-2">
+    <div class="panel p-sub">
+        <div class="panel-header"><h2>Subscribe</h2></div>
+        <label>Instruments (numeric tokens or EXCHANGE-TOKEN strings)</label>
+        <textarea id="instInput" placeholder="26000&#10;NSE_FO-135938&#10;11536, 2881"></textarea>
+        <label>Symbols (EXCHANGE:SYMBOL or plain name)</label>
+        <textarea id="symInput" placeholder="NSE:RELIANCE&#10;RELIANCE&#10;SBIN" style="min-height:44px"></textarea>
+        <label>Mode</label>
+        <div class="radio-pills">
+            <input type="radio" name="mode" id="m-ltp" value="ltp" checked>
+            <label for="m-ltp">LTP</label>
+            <input type="radio" name="mode" id="m-ohlcv" value="ohlcv">
+            <label for="m-ohlcv">OHLCV</label>
+            <input type="radio" name="mode" id="m-full" value="full">
+            <label for="m-full">Full</label>
+        </div>
+        <div class="btn-group">
+            <button class="btn-success" id="subBtn" onclick="doSubscribe()" disabled>Subscribe</button>
+            <button class="btn-danger btn-sm" id="unsubBtn" onclick="doUnsubscribe()" disabled>Unsubscribe</button>
+            <button class="btn-warning btn-sm" id="setModeBtn" onclick="doSetMode()" disabled>Set Mode</button>
+        </div>
+        <div id="subConfirmed"></div>
+    </div>
+
+    <div class="panel p-tools">
+        <div class="panel-header"><h2>Tools</h2></div>
+        <div class="btn-group">
+            <button class="btn-warning btn-sm" id="pingBtn" onclick="doPing()" disabled>Ping</button>
+            <button class="btn-warning btn-sm sio-only" id="whoamiBtn" onclick="doEmit('whoami',{})" disabled>Whoami</button>
+            <button class="btn-warning btn-sm sio-only" id="statusBtn" onclick="doEmit('status',{})" disabled>Status</button>
+        </div>
+        <div class="btn-group">
+            <button class="btn-gray btn-sm sio-only" id="listSubsBtn" onclick="doEmit('list_subscriptions',{})" disabled>List Subscriptions</button>
+            <button class="btn-danger btn-sm sio-only" id="unsubAllBtn" onclick="doEmit('unsubscribe_all',{})" disabled>Unsubscribe All</button>
+        </div>
+        <div class="sio-only" id="sioNote" style="background:#fff3e0;border-radius:3px;padding:4px 8px;font-size:10px;color:#e65100;margin-bottom:8px">
+            Whoami / Status / List Subscriptions / Unsubscribe All are Socket.IO only
+        </div>
+        <div id="toolsResult" class="rbox"></div>
+    </div>
+</div>
+
+<!-- QUOTE / HISTORICAL -->
+<div class="panel p-quote">
+    <div class="panel-header"><h2>Quote &amp; Historical</h2></div>
+    <div class="row">
+        <div>
+            <label>Instrument Token</label>
+            <input type="number" id="qInst" placeholder="e.g. 26000" />
+        </div>
+        <div>
+            <label>Exchange</label>
+            <input type="text" id="qExch" value="NSE" />
+        </div>
+        <div>
+            <label>Interval</label>
+            <select id="hInterval">
+                <option>minute</option><option>3minute</option><option>5minute</option>
+                <option>15minute</option><option>30minute</option><option>60minute</option>
+                <option>day</option><option>week</option><option>month</option>
+            </select>
+        </div>
+        <div>
+            <label>From (YYYY-MM-DD)</label>
+            <input type="text" id="hFrom" placeholder="2025-01-01" />
+        </div>
+        <div>
+            <label>To (YYYY-MM-DD)</label>
+            <input type="text" id="hTo" placeholder="2025-01-31" />
+        </div>
+    </div>
+    <div class="btn-group">
+        <button class="btn-teal" id="getQuoteBtn" onclick="doGetQuote()" disabled>Get Quote</button>
+        <button class="btn-teal" id="getHistBtn" onclick="doGetHistorical()" disabled>Get Historical</button>
+    </div>
+    <div id="quoteResult" class="rbox"></div>
+</div>
+
+<!-- LIVE TICKS -->
+<div class="panel p-ticks">
+    <div class="panel-header">
+        <h2>Live Market Data</h2>
+        <div class="hdr-right">
+            <label style="font-size:11px;margin:0"><input type="checkbox" id="autoScroll" checked> auto-scroll</label>
+            <button class="btn-gray btn-sm" onclick="clearTicks()">Clear</button>
+        </div>
+    </div>
+    <div class="stats-row">
+        <span>Messages: <b id="msgCount">0</b></span>
+        <span>Rate: <b id="dataRate">0/s</b></span>
+        <span>Last: <b id="lastUp">—</b></span>
+    </div>
+    <div class="tbl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Token</th><th>uirId</th><th>Mode</th>
+                    <th>Last</th><th>Open</th><th>High</th><th>Low</th><th>Close</th>
+                    <th>Vol</th>
+                    <th>Bid</th><th>Ask</th>
+                    <th>Updated</th>
+                </tr>
+            </thead>
+            <tbody id="tickBody">
+                <tr id="emptyRow"><td colspan="12" style="text-align:center;color:#aaa;padding:18px">No ticks yet</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- EVENT LOG -->
+<div class="panel p-log">
+    <div class="panel-header">
+        <h2>Event Log</h2>
+        <div class="hdr-right">
+            <button class="btn-gray btn-sm" onclick="clearLog()">Clear</button>
+            <button class="btn-gray btn-sm" onclick="exportLog()">Export</button>
+        </div>
+    </div>
+    <div style="font-size:10px;color:#888;margin-bottom:5px">
+        <span style="color:#81c784">server</span> &nbsp;
+        <span style="color:#64b5f6">client</span> &nbsp;
+        <span style="color:#ef9a9a">error</span> &nbsp;
+        <span style="color:#ffd54f">system</span>
+    </div>
+    <div id="logWrap"></div>
+</div>
+
+<script>
+// State
+var socket = null, ws = null;
+var protocol = 'socketio';
+var msgCount = 0, msgRates = [], lastMsgTs = 0, pingTs = 0;
+var ticks = {};
+
+// DOM helper
+function mk(tag, opts) {
+    var e = document.createElement(tag);
+    if (!opts) return e;
+    if (opts.cls) e.className = opts.cls;
+    if (opts.text !== undefined) e.textContent = opts.text;
+    if (opts.style) e.setAttribute('style', opts.style);
+    if (opts.bold) e.style.fontWeight = 'bold';
+    if (opts.color) e.style.color = opts.color;
+    if (opts.children) opts.children.forEach(function(c){ if (c) e.appendChild(c); });
+    return e;
+}
+
+// Logging
+function log(text, type) {
+    type = type || 'system';
+    var wrap = document.getElementById('logWrap');
+    var now = new Date();
+    var ts = now.toTimeString().slice(0,8) + '.' + String(now.getMilliseconds()).padStart(3,'0');
+    var clsMap = {server:'l-s', client:'l-c', error:'l-e', system:'l-y'};
+    var cls = clsMap[type] || 'l-y';
+    var dirMap = {server:'<-', client:'->', error:'X', system:'*'};
+    var dir = dirMap[type] || '*';
+
+    var row = mk('div', {cls: 'le'});
+    row.appendChild(mk('span', {cls: 'ts', text: '[' + ts + '] '}));
+    row.appendChild(mk('span', {cls: cls, text: dir + ' ' + String(text)}));
+    wrap.appendChild(row);
+    if (document.getElementById('autoScrollLog') && document.getElementById('autoScrollLog').checked) {
+        wrap.scrollTop = wrap.scrollHeight;
+    }
+}
+
+function logEv(name, data, type) {
+    log(name + ' ' + JSON.stringify(data), type || 'server');
+}
+
+// Badges
+function badge(id, text, cls) {
+    var el = document.getElementById(id);
+    el.className = 'badge ' + cls;
+    el.textContent = text;
+    el.style.display = 'inline-block';
+}
+
+function hideBadge(id) { document.getElementById(id).style.display = 'none'; }
+
+function connBadge(state) {
+    var map = {
+        connected: ['b-green', 'Connected'],
+        connecting: ['b-orange', 'Connecting...'],
+        disconnected: ['b-gray', 'Disconnected']
+    };
+    var p = map[state] || map.disconnected;
+    badge('connBadge', p[1], p[0]);
+}
+
+// Protocol selection
+function selectProtocol(p) {
+    if (socket || ws) { disconnect(); }
+    protocol = p;
+    document.getElementById('tab-sio').classList.toggle('active', p === 'socketio');
+    document.getElementById('tab-ws').classList.toggle('active', p === 'native');
+    badge('protoBadge', p === 'socketio' ? 'Socket.IO' : 'Native WS', 'b-blue');
+    var isSio = p === 'socketio';
+    document.querySelectorAll('.sio-only').forEach(function(el){ el.classList.toggle('off', !isSio); });
+    log('Protocol -> ' + (isSio ? 'Socket.IO' : 'Native WebSocket'), 'system');
+}
+
+// Connected state
+function setConnected(yes) {
+    var always = ['subBtn','unsubBtn','setModeBtn','pingBtn','getQuoteBtn','getHistBtn'];
+    var sioOnly = ['whoamiBtn','statusBtn','listSubsBtn','unsubAllBtn'];
+    always.forEach(function(id){ var el=document.getElementById(id); if(el) el.disabled=!yes; });
+    var isSio = protocol === 'socketio';
+    sioOnly.forEach(function(id){ var el=document.getElementById(id); if(el) el.disabled=!(yes&&isSio); });
+    document.getElementById('connectBtn').disabled = yes;
+    document.getElementById('disconnectBtn').disabled = !yes;
+}
+
+// Connect
+function connect() {
+    var url = document.getElementById('serverUrl').value.trim().replace(/\/$/, '');
+    var key = document.getElementById('apiKey').value.trim();
+    if (!key) { alert('Enter API Key'); return; }
+    connBadge('connecting');
+    log('Connecting to ' + url + ' via ' + protocol + '...', 'system');
+    if (protocol === 'socketio') connectSIO(url, key);
+    else connectWS(url, key);
+}
+
+function connectSIO(url, key) {
+    if (socket) { socket.disconnect(); socket = null; }
+    socket = io(url + '/market-data', {
+        query: { api_key: key },
+        auth: { api_key: key },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1500,
+        reconnectionAttempts: 10
+    });
+
+    socket.on('connect', function() {
+        setConnected(true);
+        connBadge('connected');
+        log('Socket.IO connected - id: ' + socket.id, 'system');
+    });
+    socket.on('connected', function(d) { logEv('connected', d); });
+    socket.on('welcome', function(d) { logEv('welcome', d); handleWelcome(d); });
+    socket.on('stream_status', function(d) { logEv('stream_status', d); handleStreamStatus(d); });
+    socket.on('subscription_confirmed', function(d) { logEv('subscription_confirmed', d); renderSubConfirmed(d, false); });
+    socket.on('unsubscription_confirmed', function(d) { logEv('unsubscription_confirmed', d); });
+    socket.on('unsubscribed_all', function(d) { logEv('unsubscribed_all', d); clearTicks(); });
+    socket.on('market_data', function(d) { handleTick(d); });
+    socket.on('quote_data', function(d) { logEv('quote_data', d); showResult('quoteResult', d); });
+    socket.on('historical_data', function(d) { logEv('historical_data', d); showResult('quoteResult', d); });
+    socket.on('mode_set', function(d) { logEv('mode_set', d); showResult('toolsResult', d); });
+    socket.on('subscriptions', function(d) { logEv('subscriptions', d); showResult('toolsResult', d); });
+    socket.on('whoami', function(d) { logEv('whoami', d); showResult('toolsResult', d); });
+    socket.on('status', function(d) { logEv('status', d); showResult('toolsResult', d); });
+    socket.on('pong', function(d) { logEv('pong', d); handlePong(d); });
+    socket.on('error', function(d) { logEv('error', d, 'error'); renderError(d); });
+    socket.on('connect_error', function(e) { log('connect_error: ' + e.message, 'error'); connBadge('disconnected'); });
+    socket.on('disconnect', function(r) { log('disconnect: ' + r, 'system'); onDisconnected(); });
+}
+
+function connectWS(url, key) {
+    if (ws) { ws.close(); ws = null; }
+    var wsUrl = url.replace(/^https/, 'wss').replace(/^http/, 'ws') + '/ws';
+    try { ws = new WebSocket(wsUrl + '?api_key=' + encodeURIComponent(key)); }
+    catch(e) { log('WS create failed: ' + e.message, 'error'); connBadge('disconnected'); return; }
+
+    ws.onopen = function() { log('Native WS TCP open - waiting for server auth...', 'system'); };
+    ws.onmessage = function(evt) {
+        var parsed;
+        try { parsed = JSON.parse(evt.data); } catch(e) { log('Unparseable frame: ' + evt.data, 'error'); return; }
+        var ev = parsed.event, d = parsed.data != null ? parsed.data : parsed;
+        if (ev === 'connected') {
+            logEv('connected', d);
+            setConnected(true);
+            connBadge('connected');
+            log('Native WS ready (server auth complete)', 'system');
+        }
+        else if (ev === 'welcome') { logEv('welcome', d); handleWelcome(d); }
+        else if (ev === 'stream_status') { logEv('stream_status', d); handleStreamStatus(d); }
+        else if (ev === 'subscription_confirmed') { logEv('subscription_confirmed', d); renderSubConfirmed(d, true); }
+        else if (ev === 'unsubscription_confirmed') { logEv('unsubscription_confirmed', d); }
+        else if (ev === 'market_data') { handleTick(parsed); }
+        else if (ev === 'quote_data') { logEv('quote_data', d); showResult('quoteResult', d); }
+        else if (ev === 'historical_data') { logEv('historical_data', d); showResult('quoteResult', d); }
+        else if (ev === 'pong') { logEv('pong', d); handlePong(d); }
+        else if (ev === 'error') { logEv('error', d, 'error'); renderError(d); }
+        else { logEv(ev || 'frame', d); }
+    };
+    ws.onerror = function() { log('WS error', 'error'); connBadge('disconnected'); };
+    ws.onclose = function(e) { log('WS closed: ' + e.code + ' ' + (e.reason||''), 'system'); ws = null; onDisconnected(); };
+}
+
+// Disconnect
+function disconnect() {
+    if (socket) { socket.disconnect(); socket = null; }
+    if (ws) { ws.close(); ws = null; }
+    onDisconnected();
+    log('Disconnected', 'system');
+}
+
+function onDisconnected() {
+    setConnected(false);
+    connBadge('disconnected');
+    hideBadge('providerBadge');
+    hideBadge('streamBadge');
+    document.getElementById('welcomeBlock').style.display = 'none';
+}
+
+// Emit
+function doEmit(ev, data) {
+    if (protocol === 'socketio' && socket && socket.connected) {
+        socket.emit(ev, data);
+    } else if (protocol === 'native' && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ event: ev, data: data }));
+    } else {
+        log('Not connected', 'error');
+        return;
+    }
+    logEv(ev, data, 'client');
+}
+
+// Welcome
+function handleWelcome(d) {
+    var provider = d.provider || d.brand || '-';
+    var exchanges = d.exchanges || d.allowedExchanges || [];
+    var limits = d.limits || {};
+
+    badge('providerBadge', 'Provider: ' + provider, 'b-purple');
+
+    document.getElementById('welcomeBlock').style.display = 'block';
+    document.getElementById('welcomeProvider').textContent = 'Provider: ' + provider;
+    document.getElementById('welcomeExchanges').textContent = exchanges.length ? 'Exchanges: ' + exchanges.join(', ') : '';
+    var ls = Object.keys(limits).map(function(k){ return k + ': ' + limits[k]; }).join(' | ');
+    document.getElementById('welcomeLimits').textContent = ls || '';
+}
+
+// Stream status
+function handleStreamStatus(d) {
+    var state = d.status || d.state || 'unknown';
+    var cls = state === 'connected' ? 'b-green' : (state === 'degraded' ? 'b-orange' : 'b-red');
+    badge('streamBadge', 'stream: ' + state, cls);
+}
+
+// Pong
+function handlePong(d) {
+    var ms = pingTs > 0 ? (Date.now() - pingTs) : (d.latency != null ? d.latency : '?');
+    pingTs = 0;
+    badge('pingBadge', ms + ' ms', 'b-blue');
+}
+
+// Subscription confirmed
+function renderSubConfirmed(d, isNative) {
+    var box = document.getElementById('subConfirmed');
+    while (box.firstChild) box.removeChild(box.firstChild);
+
+    var main = mk('div', {cls: 'sc-ok', style: 'background:#e8f5e9;border-left:4px solid #43a047;border-radius:4px;padding:8px 10px;margin-top:8px;font-size:12px'});
+    main.appendChild(mk('b', {text: 'subscription_confirmed'}));
+    main.appendChild(mk('span', {
+        text: ' - mode: ' + (d.mode||'-')
+            + ' | pairs: ' + ((d.pairs||[]).length)
+            + ' | included: ' + ((d.included||[]).length)
+            + (d.snapshot ? ' | snapshot' : '')
+    }));
+
+    if (d.resolved && d.resolved.length) {
+        main.appendChild(mk('div', {text: 'Resolved (' + d.resolved.length + '):', bold: true, style: 'margin-top:4px'}));
+        d.resolved.slice(0, 5).forEach(function(r) {
+            main.appendChild(mk('div', {text: '  * ' + r.symbol + ' -> ' + r.uirId, style: 'font-family:monospace;font-size:11px'}));
+        });
+        if (d.resolved.length > 5) {
+            main.appendChild(mk('div', {text: '  ... and ' + (d.resolved.length - 5) + ' more', style: 'color:#888'}));
+        }
+    }
+    if (d.unresolvedSymbols && d.unresolvedSymbols.length) {
+        main.appendChild(mk('div', {text: 'Unresolved: ' + d.unresolvedSymbols.join(', '), style: 'color:#b71c1c;margin-top:3px'}));
+    }
+    box.appendChild(main);
+}
+
+// Error rendering
+function renderError(d) {
+    var code = d.code || d.error || 'error';
+    var msg = d.message || d.msg || JSON.stringify(d);
+    var banner = mk('div', {cls: 'err-banner', style: 'background:#ffebee;border-left:4px solid #e53935;border-radius:4px;padding:8px 10px;margin:6px 0;font-size:12px'});
+    banner.appendChild(mk('span', {cls: 'mono', text: '[' + String(code) + '] ', bold: true, color: '#b71c1c'}));
+    banner.appendChild(mk('span', {text: String(msg)}));
+    var box = document.getElementById('subConfirmed');
+    box.insertBefore(banner, box.firstChild);
+}
+
+// Market data tick
+function handleTick(raw) {
+    var token = raw.instrumentToken || raw.instrument_token;
+    if (!token) return;
+
+    msgCount++;
+    document.getElementById('msgCount').textContent = msgCount;
+    var now = Date.now();
+    document.getElementById('lastUp').textContent = new Date().toLocaleTimeString();
+
+    if (lastMsgTs > 0) {
+        msgRates.push(1000 / (now - lastMsgTs));
+        if (msgRates.length > 20) msgRates.shift();
+        var avg = msgRates.reduce(function(a,b){ return a+b; }, 0) / msgRates.length;
+        document.getElementById('dataRate').textContent = avg.toFixed(1) + '/s';
+    }
+    lastMsgTs = now;
+
+    var d = raw.data || raw;
+    var prev = ticks[token];
+    var merged = prev && prev.d ? { ...prev.d, ...d } : d;
+    ticks[token] = { token: token, uirId: raw.uirId || '', d: merged, ts: new Date().toLocaleTimeString() };
+    renderTick(token);
+}
+
+function fmt(v) { return (v != null) ? (typeof v === 'number' ? v.toFixed(2) : String(v)) : '-'; }
+
+function renderTick(token) {
+    var t = ticks[token], d = t.d;
+    var bid = (d.depth && d.depth.buy && d.depth.buy[0]) || d.best_bid || null;
+    var ask = (d.depth && d.depth.sell && d.depth.sell[0]) || d.best_ask || null;
+    var open = d.ohlc ? d.ohlc.open : d.open;
+    var high = d.ohlc ? d.ohlc.high : d.high;
+    var low = d.ohlc ? d.ohlc.low : d.low;
+    var close = d.ohlc ? d.ohlc.close : d.close;
+    var mode = d.depth ? 'full' : (d.ohlc || d.open != null ? 'ohlcv' : 'ltp');
+
+    var row = document.getElementById('tick-' + token);
+    if (!row) {
+        row = document.createElement('tr');
+        row.id = 'tick-' + token;
+        for (var i = 0; i < 12; i++) row.insertCell();
+        var em = document.getElementById('emptyRow');
+        if (em) em.parentNode.removeChild(em);
+        document.getElementById('tickBody').appendChild(row);
+    }
+
+    var cells = row.cells;
+    cells[0].textContent = token;
+    cells[0].style.fontWeight = 'bold';
+    cells[1].textContent = t.uirId || '-';
+    cells[1].style.fontFamily = 'monospace';
+    cells[1].style.fontSize = '11px';
+    cells[2].textContent = mode;
+    cells[3].textContent = fmt(d.last_price || d.ltp);
+    cells[3].style.fontWeight = 'bold';
+    cells[4].textContent = fmt(open);
+    cells[4].style.color = '#888';
+    cells[5].textContent = fmt(high);
+    cells[5].style.color = '#2e7d32';
+    cells[6].textContent = fmt(low);
+    cells[6].style.color = '#c62828';
+    cells[7].textContent = fmt(close);
+    cells[7].style.color = '#888';
+    cells[8].textContent = fmt(d.volume || d.volume_traded);
+    cells[9].textContent = bid ? fmt(bid.price) : '-';
+    cells[9].style.color = '#1565c0';
+    cells[10].textContent = ask ? fmt(ask.price) : '-';
+    cells[10].style.color = '#c62828';
+    cells[11].textContent = t.ts;
+    cells[11].style.color = '#aaa';
+    cells[11].style.fontSize = '11px';
+
+    row.classList.remove('flash');
+    void row.offsetWidth;
+    row.classList.add('flash');
+    if (document.getElementById('autoScroll').checked) row.scrollIntoView({ block: 'nearest' });
+}
+
+// Subscribe actions
+function parseInstruments() {
+    return document.getElementById('instInput').value
+        .split(/[,\n]/).map(function(s){ return s.trim(); }).filter(Boolean)
+        .map(function(s){ return /^\d+$/.test(s) ? parseInt(s, 10) : s; });
+}
+function parseSymbols() {
+    return document.getElementById('symInput').value
+        .split(/[,\n]/).map(function(s){ return s.trim(); }).filter(Boolean);
+}
+function getMode() {
+    var el = document.querySelector('input[name="mode"]:checked');
+    return el ? el.value : 'ltp';
+}
+
+function doSubscribe() {
+    var inst = parseInstruments(), syms = parseSymbols(), mode = getMode();
+    var payload = { mode: mode };
+    if (inst.length) payload.instruments = inst;
+    if (syms.length) payload.symbols = syms;
+    doEmit('subscribe', payload);
+}
+function doUnsubscribe() {
+    var inst = parseInstruments(), syms = parseSymbols();
+    var payload = {};
+    if (inst.length) payload.instruments = inst;
+    if (syms.length) payload.symbols = syms;
+    doEmit('unsubscribe', payload);
+}
+function doSetMode() {
+    doEmit('set_mode', { instruments: parseInstruments(), mode: getMode() });
+}
+
+// Tools
+function doPing() { pingTs = Date.now(); doEmit('ping', { timestamp: pingTs }); }
+
+// Quote / Historical
+function doGetQuote() {
+    var inst = parseInt(document.getElementById('qInst').value, 10);
+    if (!inst) { alert('Enter instrument token'); return; }
+    doEmit('get_quote', { instrument: inst, exchange: document.getElementById('qExch').value.trim() });
+}
+function doGetHistorical() {
+    var inst = parseInt(document.getElementById('qInst').value, 10);
+    if (!inst) { alert('Enter instrument token'); return; }
+    doEmit('get_historical_data', {
+        instrument: inst,
+        interval: document.getElementById('hInterval').value,
+        from: document.getElementById('hFrom').value.trim(),
+        to: document.getElementById('hTo').value.trim()
+    });
+}
+
+// Utilities
+function showResult(id, data) {
+    var el = document.getElementById(id);
+    el.style.display = 'block';
+    el.textContent = JSON.stringify(data, null, 2);
+}
+
+function clearTicks() {
+    ticks = {}; msgCount = 0; msgRates = []; lastMsgTs = 0;
+    document.getElementById('msgCount').textContent = '0';
+    document.getElementById('dataRate').textContent = '0/s';
+    var tbody = document.getElementById('tickBody');
+    while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    var emptyRow = document.createElement('tr');
+    emptyRow.id = 'emptyRow';
+    var td = document.createElement('td');
+    td.colSpan = 12;
+    td.textContent = 'No ticks yet';
+    td.style.cssText = 'text-align:center;color:#aaa;padding:18px';
+    emptyRow.appendChild(td);
+    tbody.appendChild(emptyRow);
+}
+
+function clearLog() { var w = document.getElementById('logWrap'); while(w.firstChild) w.removeChild(w.firstChild); }
+
+function exportLog() {
+    var lines = Array.from(document.querySelectorAll('#logWrap .le')).map(function(e){ return e.textContent; }).join('\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines], { type: 'text/plain' }));
+    a.download = 'ws-log-' + Date.now() + '.txt';
+    a.click();
+}
+
+// Init
+(function init() {
+    selectProtocol('socketio');
+    log('Market Data Client ready - Socket.IO / Native WS', 'system');
+})();
+</script>
+</body>
+</html>

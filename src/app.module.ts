@@ -13,8 +13,11 @@ import { MarketDataModule } from './features/market-data/market-data.module';
 import { KiteConnectModule } from './features/kite-connect/kite-connect.module';
 import { StockModule } from './features/stock/stock.module';
 import { FalconModule } from './features/falcon/falcon.module';
+import { FundamentalsModule } from './features/fundamentals/fundamentals.module';
+import { MarketMoversModule } from './features/market-movers/market-movers.module';
 import { MassiveModule } from './features/massive/massive.module';
 import { BinanceModule } from './features/binance/binance.module';
+import { NewsModule } from './features/news/news.module';
 import { HealthModule } from './features/health/health.module';
 import { ObservabilityModule } from './infra/observability/observability.module';
 
@@ -39,8 +42,11 @@ import { ObservabilityModule } from './infra/observability/observability.module'
     KiteConnectModule,
     StockModule,
     FalconModule,
+    FundamentalsModule,
+    MarketMoversModule,
     MassiveModule,
     BinanceModule,
+    NewsModule,
     HealthModule,
   ],
   controllers: [AppController],

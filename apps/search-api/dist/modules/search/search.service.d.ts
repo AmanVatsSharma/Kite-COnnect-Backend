@@ -21,6 +21,8 @@ export type SearchResultItem = {
     massiveToken?: string;
     binanceToken?: string;
     streamProvider?: StreamProviderName;
+    change?: number | null;
+    pchange?: number | null;
 };
 export declare const PUBLIC_FIELD_ALLOWLIST: readonly string[];
 export declare const PUBLIC_ALWAYS_INCLUDED: readonly string[];
