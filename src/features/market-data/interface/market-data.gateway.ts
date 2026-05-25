@@ -2087,18 +2087,19 @@ export class MarketDataGateway
       const room = `instrument:${identifier}`;
 
       // O(1) lookup via in-memory Map instead of Socket.IO's O(n) fetchSockets()
+      // this.server IS the /market-data Namespace (set by @WebSocketGateway(namespace='/market-data')).
+      // Namespaces expose .sockets as a Map<socketId, Socket>.
       const memberIds = this.roomMembers.get(room);
       if (!memberIds?.size) return;
 
-      // Resolve the sockets collection — Redis adapter may not expose server.sockets.sockets
-      // directly; always go through the namespace for compatibility.
-      const ns = this.server.of('/market-data');
+      // Namespace.sockets is a Map<socketId, Socket> — use it directly with optional chaining.
+      const namespaceSockets = (this.server as any).sockets as Map<string, Socket> | undefined;
       const rawSockets: Socket[] = [];
-      for (const socketId of memberIds) {
-        const s = (ns as any).sockets?.get?.(socketId)
-          ?? (ns as any).adapter?.sockets?.get?.(socketId)
-          ?? (this.server as any).sockets?.sockets?.get?.(socketId);
-        if (s) rawSockets.push(s);
+      if (namespaceSockets) {
+        for (const socketId of memberIds) {
+          const s = namespaceSockets.get(socketId);
+          if (s) rawSockets.push(s);
+        }
       }
       if (rawSockets.length === 0) return;
 
