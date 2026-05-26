@@ -465,6 +465,20 @@ export class InstrumentRegistryService implements OnModuleInit {
       };
     }
 
+    // Multiple candidates — for derivatives, pick nearest expiry (first in sorted).
+    // Only return ambiguous if expiry dates are equal (truly duplicate contracts).
+    const nearestExpiry = sorted[0].expiry?.getTime() ?? 0;
+    const hasSameExpiry = sorted.every(e => e.expiry?.getTime() === nearestExpiry);
+    if (!hasSameExpiry) {
+      return {
+        status: 'resolved',
+        uirId: sorted[0].uirId,
+        canonical: sorted[0].canonical,
+        expiry: sorted[0].expiry,
+        instrument_type: sorted[0].instrument_type,
+      };
+    }
+
     return {
       status: 'ambiguous',
       candidates: sorted.map(e => e.canonical),
