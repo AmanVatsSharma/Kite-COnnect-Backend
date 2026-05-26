@@ -32,12 +32,26 @@ export type ProviderScopedResolveResult =
   | { status: 'ambiguous'; candidates: string[] }
   | { status: 'not_found' };
 
+/** Result of a derivative symbol resolution attempt (FUT/CE/PE). */
+export type DerivativeResolveResult =
+  | {
+      status: 'resolved';
+      uirId: number;
+      canonical: string;
+      providerToken?: string;
+      expiry: Date | null;
+      instrument_type: string;
+    }
+  | { status: 'ambiguous'; candidates: string[] }
+  | { status: 'not_found'; reason?: string };
+
 /** One entry in the underlying → entries warm map. */
 interface UnderlyingEntry {
   uirId: number;
   exchange: string;
   instrument_type: string;
   canonical: string;
+  expiry: Date | null; // Contract expiry date for derivatives
 }
 
 @Injectable()
@@ -92,6 +106,7 @@ export class InstrumentRegistryService implements OnModuleInit {
           exchange: row.exchange,
           instrument_type: row.instrument_type,
           canonical: row.canonical_symbol,
+          expiry: row.expiry ?? null,
         });
         this.underlyingToEntries.set(underlyingKey, existing);
       }
