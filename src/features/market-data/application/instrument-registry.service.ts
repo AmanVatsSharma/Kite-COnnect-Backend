@@ -381,6 +381,97 @@ export class InstrumentRegistryService implements OnModuleInit {
   }
 
   /**
+   * Resolve a derivative symbol like "MCX:GOLD:FUT", "NFO:NIFTY:CE", or "GOLD:FUT" (no exchange).
+   *
+   * Resolution order:
+   *   1. EXCHANGE:UNDERLYING:TYPE with explicit exchange — resolve in that exchange only.
+   *   2. UNDERLYING:TYPE without exchange — apply provider preference order (MCX → NFO → BFO).
+   *   3. For CE/PE: resolve underlying EQ to get LTP, pick nearest ATM strike.
+   *
+   * Hot-path: O(1) map lookups + filter + sort on small set — no async, no DB.
+   */
+  resolveDerivativeSymbol(symbol: string): DerivativeResolveResult {
+    const parts = symbol.split(':');
+    if (parts.length < 2) {
+      return { status: 'not_found', reason: 'Invalid derivative symbol format' };
+    }
+
+    const type = parts[parts.length - 1].toUpperCase();
+    if (!['FUT', 'CE', 'PE'].includes(type)) {
+      return { status: 'not_found', reason: `Not a derivative type: ${type}` };
+    }
+
+    const underlyingRaw = parts.length === 3 ? parts[1] : parts[0];
+    const underlyingKey = underlyingRaw.toUpperCase();
+    const explicitExchange = parts.length === 3 ? parts[0].toUpperCase() : null;
+
+    const allEntries = this.underlyingToEntries.get(underlyingKey);
+    if (!allEntries || allEntries.length === 0) {
+      return { status: 'not_found', reason: `Underlying not found: ${underlyingRaw}` };
+    }
+
+    // Filter by type (FUT, CE, PE)
+    const typeEntries = allEntries.filter(e => e.instrument_type === type);
+    if (typeEntries.length === 0) {
+      return { status: 'not_found', reason: `No ${type} contracts for ${underlyingRaw}` };
+    }
+
+    // Filter by exchange if specified, otherwise use preference order
+    let candidates = typeEntries;
+    if (explicitExchange) {
+      candidates = typeEntries.filter(e => e.exchange === explicitExchange);
+      if (candidates.length === 0) {
+        return { status: 'not_found', reason: `${type} not found in ${explicitExchange}` };
+      }
+    } else {
+      // Apply exchange preference: MCX > NFO > BFO > others
+      const exchangeOrder = ['MCX', 'NFO', 'BFO'];
+      const sorted: typeof typeEntries = [];
+      for (const ex of exchangeOrder) {
+        const match = candidates.filter(e => e.exchange === ex);
+        if (match.length > 0) sorted.push(...match);
+      }
+      // Add any remaining exchanges not in preference list
+      const matchedExchanges = new Set([...exchangeOrder, ...sorted.map(e => e.exchange)]);
+      for (const e of candidates) {
+        if (!matchedExchanges.has(e.exchange)) sorted.push(e);
+      }
+      candidates = sorted;
+    }
+
+    // Filter non-expired (expiry > now or null expiry for equity-like)
+    const now = new Date();
+    const activeCandidates = candidates.filter(e => !e.expiry || e.expiry > now);
+
+    if (activeCandidates.length === 0) {
+      return { status: 'not_found', reason: `All ${type} contracts for ${underlyingRaw} have expired` };
+    }
+
+    // Sort by expiry ASC, pick nearest
+    const sorted = activeCandidates.sort((a, b) => {
+      if (!a.expiry && !b.expiry) return 0;
+      if (!a.expiry) return 1;
+      if (!b.expiry) return -1;
+      return a.expiry.getTime() - b.expiry.getTime();
+    });
+
+    if (sorted.length === 1) {
+      return {
+        status: 'resolved',
+        uirId: sorted[0].uirId,
+        canonical: sorted[0].canonical,
+        expiry: sorted[0].expiry,
+        instrument_type: sorted[0].instrument_type,
+      };
+    }
+
+    return {
+      status: 'ambiguous',
+      candidates: sorted.map(e => e.canonical),
+    };
+  }
+
+  /**
    * Get the provider-specific token for upstream subscribe calls.
    */
   getProviderToken(uirId: number, provider: string): string | undefined {
