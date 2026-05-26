@@ -658,6 +658,13 @@ export class MarketDataGateway
         resolvedAs?: string;
       }> = [];
       const unresolvedSymbols: string[] = [];
+      const derivativeResolved: Array<{
+        symbol: string;
+        uirId: number;
+        resolvedAs: string;
+        expiry: string | null;
+        type: string;
+      }> = [];
       // UIR IDs for instruments whose provider is not the global WS provider (e.g. massive US stocks).
       // These bypass exchange-pair resolution and are routed directly by the streaming batch processor.
       const directUirIds: number[] = [];
@@ -796,6 +803,47 @@ export class MarketDataGateway
               unresolvedSymbols.push(sym);
             }
           }
+        }
+
+        // ── Derivative symbol resolution (MCX:GOLD:FUT, NFO:NIFTY:CE, etc.) ──
+        for (const sym of symbols) {
+          const trimmed = String(sym).trim();
+          // Check if this is a derivative symbol (has :FUT, :CE, :PE suffix)
+          if (!/^[^:]+:[^:]+:(FUT|CE|PE)$/i.test(trimmed)) continue;
+
+          const result = this.instrumentRegistry.resolveDerivativeSymbol(trimmed);
+          if (result.status === 'not_found') {
+            unresolvedSymbols.push(`${sym} (${result.reason ?? 'not found'})`);
+            continue;
+          }
+          if (result.status === 'ambiguous') {
+            unresolvedSymbols.push(
+              `${sym} (ambiguous — try: ${result.candidates?.join(', ')})`,
+            );
+            continue;
+          }
+          // Resolved — get provider token and add to subscriptions
+          const provName = lockedProvider ?? this.streamService.activeProviderName;
+          const provToken = this.instrumentRegistry.getProviderToken(result.uirId, provName);
+          if (provToken) {
+            const numToken = Number(provToken);
+            if (Number.isFinite(numToken)) {
+              instruments = [...instruments, numToken];
+            }
+          }
+          derivativeResolved.push({
+            symbol: sym,
+            uirId: result.uirId,
+            resolvedAs: result.canonical ?? trimmed,
+            expiry: result.expiry ? result.expiry.toISOString().split('T')[0] : null,
+            type: result.instrument_type ?? 'FUT',
+          });
+          resolvedSymbols.push({
+            symbol: sym,
+            uirId: result.uirId,
+            providerToken: provToken ? Number(provToken) : undefined,
+            resolvedAs: result.canonical !== sym ? result.canonical : undefined,
+          });
         }
       }
 
@@ -1224,6 +1272,7 @@ export class MarketDataGateway
         included: allIncludedUirIds,
         resolved: symbolEnrichment.length > 0 ? symbolEnrichment : undefined,
         forced: forcedConfirm.length > 0 ? forcedConfirm : undefined,
+        derivative: derivativeResolved.length > 0 ? derivativeResolved : undefined,
         unresolved,
         unresolvedSymbols:
           unresolvedSymbols.length > 0 ? unresolvedSymbols : undefined,
