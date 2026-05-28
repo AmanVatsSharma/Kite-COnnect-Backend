@@ -17,11 +17,9 @@
 9. [Equity, Futures, Options, Commodity Lists](#9-equity-futures-options-commodity-lists)
 10. [Symbol Resolution & Search](#10-symbol-resolution--search)
 11. [Universal Search](#11-universal-search)
-12. [Instrument Validation](#12-instrument-validation)
-13. [Instrument Sync](#13-instrument-sync)
-14. [Error Codes](#14-error-codes)
-15. [Rate Limits](#15-rate-limits)
-16. [Appendix: Token Reference](#16-appendix-token-reference)
+12. [Error Codes](#12-error-codes)
+13. [Rate Limits](#13-rate-limits)
+14. [Appendix: Token Reference](#14-appendix-token-reference)
 
 ---
 
@@ -1373,260 +1371,7 @@ Signal which search result was selected. Used to improve search relevance over t
 
 ---
 
-## 12. Instrument Validation
-
-### `POST /api/stock/falcon/validate-instruments`
-
-Validate instruments via live LTP — finds instruments with stale or invalid prices.
-
-*Headers:* `x-api-key`
-
-*Request Body*
-
-```json
-{
-  "limit": 2000,
-  "offset": 0,
-  "batchSize": 200,
-  "dry_run": false,
-  "auto_cleanup": false
-}
-```
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | integer | 2000 | Max instruments to check (max 10000) |
-| `offset` | integer | 0 | Starting offset |
-| `batchSize` | integer | 200 | Batch size per LTP call |
-| `dry_run` | boolean | `false` | If `true`, only returns results without deactivating |
-| `auto_cleanup` | boolean | `false` | If `true` + `dry_run=false`, sets `is_active=false` on invalid instruments |
-
-*Response*
-
-```json
-{
-  "success": true,
-  "tested": 2000,
-  "invalid_instruments": [127800001, 127800015, 128000042],
-  "deactivated": 0
-}
-```
-
----
-
-### `GET /api/stock/falcon/validate-instruments/status`
-
-Poll validation job status.
-
-*Headers:* `x-api-key`
-
-*Query Parameters*
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `jobId` | string | ✅ | Job ID from validation request |
-
----
-
-### `POST /api/stock/falcon/validate-instruments/stream`
-
-Stream live validation progress via Server-Sent Events (SSE).
-
-*Headers:* `x-api-key`
-
-*Request Body* — Same as `/validate-instruments`
-
-*Response:* SSE stream
-
-```
-data: {"event":"started","jobId":"uuid-xxx","ts":...}
-data: {"event":"progress","tested":500,"invalid":2,"ts":...}
-data: {"event":"completed","result":{...},"ts":...}
-```
-
----
-
-### `POST /api/stock/falcon/validate-instruments/export`
-
-Export invalid instruments as CSV.
-
-*Headers:* `x-api-key`
-
-*Response:* CSV download
-
-```csv
-token,reason
-127800001,invalid_ltp
-127800015,invalid_ltp
-```
-
----
-
-## 13. Instrument Sync
-
-### `POST /api/stock/falcon/instruments/sync`
-
-Trigger a manual instrument sync. Blocking call — waits for completion.
-
-*Headers:* `x-api-key`
-
-*Query Parameters*
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `exchange` | string | ❌ | Sync only a specific exchange |
-
-*Response*
-
-```json
-{
-  "success": true,
-  "synced": 1200,
-  "updated": 4500,
-  "reconciled": 50
-}
-```
-
----
-
-### `GET /api/stock/falcon/instruments/sync/status`
-
-Poll sync job status.
-
-*Headers:* `x-api-key`
-
-*Query Parameters*
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `jobId` | string | ✅ | Job ID |
-
-*Response (in progress)*
-
-```json
-{
-  "success": true,
-  "jobId": "550e8400-e29b-41d4-a716-446655440000",
-  "status": {
-    "status": "running",
-    "progress": { "processed": 50000, "created": 1200, "updated": 4500 },
-    "ts": 1748419200000
-  }
-}
-```
-
-*Response (completed)*
-
-```json
-{
-  "success": true,
-  "jobId": "550e8400-e29b-41d4-a716-446655440000",
-  "status": {
-    "status": "completed",
-    "summary": { "synced": 1200, "updated": 4500, "reconciled": 50 },
-    "ts": 1748420000000
-  }
-}
-```
-
----
-
-### `POST /api/stock/falcon/instruments/sync/start`
-
-Start a sync in the background and return immediately with a jobId.
-
-*Headers:* `x-api-key`
-
-*Query Parameters*
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `exchange` | string | ❌ | Sync only specific exchange |
-
-*Response*
-
-```json
-{
-  "success": true,
-  "jobId": "550e8400-e29b-41d4-a716-446655440000",
-  "message": "Sync job started",
-  "timestamp": "2026-05-28T10:30:00.000Z"
-}
-```
-
-Poll status via `GET /instruments/sync/status?jobId=<jobId>`
-
----
-
-### `POST /api/stock/falcon/instruments/sync/stream`
-
-Stream live sync progress via SSE.
-
-*Headers:* `x-api-key`
-
-*Query Parameters*
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `exchange` | string | ❌ | Exchange to sync |
-
-*Response:* SSE stream
-
-```
-data: {"event":"started","jobId":"uuid","exchange":"all","ts":...}
-data: {"event":"progress","processed":1000,"created":50,"updated":150,"ts":...}
-data: {"event":"completed","summary":{"synced":1200,"updated":4500},"ts":...}
-```
-
----
-
-### `DELETE /api/stock/falcon/instruments/inactive`
-
-Permanently delete all inactive instruments from the database.
-
-*Headers:* `x-api-key`
-
-*Response*
-
-```json
-{
-  "success": true,
-  "message": "Inactive instruments deleted",
-  "deleted": 512
-}
-```
-
----
-
-### `DELETE /api/stock/falcon/instruments`
-
-Delete instruments by exchange and/or type filter.
-
-*Headers:* `x-api-key`
-
-*Query Parameters*
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `exchange` | string | ❌ | Exchange to delete |
-| `instrument_type` | string | ❌ | Type to delete (`EQ`, `FUT`, `CE`, `PE`) |
-
-> ⚠️ At least one filter (`exchange` or `instrument_type`) is required.
-
-*Response*
-
-```json
-{
-  "success": true,
-  "message": "Delete completed",
-  "deleted": 2500,
-  "filters": { "exchange": "BFO", "instrument_type": null }
-}
-```
-
----
-
-## 14. Error Codes
+## 12. Error Codes
 
 | HTTP Status | Success | Message | Likely Cause |
 |-------------|---------|---------|-------------|
@@ -1645,7 +1390,7 @@ Delete instruments by exchange and/or type filter.
 
 ---
 
-## 15. Rate Limits
+## 13. Rate Limits
 
 | Endpoint Pattern | Limit | Window |
 |-----------------|-------|--------|
@@ -1669,7 +1414,7 @@ All limits are enforced via Redis distributed locks, accurate even in multi-inst
 
 ---
 
-## 16. Appendix: Token Reference
+## 14. Appendix: Token Reference
 
 Common instrument tokens (verify via API — these may change):
 
