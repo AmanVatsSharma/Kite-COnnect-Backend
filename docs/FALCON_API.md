@@ -1,85 +1,31 @@
 # Falcon API — Complete Developer Reference
 
-> **Version:** 2.0 · **Base URL:** `https://your-domain.com`
+> **Version:** 2.0 · **Powered by Vedpragya** · **Base URL:** `https://marketdata.vedpragya.com`
 
 ---
 
 ## Table of Contents
 
-1. [Authentication](#1-authentication)
-2. [Base Response Format](#2-base-response-format)
-3. [Health & System](#3-health--system)
-4. [Instruments](#4-instruments)
-5. [Market Data — LTP, Quote, OHLC](#5-market-data--ltp-quote-ohlc)
-6. [Historical Candles](#6-historical-candles)
-7. [Options Chain](#7-options-chain)
-8. [Underlyings & Derivatives](#8-underlyings--derivatives)
-9. [F&O Autocomplete](#9-fno-autocomplete)
-10. [Equity, Futures, Options, Commodity Lists](#10-equity-futures-options-commodity-lists)
-11. [Symbol Resolution & Search](#11-symbol-resolution--search)
+1. [Base Response Format](#1-base-response-format)
+2. [Health & System](#2-health--system)
+3. [Instruments](#3-instruments)
+4. [Market Data — LTP, Quote, OHLC](#4-market-data--ltp-quote-ohlc)
+5. [Historical Candles](#5-historical-candles)
+6. [Options Chain](#6-options-chain)
+7. [Underlyings & Derivatives](#7-underlyings--derivatives)
+8. [F&O Autocomplete](#8-fno-autocomplete)
+9. [Equity, Futures, Options, Commodity Lists](#9-equity-futures-options-commodity-lists)
+10. [Symbol Resolution & Search](#10-symbol-resolution--search)
+11. [Universal Search](#11-universal-search)
 12. [Instrument Validation](#12-instrument-validation)
 13. [Instrument Sync](#13-instrument-sync)
-14. [Cache Management](#14-cache-management)
-15. [Error Codes](#15-error-codes)
-16. [Rate Limits](#16-rate-limits)
+14. [Error Codes](#14-error-codes)
+15. [Rate Limits](#15-rate-limits)
+16. [Appendix: Token Reference](#16-appendix-token-reference)
 
 ---
 
-## 1. Authentication
-
-All client endpoints are protected by API key authentication. Pass your API key in every request header:
-
-```
-x-api-key: YOUR_API_KEY
-```
-
-### 1.1 OAuth Login (One-time setup)
-
-Before making any API calls, you must authenticate using OAuth.
-
-**`GET /api/auth/falcon/login`**
-
-Initiates the OAuth flow. Returns a login URL to redirect the user to the authorization page.
-
-*Response*
-
-```json
-{
-  "url": "https://your-provider.com/connect/login?v=3&api_key=...",
-  "state": "abc123xyz"
-}
-```
-
-Redirect the user to the returned `url`. After they authorize, the system redirects to your callback URL with `request_token` and `state` parameters.
-
----
-
-**`GET /api/auth/falcon/callback`**
-
-OAuth callback handler. Called automatically after user authorization.
-
-*Query Parameters*
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `request_token` | string | ✅ | Token from OAuth redirect |
-| `state` | string | ✅ | CSRF state from `/login` step |
-
-*Response*
-
-```json
-{
-  "success": true,
-  "access_token": "eyJhbGci...",
-  "message": "Session established successfully"
-}
-```
-
-The access token is stored securely in Redis and survives server restarts.
-
----
-
-## 2. Base Response Format
+## 1. Base Response Format
 
 All API responses follow a consistent envelope:
 
@@ -103,7 +49,7 @@ On error:
 
 ---
 
-## 3. Health & System
+## 2. Health & System
 
 ### `GET /api/stock/falcon/health`
 
@@ -130,12 +76,6 @@ Health probe with sample LTP check. Use this to verify your API key is valid and
 Returns instrument counts broken down by exchange and type.
 
 *Headers:* `x-api-key`
-
-*Query Parameters*
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| — | — | — | No parameters |
 
 *Response*
 
@@ -181,7 +121,7 @@ Cached version of instrument stats (refreshes every 60 seconds). Faster than `/i
 
 ---
 
-## 4. Instruments
+## 3. Instruments
 
 ### `GET /api/stock/falcon/instruments`
 
@@ -333,9 +273,9 @@ Batch lookup instruments by a list of tokens. Up to 1000 tokens per request.
 
 ---
 
-## 5. Market Data — LTP, Quote, OHLC
+## 4. Market Data — LTP, Quote, OHLC
 
-All market data endpoints use the `FalconTokensDto` input format. Pass token arrays in the request body.
+All market data endpoints accept the same input format. Pass token arrays in the request body.
 
 ### `POST /api/stock/falcon/ltp`
 
@@ -378,7 +318,7 @@ Get Last Traded Price for one or more instruments.
 
 ### `GET /api/stock/falcon/ltp`
 
-Alternative LTP endpoint using query parameters instead of body. Useful for quick single-token checks.
+Alternative LTP endpoint using query parameters instead of body.
 
 *Headers:* `x-api-key`
 
@@ -387,8 +327,6 @@ Alternative LTP endpoint using query parameters instead of body. Useful for quic
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `tokens` | string | ✅ | Comma-separated tokens: `738561,5633,256265` |
-
-*Response:* Same format as `POST /ltp`
 
 ---
 
@@ -515,7 +453,7 @@ Get OHLC (Open-High-Low-Close) summary for instruments.
 
 ---
 
-## 6. Historical Candles
+## 5. Historical Candles
 
 Historical OHLCV (Open-High-Low-Close-Volume) data for charting and analysis.
 
@@ -538,8 +476,8 @@ Fetch historical candles for a single instrument.
 | `from` | string | ✅ | Start date: `YYYY-MM-DD` or `YYYY-MM-DD HH:mm:ss` |
 | `to` | string | ✅ | End date: `YYYY-MM-DD` or `YYYY-MM-DD HH:mm:ss` |
 | `interval` | string | ✅ | Candle interval (see table below) |
-| `continuous` | boolean | ❌ | `true` to include expiry contract data for F&O (default: `false`) |
-| `oi` | boolean | ❌ | `true` to include Open Interest in candles for F&O (default: `false`) |
+| `continuous` | boolean | ❌ | `true` to include expiry contract data for F&O |
+| `oi` | boolean | ❌ | `true` to include Open Interest in candles for F&O |
 
 **Supported intervals:**
 
@@ -613,7 +551,7 @@ GET /api/stock/falcon/historical/127795793?from=2026-05-27&to=2026-05-28&interva
 
 ### `POST /api/stock/falcon/historical/batch`
 
-Fetch historical candles for up to **10 instruments** in a single request. Much more efficient than multiple individual calls.
+Fetch historical candles for up to **10 instruments** in a single request.
 
 *Headers:* `x-api-key`
 
@@ -682,18 +620,18 @@ Fetch historical candles for up to **10 instruments** in a single request. Much 
 }
 ```
 
-**Smart Cache TTL:** Results are cached with intelligent TTL:
+**Smart Cache TTL:**
+
 | Interval | Today | Historical |
 |----------|-------|------------|
-| `minute` | 60s | 1 hour |
-| `3minute` / `5minute` | 60s | 1 hour |
+| `minute` / `3minute` / `5minute` | 60s | 1 hour |
 | `10minute` / `15minute` | 300s | 2 hours |
 | `60minute` | 900s | 6 hours |
 | `day` | 1800s | 24 hours |
 
 ---
 
-## 7. Options Chain
+## 6. Options Chain
 
 Full options market data with strike-by-strike pricing, OI, volume, and Greeks.
 
@@ -789,8 +727,8 @@ Standard options chain — tokens and basic LTP for all strikes grouped by expir
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `expiry` | string | ❌ | — | Filter to a single expiry (`YYYY-MM-DD`). Omit for all expiries |
-| `strikes_around_atm` | integer | ❌ | `0` (all) | Return only N strikes above and below ATM. E.g., `10` returns 21 strikes total |
+| `expiry` | string | ❌ | — | Filter to a single expiry (`YYYY-MM-DD`) |
+| `strikes_around_atm` | integer | ❌ | `0` (all) | Return only N strikes above and below ATM |
 
 *Example:* `GET /api/stock/falcon/options/chain/NIFTY/deep?strikes_around_atm=10`
 
@@ -850,46 +788,12 @@ Standard options chain — tokens and basic LTP for all strikes grouped by expir
             "ltp": 55.20,
             "oi": 98000,
             "volume": 45000,
-            "open": 52.00,
-            "high": 58.00,
-            "low": 51.50,
-            "close": 53.00,
-            "bid": 55.00,
-            "ask": 55.50,
-            "bq": 200,
-            "aq": 150,
             "iv": 18.2,
             "delta": -0.28,
             "gamma": 0.025,
             "theta": -5.2,
             "vega": 15.8,
             "theoretical_price": 55.00
-          }
-        },
-        {
-          "strike": 23650,
-          "itm": "PE",
-          "CE": {
-            "instrument_token": 127795799,
-            "ltp": 305.00,
-            "oi": 110000,
-            "volume": 72000,
-            "iv": 15.0,
-            "delta": 0.65,
-            "gamma": 0.032,
-            "theta": -9.8,
-            "vega": 19.5
-          },
-          "PE": {
-            "instrument_token": 127795853,
-            "ltp": 72.50,
-            "oi": 115000,
-            "volume": 58000,
-            "iv": 17.5,
-            "delta": -0.35,
-            "gamma": 0.030,
-            "theta": -7.1,
-            "vega": 17.2
           }
         },
         {
@@ -937,14 +841,14 @@ Standard options chain — tokens and basic LTP for all strikes grouped by expir
 
 **ITM flags:**
 - `ATM` — At-the-money (strike closest to underlying LTP)
-- `CE` — Call is ITM (strike < underlying for calls)
-- `PE` — Put is ITM (strike > underlying for puts)
+- `CE` — Call is ITM (strike < underlying)
+- `PE` — Put is ITM (strike > underlying)
 
 **Cache TTL:** 15 seconds during market hours, 300 seconds otherwise.
 
 ---
 
-## 8. Underlyings & Derivatives
+## 7. Underlyings & Derivatives
 
 ### `GET /api/stock/falcon/underlyings/{symbol}/futures`
 
@@ -967,8 +871,6 @@ Get all active futures contracts for a specific underlying symbol.
 | `limit` | integer | ❌ | 100 | Max results (max 1000) |
 | `offset` | integer | ❌ | 0 | Pagination offset |
 
-*Example:* `GET /api/stock/falcon/underlyings/NIFTY/futures`
-
 *Response*
 
 ```json
@@ -990,21 +892,6 @@ Get all active futures contracts for a specific underlying symbol.
       "uir_id": 60001,
       "canonical_symbol": "NFO:NIFTY:FUT:2026-05-29",
       "description": "NFO NIFTY 29MAY FUT"
-    },
-    {
-      "instrument_token": 128123457,
-      "tradingsymbol": "NIFTY26JUN",
-      "name": "NIFTY",
-      "expiry": "2026-06-26",
-      "strike": 0,
-      "instrument_type": "FUT",
-      "segment": "NFO-FUT",
-      "exchange": "NFO",
-      "lot_size": 75,
-      "tick_size": 0.05,
-      "last_price_live": 23950.00,
-      "uir_id": 60002,
-      "canonical_symbol": "NFO:NIFTY:FUT:2026-06-26"
     }
   ],
   "total": 4
@@ -1027,7 +914,7 @@ Options chain for an underlying. Alias for `/options/chain/{symbol}`.
 
 ---
 
-## 9. F&O Autocomplete
+## 8. F&O Autocomplete
 
 ### `GET /api/stock/falcon/fno/autocomplete`
 
@@ -1042,8 +929,6 @@ Autocomplete for F&O underlying symbols — returns only symbols that have activ
 | `q` | string | ✅ | — | Search prefix (e.g., `NIF`, `BANK`) |
 | `scope` | string | ❌ | `all` | Filter: `nse`, `mcx`, `all` |
 | `limit` | integer | ❌ | 10 | Max suggestions (max 50) |
-
-*Example:* `GET /api/stock/falcon/fno/autocomplete?q=NIF&scope=nse`
 
 *Response*
 
@@ -1061,7 +946,7 @@ Autocomplete for F&O underlying symbols — returns only symbols that have activ
 
 ---
 
-## 10. Equity, Futures, Options, Commodity Lists
+## 9. Equity, Futures, Options, Commodity Lists
 
 ### `GET /api/stock/falcon/equities`
 
@@ -1170,7 +1055,7 @@ MCX options with strike and expiry filtering.
 
 ---
 
-## 11. Symbol Resolution & Search
+## 10. Symbol Resolution & Search
 
 ### `GET /api/stock/falcon/instruments/resolve`
 
@@ -1298,6 +1183,196 @@ Popular instruments with live LTP — hardcoded list of the most-traded symbols.
 
 ---
 
+## 11. Universal Search
+
+> **Powered by MeiliSearch** · Cross-provider, cross-segment search in a single call.
+
+All instruments from all providers (falcon, vayu, atlas, drift) are indexed in a unified search index. Use these endpoints for a unified, typeahead-friendly search experience across the entire market.
+
+### `GET /api/search`
+
+Universal instrument search across all providers and segments.
+
+*Base URL:* `https://marketdata.vedpragya.com` *(no API key required for public fields)*
+
+*Query Parameters*
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `q` | string | ✅ | — | Search query (symbol, name, or partial match) |
+| `limit` | integer | ❌ | 10 | Max results (max 50) |
+| `exchange` | string | ❌ | — | Filter: `NSE`, `BSE`, `NFO`, `MCX`, `CDS`, `BINANCE`, etc. |
+| `segment` | string | ❌ | — | Filter: `NSE`, `NFO-FUT`, `NFO-OPT`, `MCX-FUT`, `crypto`, etc. |
+| `instrumentType` | string | ❌ | — | Filter: `EQ`, `FUT`, `CE`, `PE`, `ETF`, `IDX` |
+| `assetClass` | string | ❌ | — | Top-level filter: `equity`, `crypto`, `currency`, `commodity` |
+| `streamProvider` | string | ❌ | — | Filter by provider brand: `falcon`, `vayu`, `atlas`, `drift` |
+| `optionType` | string | ❌ | — | Filter: `CE` or `PE` |
+| `expiry_from` | string | ❌ | — | Min expiry (`YYYY-MM-DD`) |
+| `expiry_to` | string | ❌ | — | Max expiry (`YYYY-MM-DD`) |
+| `strike_min` | number | ❌ | — | Minimum strike price |
+| `strike_max` | number | ❌ | — | Maximum strike price |
+| `mode` | string | ❌ | — | Shorthand: `eq` (NSE_EQ), `fno` (NSE_FO), `curr` (NSE_CUR), `commodities` (MCX_FO) |
+| `ltp_only` | boolean | ❌ | `false` | Return only instruments with a live price |
+| `live` | boolean | ❌ | `false` | Alias for `ltp_only` |
+| `fields` | string | ❌ | — | Comma-separated field projection (see Response fields) |
+| `include` | string | ❌ | — | `internal` — add internal token fields (requires `x-admin-token` header) |
+
+*Example:* `GET /api/search?q=nifty&limit=10&streamProvider=falcon&ltp_only=true`
+
+*Response*
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 355010,
+      "canonicalSymbol": "NSE:NIFTY:EQ",
+      "wsSubscribeUirId": 355010,
+      "last_price": 23850.00,
+      "priceStatus": "live",
+      "streamProvider": "falcon",
+      "logo_url": "https://financialmodelingprep.com/image-stock/NIFTY.NS.png",
+      "change": 125.50,
+      "pchange": 0.53,
+      "symbol": "NIFTY",
+      "name": "NIFTY 50",
+      "exchange": "NSE",
+      "segment": "INDICES",
+      "instrumentType": "IDX"
+    },
+    {
+      "id": 127795793,
+      "canonicalSymbol": "NFO:NIFTY:CE:2026-05-29:24000",
+      "wsSubscribeUirId": 127795793,
+      "last_price": 185.00,
+      "priceStatus": "live",
+      "streamProvider": "falcon",
+      "symbol": "NIFTY26MAY24000CE",
+      "name": "NIFTY",
+      "exchange": "NFO",
+      "segment": "NFO-OPT",
+      "instrumentType": "CE",
+      "expiry": "2026-05-29",
+      "strike": 24000
+    }
+  ],
+  "timestamp": "2026-05-28T10:30:00.000Z"
+}
+```
+
+**Response fields (anchor fields — always returned):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | integer | **Universal instrument ID** — use this to subscribe via WebSocket |
+| `wsSubscribeUirId` | integer | Same as `id` — convenience alias for WebSocket subscribe payloads |
+| `canonicalSymbol` | string | Human-readable unique key (e.g., `NSE:RELIANCE`, `BINANCE:BTCUSDT`) |
+| `last_price` | number | Latest known price (`null` if unavailable) |
+| `priceStatus` | string | `"live"` = recent tick received; `"stale"` = no recent data |
+| `streamProvider` | string | Provider brand: `falcon` (Indian equity), `vayu` (F&O/commodities), `atlas` (US/global), `drift` (crypto) |
+| `change` | number | Price change from previous close |
+| `pchange` | number | Price change percent from previous close |
+| `logo_url` | string | Stock logo URL (Financial Modeling Prep for equities, CryptoIcons for crypto) |
+
+**Allowed `fields=` projection extras:**
+
+`symbol`, `name`, `exchange`, `segment`, `instrumentType`, `assetClass`, `optionType`, `expiry`, `strike`, `lotSize`, `tickSize`, `isDerivative`, `underlyingSymbol`
+
+> **LTP enrichment:** When `ltp_only=true` or `live=true`, the API probes more results and filters to those with a live price. This means you can request 10 results and get fewer back if some don't have live data.
+
+---
+
+### `GET /api/search/suggest`
+
+Lightweight typeahead. Same surface as `/search` but with a smaller default limit (5) and cap (20).
+
+*Example:* `GET /api/search/suggest?q=rel&limit=5`
+
+---
+
+### `GET /api/search/filters`
+
+Get live facet counts for building filter UIs. Returns how many instruments match each value.
+
+*Example:* `GET /api/search/filters?exchange=NSE`
+
+*Response*
+
+```json
+{
+  "success": true,
+  "data": {
+    "exchange": { "NSE": 2500, "BSE": 1800, "NFO": 85000 },
+    "segment": { "NSE": 2500, "NFO-FUT": 1200, "NFO-OPT": 84000 },
+    "instrumentType": { "EQ": 4300, "FUT": 1200, "CE": 42000, "PE": 42000 },
+    "assetClass": { "equity": 4300, "commodity": 2500 },
+    "streamProvider": { "falcon": 85000, "vayu": 25000, "atlas": 5000, "drift": 200 }
+  },
+  "timestamp": "2026-05-28T10:30:00.000Z"
+}
+```
+
+---
+
+### `GET /api/search/schema`
+
+Machine-readable description of all search parameters and their valid values. No auth required.
+
+*Response:* Full parameter schema with enums, types, and response field documentation.
+
+---
+
+### `GET /api/search/stream`
+
+SSE stream of live LTP ticks for a set of instruments. Pushes every ~1 second.
+
+*Query Parameters*
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ids` | string | ✅* | Comma-separated UIR IDs (e.g., `355010,738561`) |
+| `q` | string | ✅* | Alternative: auto-resolve top-10 from a search query |
+| `ltp_only` | boolean | ❌ | Drop entries with no live price |
+
+> \* Either `ids` or `q` is required.
+
+*Example:* `GET /api/search/stream?ids=355010,738561&ltp_only=true`
+
+*Response:* SSE stream
+
+```
+event: ltp
+data: {"quotes":{"355010":{"last_price":23850.00,"change":125.50},"738561":{"last_price":2850.50,"change":-10.20}},"ts":"2026-05-28T10:30:01.000Z"}
+
+event: ltp
+data: {"quotes":{"355010":{"last_price":23852.00,"change":127.50},"738561":{"last_price":2851.00,"change":-9.70}},"ts":"2026-05-28T10:30:02.000Z"}
+```
+
+---
+
+### `POST /api/search/telemetry/selection`
+
+Signal which search result was selected. Used to improve search relevance over time.
+
+*Request Body*
+
+```json
+{
+  "q": "rel",
+  "symbol": "RELIANCE",
+  "universalId": 738561
+}
+```
+
+*Response*
+
+```json
+{ "success": true }
+```
+
+---
+
 ## 12. Instrument Validation
 
 ### `POST /api/stock/falcon/validate-instruments`
@@ -1366,7 +1441,6 @@ Stream live validation progress via Server-Sent Events (SSE).
 ```
 data: {"event":"started","jobId":"uuid-xxx","ts":...}
 data: {"event":"progress","tested":500,"invalid":2,"ts":...}
-data: {"event":"progress","tested":1000,"invalid":5,"ts":...}
 data: {"event":"completed","result":{...},"ts":...}
 ```
 
@@ -1435,11 +1509,7 @@ Poll sync job status.
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
   "status": {
     "status": "running",
-    "progress": {
-      "processed": 50000,
-      "created": 1200,
-      "updated": 4500
-    },
+    "progress": { "processed": 50000, "created": 1200, "updated": 4500 },
     "ts": 1748419200000
   }
 }
@@ -1453,11 +1523,7 @@ Poll sync job status.
   "jobId": "550e8400-e29b-41d4-a716-446655440000",
   "status": {
     "status": "completed",
-    "summary": {
-      "synced": 1200,
-      "updated": 4500,
-      "reconciled": 50
-    },
+    "summary": { "synced": 1200, "updated": 4500, "reconciled": 50 },
     "ts": 1748420000000
   }
 }
@@ -1504,7 +1570,7 @@ Stream live sync progress via SSE.
 |-----------|------|----------|-------------|
 | `exchange` | string | ❌ | Exchange to sync |
 
-*Response:* SSE stream of progress events
+*Response:* SSE stream
 
 ```
 data: {"event":"started","jobId":"uuid","exchange":"all","ts":...}
@@ -1560,26 +1626,7 @@ Delete instruments by exchange and/or type filter.
 
 ---
 
-## 14. Cache Management
-
-### `POST /api/stock/falcon/cache/clear`
-
-Clear Falcon Redis cache (profile, margins, stats keys).
-
-*Headers:* `x-api-key`
-
-*Response*
-
-```json
-{
-  "success": true,
-  "message": "Falcon cache cleared"
-}
-```
-
----
-
-## 15. Error Codes
+## 14. Error Codes
 
 | HTTP Status | Success | Message | Likely Cause |
 |-------------|---------|---------|-------------|
@@ -1588,6 +1635,7 @@ Clear Falcon Redis cache (profile, margins, stats keys).
 | 400 | `false` | `Invalid token` | Non-numeric token in path |
 | 400 | `false` | `symbols query param is required` | Missing required query param |
 | 400 | `false` | `At least one filter required` | Delete without filters |
+| 400 | `false` | `q is required` | Missing search query |
 | 401 | `false` | `Invalid API key` | Bad `x-api-key` header |
 | 404 | `false` | `Instrument not found` | Token doesn't exist |
 | 404 | `false` | `Symbol not found` | Symbol not in database |
@@ -1597,7 +1645,7 @@ Clear Falcon Redis cache (profile, margins, stats keys).
 
 ---
 
-## 16. Rate Limits
+## 15. Rate Limits
 
 | Endpoint Pattern | Limit | Window |
 |-----------------|-------|--------|
@@ -1608,7 +1656,7 @@ Clear Falcon Redis cache (profile, margins, stats keys).
 | `/options/chain/**` | 2 req | per second |
 | `/instruments/*` | 10 req | per second |
 
-All limits are enforced via Redis distributed locks, making them accurate even in multi-instance deployments.
+All limits are enforced via Redis distributed locks, accurate even in multi-instance deployments.
 
 **Caching:** Most responses are cached in Redis with short TTLs:
 - LTP: 10 seconds
@@ -1621,54 +1669,7 @@ All limits are enforced via Redis distributed locks, making them accurate even i
 
 ---
 
-## Appendix A: FalconInstrument Entity
-
-The complete instrument schema as stored in the database:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `instrument_token` | integer | Primary key. Numeric instrument token |
-| `exchange_token` | integer | Exchange-level token |
-| `tradingsymbol` | varchar(64) | Trading symbol (e.g., `RELIANCE`) |
-| `name` | varchar(128) | Company/instrument name |
-| `last_price` | decimal(14,4) | Stale price from last CSV sync |
-| `expiry` | varchar(16) | Expiry date `YYYY-MM-DD` (empty for EQ) |
-| `strike` | decimal(14,4) | Strike price (0 for non-options) |
-| `tick_size` | decimal(10,4) | Minimum price step (default 0.05) |
-| `lot_size` | integer | Contract lot size |
-| `instrument_type` | varchar(16) | `EQ`, `FUT`, `CE`, `PE`, `IDX` |
-| `segment` | varchar(32) | Full segment: `NSE`, `NFO-OPT`, `MCX`, etc. |
-| `exchange` | varchar(16) | Exchange: `NSE`, `BSE`, `NFO`, `MCX`, `BFO`, `CDS` |
-| `isin` | varchar(16) | ISIN for EQ instruments |
-| `is_active` | boolean | Whether the instrument is tradeable |
-| `description` | text | Human-readable description |
-| `uir_id` | integer | Universal Instrument Registry ID |
-| `canonical_symbol` | varchar(128) | Normalized canonical symbol |
-| `logo_url` | varchar(512) | Stock logo URL (Financial Modeling Prep) |
-
----
-
-## Appendix B: Canonical Symbol Format
-
-Falcon uses a canonical symbol format for cross-provider compatibility:
-
-```
-{EXCHANGE}:{UNDERLYING}:{TYPE}:{EXPIRY}:{STRIKE}
-```
-
-Examples:
-
-| Instrument | Canonical Symbol |
-|-----------|----------------|
-| NSE RELIANCE EQ | `NSE:RELIANCE:EQ` |
-| NFO NIFTY 29MAY FUT | `NFO:NIFTY:FUT:2026-05-29` |
-| NFO NIFTY 29MAY 23800 CE | `NFO:NIFTY:CE:2026-05-29:23800` |
-| MCX GOLD FUT | `MCX:GOLD:FUT` |
-| MCX CRUDEOIL 29MAY FUT | `MCX:CRUDEOIL:FUT:2026-05-29` |
-
----
-
-## Appendix C: Common Token Reference
+## 16. Appendix: Token Reference
 
 Common instrument tokens (verify via API — these may change):
 
@@ -1681,6 +1682,29 @@ Common instrument tokens (verify via API — these may change):
 | INFY | NSE | 408065 |
 | TCS | NSE | 295321 |
 
+**Canonical Symbol Format:**
+
+```
+{EXCHANGE}:{UNDERLYING}:{TYPE}:{EXPIRY}:{STRIKE}
+```
+
+| Instrument | Canonical Symbol |
+|-----------|----------------|
+| NSE RELIANCE EQ | `NSE:RELIANCE:EQ` |
+| NFO NIFTY 29MAY FUT | `NFO:NIFTY:FUT:2026-05-29` |
+| NFO NIFTY 29MAY 23800 CE | `NFO:NIFTY:CE:2026-05-29:23800` |
+| MCX GOLD FUT | `MCX:GOLD:FUT` |
+| CRYPTO BTC/USDT | `BINANCE:BTCUSDT` |
+
+**Provider Brands:**
+
+| Brand | Coverage |
+|-------|----------|
+| `falcon` | Indian equity (NSE/BSE), indices |
+| `vayu` | Indian F&O (NFO), currency (CDS), commodities (MCX) |
+| `atlas` | US/global stocks, forex, indices |
+| `drift` | Global crypto Spot (Binance) |
+
 ---
 
-*Document generated: May 2026 · API Version: 2.0*
+*Powered by Vedpragya Bharat Pvt. Ltd. · vedpragya.com · marketdata.vedpragya.com*
