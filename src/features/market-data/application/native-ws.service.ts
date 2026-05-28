@@ -430,8 +430,43 @@ export class NativeWsService implements OnModuleDestroy {
     // (NSE:RELIANCE → kite/vortex, BINANCE:BTCUSDT → binance, US:AAPL → massive, …).
     // The batch processor routes each UIR per-instrument via getBestProviderForUirId.
     const resolvedSymbolUirIds: number[] = [];
+    const derivativeResolved: Array<{
+      symbol: string;
+      uirId: number;
+      resolvedAs: string;
+      expiry: string | null;
+      type: string;
+    }> = [];
     if (Array.isArray(cleanedSymbols) && cleanedSymbols.length > 0) {
       for (const sym of cleanedSymbols as string[]) {
+        const trimmed = String(sym).trim();
+
+        // ── Derivative symbol resolution (MCX:GOLD:FUT, GOLD:FUT, NFO:NIFTY:CE, etc.) ──
+        if (/^[^:]+:[^:]+:(FUT|CE|PE)$/i.test(trimmed)) {
+          const result = this.instrumentRegistry.resolveDerivativeSymbol(trimmed);
+          if (result.status === 'not_found') {
+            unresolvedSymbols.push(`${sym} (${result.reason ?? 'not found'})`);
+            continue;
+          }
+          if (result.status === 'ambiguous') {
+            unresolvedSymbols.push(
+              `${sym} (ambiguous — try: ${result.candidates?.join(', ')})`,
+            );
+            continue;
+          }
+          // Resolved — store for forced-provider routing below
+          resolvedSymbolUirIds.push(result.uirId);
+          derivativeResolved.push({
+            symbol: sym,
+            uirId: result.uirId,
+            resolvedAs: result.canonical ?? trimmed,
+            expiry: result.expiry ? result.expiry.toISOString().split('T')[0] : null,
+            type: result.instrument_type ?? 'FUT',
+          });
+          continue;
+        }
+
+        // ── Flex symbol resolution (RELIANCE, NSE:RELIANCE, BTCUSDT, etc.) ──
         const flexResult = this.instrumentRegistry.resolveFlexSymbol(sym);
         if (flexResult.status === 'not_found') {
           unresolvedSymbols.push(sym);
@@ -639,10 +674,20 @@ export class NativeWsService implements OnModuleDestroy {
     }
 
     // Resolve incoming inputs to UIR IDs. Accepts numeric tokens (resolved against the
-    // active provider), Vortex EXCHANGE-TOKEN strings, and Provider:identifier prefix
-    // strings (Falcon:reliance, Vayu:26000, Massive:AAPL, Binance:BTCUSDT).
+    // active provider), Vortex EXCHANGE-TOKEN strings, Provider:identifier prefix
+    // strings (Falcon:reliance, Vayu:26000, Massive:AAPL, Binance:BTCUSDT), and
+    // derivative symbols (MCX:GOLD:FUT, GOLD:FUT, NFO:NIFTY:CE, etc.).
     const requestedUirIds: number[] = [];
     for (const item of instruments as Array<unknown>) {
+      const trimmed = String(item).trim();
+
+      // ── Derivative symbol resolution for unsubscribe (MCX:GOLD:FUT, GOLD:FUT, etc.) ──
+      if (/^[^:]+:[^:]+:(FUT|CE|PE)$/i.test(trimmed)) {
+        const result = this.instrumentRegistry.resolveDerivativeSymbol(trimmed);
+        if (result.status === 'resolved') requestedUirIds.push(result.uirId);
+        continue;
+      }
+
       const prefixed = parseProviderPrefix(item);
       if (prefixed) {
         const result = this.instrumentRegistry.resolveProviderScopedSymbol(
