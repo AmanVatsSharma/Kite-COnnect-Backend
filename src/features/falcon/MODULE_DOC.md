@@ -4,6 +4,11 @@ Provider-facing **Kite (Falcon)** instrument catalog: `falcon_instruments`, sync
 
 ## Changelog
 
+- **2026-05-28** — Bug fixes to client API surface:
+  - `FalconController.ltp()`: fixed inconsistent DTO — changed `{ instruments: number[] }` to the canonical `FalconTokensDto` (`{ tokens: string[] }`), matching quote/ohlc/historical endpoints. All market data endpoints now use the same input contract.
+  - `FalconController.batch()`: fixed `tokens` to accept `(number | string)[]` instead of `number[]` (string tokens match other endpoints); internal mapping also updated to filter with `String()` instead of `Number()` which was dropping tokens silently.
+  - `FalconInstrumentService.getFalconInstrumentsBatch()`: relaxed signature to `(number | string)[]` to match the updated batch controller call.
+
 - **2026-05-09** — Deep option chain endpoint:
   - `FalconProviderAdapter`: `getQuoteBatched(tokens[])` — chunks token arrays into 500-token batches and fans out via existing `getQuote()` (rate-limit + Redis cache + retry). Handles BANKNIFTY-scale chains (2000+ instruments) without hitting Kite's 500-per-call limit.
   - `FalconInstrumentService`: `getDeepOptionsChain(symbol, expiry?, strikesAroundAtm?)` — fetches all CE/PE rows, calls `getQuoteBatched`, resolves underlying LTP (EQ → nearest FUT fallback), computes `atm_strike`, per-strike `itm` flag, per-expiry `total_ce_oi`/`total_pe_oi`/`pcr`. Each strike entry includes: `ltp`, `oi`, `oi_day_high`, `oi_day_low`, `volume`, `average_price`, `ohlc`, `bid`, `ask`, `buy_quantity`, `sell_quantity`, `depth`. Redis-cached 15 s market hours / 300 s otherwise.

@@ -4,7 +4,7 @@
  * @description Client-facing Falcon (Kite) REST endpoints: instruments, LTP, Quote, OHLC, Historical.
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-04-14 — added instruments/export (NDJSON stream) and instruments/resolve (symbol→token)
+ * @updated 2026-05-28 — fixed ltp DTO uses FalconTokensDto; batch tokens accept string (not number-only)
  */
 import {
   Controller,
@@ -507,12 +507,12 @@ export class FalconController {
   @ApiOperation({ summary: 'Get Falcon LTP for instrument tokens' })
   @ApiOkResponse({ description: 'Map of token → { last_price }' })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
-  async ltp(@Body() body: { instruments: number[] }) {
+  async ltp(@Body() body: FalconTokensDto) {
     try {
-      const tokens = (body?.instruments || []).map((t) => String(t));
+      const tokens = (body?.tokens || []).map(String);
       if (!tokens.length) {
         throw new HttpException(
-          { success: false, message: 'instruments array is required' },
+          { success: false, message: 'tokens array is required' },
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -581,10 +581,10 @@ export class FalconController {
   @Post('instruments/batch')
   @ApiOperation({ summary: 'Batch lookup Falcon instruments by tokens' })
   @ApiHeader({ name: 'x-api-key', required: true, description: 'Your API key' })
-  async batch(@Body() body: { tokens: number[] }) {
+  async batch(@Body() body: { tokens: (number | string)[] }) {
     try {
       const tokens = Array.isArray(body?.tokens)
-        ? body.tokens.map((n) => Number(n)).filter((n) => Number.isFinite(n))
+        ? body.tokens.map((n) => String(n)).filter(Boolean)
         : [];
       if (!tokens.length) {
         throw new HttpException(

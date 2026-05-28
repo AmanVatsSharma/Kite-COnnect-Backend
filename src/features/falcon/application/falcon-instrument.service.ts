@@ -28,7 +28,7 @@
  *   3. getEquities / getFutures / getOptions / getCommodities — read + enrich paths
  *
  * Author:      BharatERP
- * Last-updated: 2026-05-09
+ * Last-updated: 2026-05-28
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -779,7 +779,7 @@ export class FalconInstrumentService implements OnModuleInit {
     return inst ? this.enrichWithUir([inst])[0] : null;
   }
 
-  async getFalconInstrumentsBatch(tokens: number[]) {
+  async getFalconInstrumentsBatch(tokens: (number | string)[]) {
     const list = await this.falconInstrumentRepo.find({
       where: { instrument_token: In(tokens) } as any,
     });
