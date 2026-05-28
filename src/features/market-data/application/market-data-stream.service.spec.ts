@@ -7,6 +7,7 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { MarketDataStreamService } from './market-data-stream.service';
 import { MarketDataProviderResolverService } from './market-data-provider-resolver.service';
 import { StockService } from '@features/stock/application/stock.service';
@@ -16,6 +17,7 @@ import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketDataWsInterestService } from './market-data-ws-interest.service';
 import { InstrumentRegistryService } from './instrument-registry.service';
 import { AppConfigService } from '@infra/app-config/app-config.service';
+import { UniversalInstrument } from '../domain/universal-instrument.entity';
 
 describe('MarketDataStreamService', () => {
   let service: MarketDataStreamService;
@@ -111,6 +113,22 @@ describe('MarketDataStreamService', () => {
         {
           provide: AppConfigService,
           useValue: { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: getRepositoryToken(UniversalInstrument),
+          useValue: {
+            createQueryBuilder: () => ({
+              update: () => ({
+                set: () => ({
+                  where: () => ({
+                    andWhere: () => ({
+                      execute: () => Promise.resolve({ affected: 0 }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          },
         },
       ],
     }).compile();

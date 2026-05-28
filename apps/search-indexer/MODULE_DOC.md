@@ -19,6 +19,8 @@ One-shot / watch-mode indexer that syncs the `universal_instruments` + `instrume
 | `incremental` | Poll `updated_at > last_sync` every `INDEXER_POLL_SEC` seconds indefinitely |
 | `backfill-and-watch` | (Default) Full backfill then switches to incremental polling |
 | `synonyms-apply` | Push synonym rules from Postgres/config to MeiliSearch then exit |
+| `settings-apply` | Push index settings (searchableAttributes, filterableAttributes, etc.) to MeiliSearch then exit |
+| `expired-cleanup` | One-shot: delete expired FUT/CE/PE contracts from MeiliSearch then exit |
 
 ## SQL Query
 
@@ -134,5 +136,8 @@ docker compose logs -f search-indexer
 
 ## Changelog
 
+- **2026-05-28** — Expired-futures purging. Added two new indexer capabilities:
+  - **`expired-cleanup`** mode (`INDEXER_MODE=expired-cleanup`): one-shot deletion of expired FUT/CE/PE contracts from MeiliSearch. Queries `universal_instruments` for `is_active=false` + `expiry < today` + derivative types, then issues batched DELETE to MeiliSearch.
+  - **`expired-cleanup`** endpoint (`POST /api/indexer/cleanup-expired`): HTTP trigger usable by the NestJS backend cron job. Enabled via `INDEXER_HTTP_ENABLED=true`. Listens on `INDEXER_HTTP_PORT` (default `3003`). Both modes share the same `expiredCleanup()` fn.
 - **2026-04-28** — Multi-provider parity. SQL pivot extended to also project `massive_token` and `binance_token` from `instrument_mappings.provider_token`. New MeiliDoc fields: `massiveToken`, `binanceToken`, `streamProvider`. `streamProvider` is precomputed per-document from an inline `EXCHANGE_TO_PROVIDER` mirror so `?streamProvider=<name>` filters work in one Meili query without joining back to Postgres. `streamProvider` added to `filterableAttributes`.
 - **2026-04-22** — Initial implementation. Migrated from old `instruments`/`vortex_instruments` table queries to `universal_instruments` + `instrument_mappings` JOIN with vortex token pivot.

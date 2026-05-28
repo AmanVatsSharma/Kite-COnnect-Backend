@@ -6,16 +6,11 @@
  * @created 2025-03-23
  * @updated 2026-04-28
  */
-import {
-  Injectable,
-  Logger,
-  OnModuleInit,
-  OnModuleDestroy,
-  Inject,
-  forwardRef,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { MarketDataProviderResolverService } from '@features/market-data/application/market-data-provider-resolver.service';
 import { MarketDataProvider } from '@features/market-data/infra/market-data.provider';
 import { StockService } from '@features/stock/application/stock.service';
@@ -23,6 +18,7 @@ import { RedisService } from '@infra/redis/redis.service';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketDataWsInterestService } from '@features/market-data/application/market-data-ws-interest.service';
+import { UniversalInstrument } from '@features/market-data/domain/universal-instrument.entity';
 import {
   internalToClientProviderName,
   internalToPublicProviderName,
@@ -104,6 +100,8 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly instrumentRegistry: InstrumentRegistryService,
     private readonly appConfig: AppConfigService,
+    @InjectRepository(UniversalInstrument)
+    private readonly uirRepo: Repository<UniversalInstrument>,
   ) {}
 
   get activeProviderName(): InternalProviderName {
@@ -1146,16 +1144,56 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
     this.logger.error('Daily instrument sync failed after retries');
   }
 
-  // Cron job to clean old market data
-  @Cron(CronExpression.EVERY_DAY_AT_2AM)
-  async cleanOldMarketData() {
+  // Cron job to purge expired derivatives from DB and refresh the in-memory registry.
+  // Runs at 00:30 IST daily — after market hours, before the 08:45 instrument sync.
+  // Deactivates FUT/CE/PE contracts whose expiry < today in universal_instruments,
+  // then refreshes InstrumentRegistryService so the WS layer stops routing to dead contracts.
+  @Cron('30 0 * * *')
+  async purgeExpiredDerivatives() {
     try {
-      this.logger.log('Starting cleanup of old market data');
-      // Implement cleanup logic here
-      // For example, delete market data older than 30 days
-      this.logger.log('Old market data cleanup completed');
+      this.logger.log('Starting purge of expired derivatives');
+      const now = new Date();
+      // Deactivate all FUT/CE/PE with expiry < today (market-close date boundary)
+      const cutoff = now.toISOString().slice(0, 10);
+      const result = await this.uirRepo
+        .createQueryBuilder()
+        .update()
+        .set({ is_active: false })
+        .where('expiry < :cutoff', { cutoff })
+        .andWhere('instrument_type IN (:...types)', { types: ['FUT', 'CE', 'PE'] })
+        .execute();
+
+      if (result.affected && result.affected > 0) {
+        this.logger.log(
+          `Purged ${result.affected} expired derivative contracts from universal_instruments`,
+        );
+        // Refresh the in-memory registry so WS subscribers stop routing to dead UIRs
+        await this.instrumentRegistry.refresh();
+        // Trigger MeiliSearch expired-cleanup via HTTP to the search-indexer service
+        await this.triggerSearchIndexCleanup().catch((e) =>
+          this.logger.warn('MeiliSearch cleanup trigger failed (non-fatal)', e),
+        );
+      } else {
+        this.logger.log('No expired derivatives to purge');
+      }
     } catch (error) {
-      this.logger.error('Error cleaning old market data', error);
+      this.logger.error('Error purging expired derivatives', error);
+    }
+  }
+
+  private async triggerSearchIndexCleanup(): Promise<void> {
+    const host =
+      process.env.SEARCH_INDEXER_HOST || 'http://localhost:3002';
+    const url = `${host}/api/indexer/cleanup-expired`;
+    try {
+      const res = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) {
+        throw new Error(`Search indexer returned ${res.status}`);
+      }
+      this.logger.log('MeiliSearch expired-instrument cleanup triggered successfully');
+    } catch (e) {
+      // Non-fatal — search indexer may not be reachable or not have the endpoint yet
+      this.logger.debug(`Search indexer cleanup unavailable: ${e}`);
     }
   }
 

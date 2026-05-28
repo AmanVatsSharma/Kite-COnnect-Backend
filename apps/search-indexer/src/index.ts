@@ -357,6 +357,123 @@ function toDoc(r: UniversalRow): MeiliDoc {
   };
 }
 
+// ─── Expired derivatives cleanup ─────────────────────────────────────────────
+
+/**
+ * Fetch IDs of expired FUT/CE/PE contracts from the DB.
+ * Returns numeric UIR ids as number[] for MeiliSearch deletion.
+ */
+async function fetchExpiredDerivativeIds(): Promise<number[]> {
+  return withPg(async (pg) => {
+    const cutoff = new Date().toISOString().slice(0, 10);
+    const r = await pg.query(
+      `SELECT id::bigint AS id FROM universal_instruments
+       WHERE expiry < $1
+         AND instrument_type IN ('FUT', 'CE', 'PE')
+         AND is_active = false`,
+      [cutoff],
+    );
+    return r.rows.map((row: { id: { toString(): string } }) =>
+      Number(row.id.toString()),
+    );
+  });
+}
+
+/**
+ * Delete expired instruments from MeiliSearch by their UIR ids.
+ * MeiliSearch deleteDocuments accepts an array of primary keys.
+ */
+async function deleteFromMeiliSearch(
+  meiliBase: string,
+  headers: Record<string, string>,
+  index: string,
+  ids: number[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  const batchSize = 1000;
+  for (let i = 0; i < ids.length; i += batchSize) {
+    const batch = ids.slice(i, i + batchSize);
+    await axios.delete(`${meiliBase}/indexes/${index}/documents`, {
+      headers,
+      data: batch,
+    });
+    // eslint-disable-next-line no-console
+    console.log(`[expired-cleanup] deleted batch ${Math.floor(i / batchSize) + 1} (${batch.length} docs)`);
+  }
+}
+
+/**
+ * Standalone expired-cleanup mode: run once, delete expired instruments from MeiliSearch.
+ * Called by the cron trigger HTTP endpoint AND when INDEXER_MODE=expired-cleanup.
+ */
+async function expiredCleanup(): Promise<{ deleted: number }> {
+  const meiliBase = env('MEILI_HOST', 'http://meilisearch:7700')!;
+  const meiliKey = env('MEILI_MASTER_KEY', '')!;
+  const index = env('MEILI_INDEX', 'instruments_v1')!;
+  const headers: Record<string, string> = meiliKey
+    ? { Authorization: `Bearer ${meiliKey}` }
+    : {};
+
+  const ids = await fetchExpiredDerivativeIds();
+  if (ids.length === 0) {
+    // eslint-disable-next-line no-console
+    console.log('[expired-cleanup] no expired derivatives to remove from MeiliSearch');
+    return { deleted: 0 };
+  }
+
+  await deleteFromMeiliSearch(meiliBase, headers, index, ids);
+  // eslint-disable-next-line no-console
+  console.log(`[expired-cleanup] deleted ${ids.length} expired instruments from MeiliSearch`);
+  return { deleted: ids.length };
+}
+
+/**
+ * Tiny HTTP server that exposes POST /api/indexer/cleanup-expired
+ * so the NestJS backend can trigger MeiliSearch cleanup after deactivating
+ * expired rows in the DB. Runs alongside the normal indexer process when
+ * INDEXER_HTTP_ENABLED=true.
+ */
+async function startHttpTriggerServer(): Promise<void> {
+  const port = Number(env('INDEXER_HTTP_PORT', '3003'));
+  const http = await import('http');
+
+  const server = http.createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/indexer/cleanup-expired') {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', async () => {
+        try {
+          const result = await expiredCleanup();
+          res.writeHead(200);
+          res.end(JSON.stringify({ ok: true, ...result }));
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[expired-cleanup] HTTP trigger failed', e);
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: String(e) }));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  await new Promise<void>((res) => server.listen(port, res));
+  // eslint-disable-next-line no-console
+  console.log(`[indexer-http] trigger server listening on port ${port}`);
+}
+
 // ─── MeiliSearch index settings ──────────────────────────────────────────────
 
 async function applySettings(
@@ -720,8 +837,9 @@ async function applySynonymsFromRedis(): Promise<void> {
 
 async function main(): Promise<void> {
   const mode = env('INDEXER_MODE', 'backfill');
+  const httpEnabled = env('INDEXER_HTTP_ENABLED', 'false') === 'true';
   // eslint-disable-next-line no-console
-  console.log(`[indexer] mode=${mode}`);
+  console.log(`[indexer] mode=${mode}, httpTrigger=${httpEnabled}`);
 
   if (mode === 'backfill') {
     await backfill();
@@ -739,10 +857,17 @@ async function main(): Promise<void> {
     await applySettings(meiliBase, meiliKey, index);
     // eslint-disable-next-line no-console
     console.log('[indexer] settings-apply complete');
-  } else {
+  } else if (mode === 'expired-cleanup') {
+    // One-shot cleanup run (e.g. from a cron job in k8s/CI)
+    const result = await expiredCleanup();
     // eslint-disable-next-line no-console
-    console.error(`[indexer] unknown INDEXER_MODE=${mode}`);
-    process.exit(2);
+    console.log(`[indexer] expired-cleanup done: deleted=${result.deleted}`);
+    return;
+  }
+
+  if (httpEnabled) {
+    // Keep the HTTP trigger server alive alongside the main loop
+    await startHttpTriggerServer();
   }
 }
 
