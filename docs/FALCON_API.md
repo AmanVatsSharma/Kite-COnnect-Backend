@@ -1,6 +1,6 @@
 # Falcon API — Complete Developer Reference
 
-> **Version:** 2.0 · **Provider:** Kite Connect (Zerodha) · **Base URL:** `https://your-domain.com`
+> **Version:** 2.0 · **Base URL:** `https://your-domain.com`
 
 ---
 
@@ -35,34 +35,34 @@ x-api-key: YOUR_API_KEY
 
 ### 1.1 OAuth Login (One-time setup)
 
-Before making any API calls, you must authenticate with Kite using OAuth.
+Before making any API calls, you must authenticate using OAuth.
 
 **`GET /api/auth/falcon/login`**
 
-Initiates the Kite OAuth flow. Returns a login URL to redirect the user to Kite's authorization page.
+Initiates the OAuth flow. Returns a login URL to redirect the user to the authorization page.
 
 *Response*
 
 ```json
 {
-  "url": "https://kite.trade/connect/login?v=3&api_key=...",
+  "url": "https://your-provider.com/connect/login?v=3&api_key=...",
   "state": "abc123xyz"
 }
 ```
 
-Redirect the user to the returned `url`. After they authorize, Kite redirects to your callback URL with `request_token` and `state` parameters.
+Redirect the user to the returned `url`. After they authorize, the system redirects to your callback URL with `request_token` and `state` parameters.
 
 ---
 
 **`GET /api/auth/falcon/callback`**
 
-OAuth callback handler. Called automatically by Kite after user authorization.
+OAuth callback handler. Called automatically after user authorization.
 
 *Query Parameters*
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `request_token` | string | ✅ | Token from Kite OAuth redirect |
+| `request_token` | string | ✅ | Token from OAuth redirect |
 | `state` | string | ✅ | CSRF state from `/login` step |
 
 *Response*
@@ -71,7 +71,7 @@ OAuth callback handler. Called automatically by Kite after user authorization.
 {
   "success": true,
   "access_token": "eyJhbGci...",
-  "message": "Kite session established successfully"
+  "message": "Session established successfully"
 }
 ```
 
@@ -1392,7 +1392,7 @@ token,reason
 
 ### `POST /api/stock/falcon/instruments/sync`
 
-Trigger a manual instrument sync from Kite. Blocking call — waits for completion.
+Trigger a manual instrument sync. Blocking call — waits for completion.
 
 *Headers:* `x-api-key`
 
@@ -1627,7 +1627,7 @@ The complete instrument schema as stored in the database:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `instrument_token` | integer | Primary key. Numeric token from Kite |
+| `instrument_token` | integer | Primary key. Numeric instrument token |
 | `exchange_token` | integer | Exchange-level token |
 | `tradingsymbol` | varchar(64) | Trading symbol (e.g., `RELIANCE`) |
 | `name` | varchar(128) | Company/instrument name |
@@ -1668,7 +1668,7 @@ Examples:
 
 ---
 
-## Appendix C: Kite Token Reference
+## Appendix C: Common Token Reference
 
 Common instrument tokens (verify via API — these may change):
 
