@@ -645,6 +645,14 @@ export class MarketDataGateway
     client: Socket,
   ) {
     try {
+      // Readiness gate: wait for the instrument-registry background warm-up to complete
+      // before any resolve* call. The warm-up runs off the boot path (resolves 502 Bad
+      // Gateway) but the in-memory maps are empty until it finishes. A subscribe that
+      // hits the empty maps returns `not_found` for every symbol, which the user reports
+      // as "unresolved". After the first call post-warm-up, this awaits a settled promise
+      // (one microtask) — no measurable cost.
+      await this.instrumentRegistry.ready();
+
       const { type = 'live', mode = 'ltp' } = data;
       let instruments = data.instruments || [];
       let symbols = data.symbols;
@@ -750,11 +758,157 @@ export class MarketDataGateway
         return remaining;
       };
 
+      // Track string items in `instruments` that the explicit-pair / numeric parser
+      // at line ~990 must skip because they have been routed through a flex or
+      // derivative resolution path above. The Set is keyed by the original (raw) string
+      // and by the trimmed uppercase form so we can match in either case.
+      const consumedStringSet = new Set<string>();
+
       if (Array.isArray(instruments) && instruments.length > 0) {
         instruments = consumePrefixed(instruments) as any;
       }
       if (Array.isArray(symbols) && symbols.length > 0) {
         symbols = consumePrefixed(symbols) as any;
+      }
+
+      // ── Fallback normalization pass for non-prefixed strings left in `instruments` ──
+      // Some clients send strings like "MCX:GOLD:FUT" or "RELIANCE" inside the
+      // `instruments` array instead of `symbols`. The provider-prefix path above only
+      // catches the `Provider:identifier` syntax; everything else falls through.
+      // We resolve the leftover string items here so the explicit-pair / numeric parser
+      // downstream does not silently drop them.
+      if (Array.isArray(instruments) && instruments.length > 0) {
+        const leftover: unknown[] = [];
+        for (const item of instruments as unknown[]) {
+          if (typeof item !== 'string') {
+            leftover.push(item);
+            continue;
+          }
+          const trimmed = item.trim();
+          if (trimmed.length === 0) {
+            leftover.push(item);
+            continue;
+          }
+
+          // Derivative shape: `<EXCHANGE>:<UNDERLYING>:(FUT|CE|PE)` — case-insensitive.
+          if (/^[^:]+:[^:]+:(FUT|CE|PE)$/i.test(trimmed)) {
+            const result = this.instrumentRegistry.resolveDerivativeSymbol(trimmed);
+            if (result.status === 'resolved') {
+              directUirIds.push(result.uirId);
+              derivativeResolved.push({
+                symbol: trimmed,
+                uirId: result.uirId,
+                resolvedAs: result.canonical ?? trimmed,
+                expiry: result.expiry
+                  ? result.expiry.toISOString().split('T')[0]
+                  : null,
+                type: result.instrument_type ?? 'FUT',
+              });
+              resolvedSymbols.push({
+                symbol: trimmed,
+                uirId: result.uirId,
+                resolvedAs:
+                  result.canonical && result.canonical !== trimmed
+                    ? result.canonical
+                    : undefined,
+              });
+            } else if (result.status === 'ambiguous') {
+              unresolvedSymbols.push(
+                `${trimmed} (ambiguous — try: ${result.candidates?.join(', ')})`,
+              );
+            } else {
+              unresolvedSymbols.push(
+                `${trimmed} (${result.reason ?? 'not found'})`,
+              );
+            }
+            consumedStringSet.add(trimmed);
+            consumedStringSet.add(trimmed.toUpperCase());
+            // Do NOT push the raw string into `leftover` — the downstream parser
+            // would only re-fail it and waste a cycle. The resolution above is
+            // the terminal step for this item.
+            continue;
+          }
+
+          // Plain underlying / canonical shape (non-derivative) — try flex resolution.
+          // This is the same path used by `symbols` for plain names. It bypasses the
+          // kite↔vortex dual-subscribe path and lands in `directUirIds` when the global
+          // provider has no token (e.g. massive US stocks).
+          if (/^[^:]+(?::[^:]+)?$/.test(trimmed)) {
+            const flexResult = this.instrumentRegistry.resolveFlexSymbol(trimmed);
+            if (flexResult.status === 'resolved') {
+              const providerName =
+                lockedProvider ?? this.streamService.activeProviderName;
+              const providerToken = this.instrumentRegistry.getProviderToken(
+                flexResult.uirId,
+                providerName,
+              );
+              if (providerToken != null) {
+                const numToken = Number(providerToken);
+                if (Number.isFinite(numToken)) {
+                  leftover.push(numToken);
+                  resolvedSymbols.push({
+                    symbol: trimmed,
+                    uirId: flexResult.uirId,
+                    providerToken: numToken,
+                    resolvedAs:
+                      flexResult.canonical &&
+                      flexResult.canonical !== trimmed
+                        ? flexResult.canonical
+                        : undefined,
+                  });
+                } else {
+                  directUirIds.push(flexResult.uirId);
+                  resolvedSymbols.push({
+                    symbol: trimmed,
+                    uirId: flexResult.uirId,
+                    resolvedAs:
+                      flexResult.canonical &&
+                      flexResult.canonical !== trimmed
+                        ? flexResult.canonical
+                        : undefined,
+                  });
+                }
+              } else {
+                // No token for the global provider — route via directUirIds the same
+                // way the `symbols` branch does (kite↔vortex dual-subscribe bypass).
+                const bestProv = this.instrumentRegistry.getBestProviderForUirId(
+                  flexResult.uirId,
+                );
+                if (bestProv) {
+                  directUirIds.push(flexResult.uirId);
+                  resolvedSymbols.push({
+                    symbol: trimmed,
+                    uirId: flexResult.uirId,
+                    resolvedAs:
+                      flexResult.canonical &&
+                      flexResult.canonical !== trimmed
+                        ? flexResult.canonical
+                        : undefined,
+                  });
+                } else {
+                  unresolvedSymbols.push(trimmed);
+                }
+              }
+            } else if (flexResult.status === 'ambiguous') {
+              unresolvedSymbols.push(
+                `${trimmed} (ambiguous — try: ${flexResult.candidates.join(', ')})`,
+              );
+            } else {
+              unresolvedSymbols.push(trimmed);
+            }
+            consumedStringSet.add(trimmed);
+            consumedStringSet.add(trimmed.toUpperCase());
+            // Whether resolved or unresolved, the raw string is no longer a valid
+            // token (already routed above, or already echoed as unresolved). The
+            // downstream explicit-pair parser would only silently drop it, so we
+            // mark it consumed and skip it.
+            continue;
+          }
+
+          // Unrecognized string shape — let the downstream parser have a look.
+          leftover.push(item);
+        }
+        instruments = leftover as any;
       }
 
       if (Array.isArray(symbols) && symbols.length > 0) {
@@ -989,6 +1143,17 @@ export class MarketDataGateway
 
       for (const item of requestedRaw as any[]) {
         if (typeof item === 'string') {
+          // Skip items already consumed by the flex/derivative normalization pass
+          // above — they have either been routed to `directUirIds` or recorded as
+          // unresolved, so the downstream explicit-pair parser must not re-touch
+          // them (it would silently drop the original string anyway).
+          const itemTrim = item.trim();
+          if (
+            consumedStringSet.has(itemTrim) ||
+            consumedStringSet.has(itemTrim.toUpperCase())
+          ) {
+            continue;
+          }
           const s = String(item).trim().toUpperCase();
           const m = s.match(/^([A-Z_]+)-(\d+)$/);
           if (m) {
@@ -2154,6 +2319,37 @@ export class MarketDataGateway
 
       const ts = new Date().toISOString();
       const now = Date.now();
+
+      // Pre-compute canonical-prefix identifier map ONCE per tick (not per subscriber).
+      // Hot path: O(1) Map lookups against the warm InstrumentRegistryService.
+      // Each subscriber reuses these primitives, so the room can have hundreds of
+      // sockets without re-querying the registry per-socket.
+      const activeProvider: InternalProviderName =
+        this.streamService.activeProviderName;
+      const providerTokensMap =
+        this.instrumentRegistry.getProviderTokens(identifier);
+      const canonicalSymbol =
+        this.instrumentRegistry.getCanonicalSymbol(identifier);
+
+      if (!providerTokensMap) {
+        // Guard: should never happen for an actively-subscribed UIR, but log if it
+        // does so the orchestrator can spot registry/gateway drift early.
+        this.logger.debug(
+          `[Gateway] No provider token map for UIR ${identifier} (activeProvider=${activeProvider})`,
+        );
+      }
+
+      // Build the identifiers object (provider → token) once. Coerce numeric Kite
+      // tokens to string so the wire format is consistent across providers.
+      const identifiers: Record<string, string> = {};
+      if (providerTokensMap) {
+        for (const [provider, token] of providerTokensMap.entries()) {
+          if (token == null) continue;
+          identifiers[provider] = String(token);
+        }
+      }
+      const activeProviderToken = providerTokensMap?.get(activeProvider);
+
       for (const s of rawSockets) {
         const sub = this.subscriptionRegistry.get(s.id);
         const apiKey = sub?.apiKey || (s.data as any)?.apiKey;
@@ -2175,6 +2371,11 @@ export class MarketDataGateway
         const emitPayload = {
           instrumentToken: data?.instrument_token ?? identifier,
           uirId: identifier,
+          canonical: canonicalSymbol,
+          identifiers,
+          activeProvider,
+          activeProviderToken:
+            activeProviderToken != null ? String(activeProviderToken) : undefined,
           data: payload,
           timestamp: ts,
           ...(emitOpts?.syntheticLast ? { syntheticLast: true } : {}),

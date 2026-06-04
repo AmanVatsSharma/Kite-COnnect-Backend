@@ -4,7 +4,7 @@
  * @description Stock and market-data orchestration: instruments, quotes, realtime tick fan-out and async DB persistence.
  * @author BharatERP
  * @created 2025-01-01
- * @updated 2026-03-24
+ * @updated 2026-06-04
  *
  * Notes:
  * - Realtime ticks use forwardRealtimeTick + enqueuePersistMarketData so WS is not blocked on DB writes.
@@ -654,13 +654,34 @@ export class StockService {
 
   /**
    * Full path: realtime forward + async persistence (backward compatible).
+   *
+   * NOTE: The live tick loop (`MarketDataStreamService.handleTicks`) now resolves
+   * the active provider's Kite/numeric token via `InstrumentRegistryService` before
+   * calling `enqueuePersistMarketData` directly, so the FK on
+   * `market_data.instrument_token` is satisfied. This wrapper remains for callers
+   * that already hold a fully qualified Kite token (e.g. periodic snapshots,
+   * Vortex quote ingestion) and want the broadcast + persistence combo.
    */
   async storeMarketData(instrumentToken: number, data: any): Promise<void> {
     try {
+      // 1. Forward to WebSocket gateways (Hot Path)
       await this.forwardRealtimeTick(instrumentToken, data);
+
+      // 2. Cache in Redis (Fast Path)
+      try {
+        await this.redisService.cacheMarketData(instrumentToken, data, 60);
+      } catch (cacheError: any) {
+        this.logger.warn(`Failed to cache market data in Redis: ${cacheError?.message || cacheError}`);
+      }
+
+      // 3. Schedule DB persistence (Cold Path)
+      // Cold-path writes target the `instruments.instrument_token` FK, so the
+      // caller MUST pass a Kite/numeric token (not a UIR id). The live tick loop
+      // resolves this via the registry; legacy callers (snapshots, periodic
+      // ingest) pass the token directly.
       this.enqueuePersistMarketData(instrumentToken, data);
     } catch (error) {
-      this.logger.error('Error storing market data', error);
+      this.logger.error('Error in storeMarketData', error);
     }
   }
 

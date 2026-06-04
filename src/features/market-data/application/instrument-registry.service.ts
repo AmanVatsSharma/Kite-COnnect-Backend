@@ -68,28 +68,77 @@ export class InstrumentRegistryService implements OnModuleInit {
   // Underlying name (uppercase) -> all UIR entries with that underlying, for flex symbol resolution
   private underlyingToEntries = new Map<string, UnderlyingEntry[]>();
 
+  /**
+   * In-flight warm-up promise. Resolves when warmMaps() completes (success or failure).
+   * Subscribers await `ready()` to ensure the in-memory maps are populated before resolving
+   * symbols. Once resolved, future `ready()` calls short-circuit (one microtask each).
+   */
+  private warmPromise: Promise<void> | null = null;
+  /** Set to true after the warm-up promise has settled (used for sync isReady() probe). */
+  private warmSettled = false;
+
   constructor(
     @InjectRepository(UniversalInstrument)
     private readonly uirRepo: Repository<UniversalInstrument>,
     @InjectRepository(InstrumentMapping)
     private readonly mappingRepo: Repository<InstrumentMapping>,
-  ) {}
+  ) {
+    this.logger.log('InstrumentRegistryService instantiated');
+  }
 
   async onModuleInit(): Promise<void> {
-    await this.warmMaps();
+    // Run warm-up in background so it doesn't block app bootstrap (resolves 502 Bad Gateway).
+    // Track the in-flight promise so callers can `await ready()` before any resolve* call
+    // — this prevents early subscribe requests from hitting empty maps and silently failing.
+    this.warmPromise = this.warmMaps()
+      .catch((err) => {
+        this.logger.error('Background instrument registry warm-up failed', err);
+      })
+      .finally(() => {
+        this.warmSettled = true;
+      });
+  }
+
+  /**
+   * Awaitable readiness gate. Resolves once the background warm-up has completed (success
+   * or failure). After the first call post-warm-up, this is a no-op (single microtask) —
+   * safe to await on every subscribe without measurable latency cost.
+   */
+  ready(): Promise<void> {
+    return this.warmPromise ?? Promise.resolve();
+  }
+
+  /**
+   * Synchronous readiness probe. True once the warm-up promise has settled.
+   * Use this only when the caller cannot afford even a microtask wait (e.g. hot-path
+   * diagnostics). The subscribe path should `await ready()` instead.
+   */
+  isReady(): boolean {
+    return this.warmSettled;
   }
 
   /**
    * Load all active UIR entries and their mappings into in-memory maps.
    */
   async warmMaps(): Promise<void> {
-    // Load all active universal instruments
-    const uirRows = await this.uirRepo.find({
-      where: { is_active: true },
-    });
+    this.logger.log('Starting instrument registry warm-up...');
+    const startTime = Date.now();
 
+    // Helper to yield control back to Event Loop
+    const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+    // Load all active universal instruments using raw query for performance
+    const uirRows = await this.uirRepo.query(`
+      SELECT id, canonical_symbol, exchange, isin, underlying, instrument_type, expiry 
+      FROM universal_instruments 
+      WHERE is_active = true
+    `);
+
+    this.logger.log(`Fetched ${uirRows.length} active universal instruments in ${Date.now() - startTime}ms. Processing...`);
+
+    let count = 0;
     for (const row of uirRows) {
-      const id = Number(row.id); // bigint comes as string from TypeORM
+      const id = Number(row.id); // bigint comes as string from TypeORM raw query
       this.uirIdToCanonical.set(id, row.canonical_symbol);
       this.canonicalToUirId.set(row.canonical_symbol, id);
       this.uirIdToExchange.set(id, row.exchange);
@@ -100,7 +149,11 @@ export class InstrumentRegistryService implements OnModuleInit {
       // Build underlying → entries map for flex symbol resolution ("RELIANCE" → [...])
       if (row.underlying) {
         const underlyingKey = row.underlying.toUpperCase();
-        const existing = this.underlyingToEntries.get(underlyingKey) ?? [];
+        let existing = this.underlyingToEntries.get(underlyingKey);
+        if (!existing) {
+          existing = [];
+          this.underlyingToEntries.set(underlyingKey, existing);
+        }
         existing.push({
           uirId: id,
           exchange: row.exchange,
@@ -108,32 +161,36 @@ export class InstrumentRegistryService implements OnModuleInit {
           canonical: row.canonical_symbol,
           expiry: row.expiry ?? null,
         });
-        this.underlyingToEntries.set(underlyingKey, existing);
+      }
+
+      // Yield every 5000 records to prevent freezing the Event Loop
+      if (++count % 5000 === 0) {
+        await yieldToEventLoop();
       }
     }
 
-    // Load all mappings that have a UIR ID assigned
-    const mappings = await this.mappingRepo.find({
-      where: { uir_id: Not(IsNull()) },
-    });
+    const mappingStartTime = Date.now();
+    // Load all mappings that have a UIR ID assigned using raw query
+    const mappings = await this.mappingRepo.query(`
+      SELECT uir_id, provider, provider_token, instrument_token 
+      FROM instrument_mappings 
+      WHERE uir_id IS NOT NULL
+    `);
 
+    this.logger.log(`Fetched ${mappings.length} instrument mappings in ${Date.now() - mappingStartTime}ms. Processing...`);
+
+    count = 0;
     for (const mapping of mappings) {
       const uirId = Number(mapping.uir_id); // bigint may come as string
       const key = `${mapping.provider}:${mapping.provider_token}`;
 
       this.providerTokenToUirId.set(key, uirId);
 
-      // Vortex secondary index: also register by numeric token so callers can resolve with just
-      // the number (e.g. "vortex:213123" in addition to "vortex:NSE_EQ-213123").
-      // Vortex tokens are globally unique (PrimaryColumn on vortex_instruments.token).
+      // Vortex secondary index
       if (mapping.provider === 'vortex' && mapping.instrument_token != null) {
         const numericKey = `vortex:${mapping.instrument_token}`;
         const existing = this.providerTokenToUirId.get(numericKey);
-        if (existing !== undefined && existing !== uirId) {
-          this.logger.warn(
-            `Vortex numeric token ${mapping.instrument_token} collision: existing uirId=${existing} vs ${uirId}; keeping existing`,
-          );
-        } else {
+        if (existing === undefined) {
           this.providerTokenToUirId.set(numericKey, uirId);
         }
       }
@@ -145,10 +202,15 @@ export class InstrumentRegistryService implements OnModuleInit {
         this.uirIdToProviderTokens.set(uirId, providerMap);
       }
       providerMap.set(mapping.provider, mapping.provider_token);
+
+      // Yield every 5000 records
+      if (++count % 5000 === 0) {
+        await yieldToEventLoop();
+      }
     }
 
     this.logger.log(
-      `Instrument registry warmed: ${uirRows.length} instruments, ${mappings.length} mappings`,
+      `Instrument registry warmed: ${uirRows.length} instruments, ${mappings.length} mappings in ${Date.now() - startTime}ms`,
     );
   }
 

@@ -332,6 +332,12 @@ export class NativeWsService implements OnModuleDestroy {
       return;
     }
 
+    // Readiness gate: wait for the instrument-registry background warm-up to complete
+    // before any resolve* call. Native WS clients that connect during the boot window
+    // would otherwise hit empty maps and get `not_found` for every symbol. After the
+    // first call post-warm-up, this awaits a settled promise (one microtask).
+    await this.instrumentRegistry.ready();
+
     const {
       instruments: rawInstruments = [],
       symbols = [],
@@ -666,6 +672,11 @@ export class NativeWsService implements OnModuleDestroy {
       );
       return;
     }
+
+    // Readiness gate — see handleSubscribe for rationale. Unsubscribe also resolves
+    // symbols/tokens against the registry; awaiting ready() prevents spurious
+    // "not_found" during the boot window.
+    await this.instrumentRegistry.ready();
 
     const { instruments } = data || {};
     if (!Array.isArray(instruments) || instruments.length === 0) {

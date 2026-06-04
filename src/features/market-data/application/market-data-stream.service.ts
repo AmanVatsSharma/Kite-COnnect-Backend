@@ -4,7 +4,7 @@
  * @description Orchestrates provider ticker streaming, subscription batching, LTP cache, and Redis stream status.
  * @author BharatERP
  * @created 2025-03-23
- * @updated 2026-04-28
+ * @updated 2026-06-04
  */
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -611,7 +611,37 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           }
         }
         try {
-          this.stockService.enqueuePersistMarketData(uirId, effectiveTick);
+          // Resolve the active provider's Kite/numeric token for the UIR. The
+          // `market_data.instrument_token` FK targets `instruments.instrument_token`
+          // (a Kite/numeric token), not the UIR id. Persisting with the UIR id
+          // would violate FK_0dfb6e8afb55f4b154f22fd66c2 on every tick.
+          const providerToken = this.instrumentRegistry.getProviderToken(
+            uirId,
+            providerName,
+          );
+          if (providerToken === undefined || providerToken === null) {
+            // No active-provider mapping for this UIR (rare; e.g. UIR has no Kite
+            // mapping). Skip persistence rather than fail the FK constraint.
+            this.logger.debug(
+              `[StockService] Skipping market_data persist for UIR ${uirId}: no ${providerName} token mapping in registry`,
+            );
+          } else {
+            const numericToken = Number(providerToken);
+            if (
+              !Number.isFinite(numericToken) ||
+              Number.isNaN(numericToken) ||
+              numericToken <= 0
+            ) {
+              this.logger.debug(
+                `[StockService] Skipping market_data persist for UIR ${uirId}: provider token "${providerToken}" is not a valid positive number`,
+              );
+            } else {
+              this.stockService.enqueuePersistMarketData(
+                numericToken,
+                effectiveTick,
+              );
+            }
+          }
         } catch (persistError: any) {
           try {
             this.metrics.marketDataStreamPersistErrors.labels(providerName).inc();
