@@ -698,6 +698,10 @@ export class MarketDataGateway
           (client.data as any).apiKeyRecord?.provider ?? null,
         );
 
+      // Provider for pair resolution (fallback to global or locked)
+      const providerForPair =
+        lockedProvider ?? this.streamService.activeProviderName;
+
       const consumePrefixed = (items: Array<unknown>): unknown[] => {
         const remaining: unknown[] = [];
         for (const item of items) {
@@ -903,6 +907,60 @@ export class MarketDataGateway
             // downstream explicit-pair parser would only silently drop it, so we
             // mark it consumed and skip it.
             continue;
+          }
+
+          // Exchange-token pair shape: `<EXCHANGE>-<TOKEN>` (e.g. "NSE_EQ-12345")
+          // Try mapping NSE_FO→NFO, NSE_EQ→NSE_EQ, etc. Vortex stores with exchange prefix,
+          // kite stores bare number. Try all permutations for best match.
+          const pairMatch = trimmed.match(/^([A-Z_]+)-(\d+)$/i);
+          if (pairMatch) {
+            const ex = pairMatch[1].toUpperCase();
+            const tok = pairMatch[2];
+            const numTok = Number(tok);
+            if (Number.isFinite(numTok)) {
+              // Try vortex-style key: `vortex:NSE_FO-12345` in provider storage
+              let uirId =
+                this.instrumentRegistry.resolveProviderToken('vortex', `${ex}-${tok}`) ??
+                this.instrumentRegistry.resolveProviderToken('vortex', tok) ??
+                // Also try with lowercase exchange
+                this.instrumentRegistry.resolveProviderToken(
+                  'vortex',
+                  `${ex.toLowerCase()}-${tok}`,
+                );
+              // Fall back to kite token
+              if (uirId == null) {
+                uirId = this.instrumentRegistry.resolveProviderToken(
+                  'kite',
+                  numTok,
+                );
+              }
+              if (uirId == null) {
+                uirId = this.instrumentRegistry.resolveProviderToken(
+                  'massive',
+                  tok,
+                );
+              }
+              if (uirId == null) {
+                uirId = this.instrumentRegistry.resolveProviderToken(
+                  'binance',
+                  tok,
+                );
+              }
+              if (uirId != null) {
+                directUirIds.push(uirId);
+                forcedConfirm.push({
+                  symbol: trimmed,
+                  uirId,
+                  provider: internalToClientProviderName(providerForPair),
+                  canonical:
+                    this.instrumentRegistry.getCanonicalSymbol(uirId) ??
+                    trimmed,
+                });
+                consumedStringSet.add(trimmed);
+                consumedStringSet.add(trimmed.toUpperCase());
+                continue;
+              }
+            }
           }
 
           // Unrecognized string shape — let the downstream parser have a look.
