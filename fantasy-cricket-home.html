@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>11DREAMER - Fantasy Cricket</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-primary: #08080d;
+      --bg-secondary: #12121a;
+      --bg-card: #16161e;
+      --bg-elevated: #1c1c26;
+      --red-primary: #e53644;
+      --red-dark: #bf2c37;
+      --red-glow: rgba(229, 54, 68, 0.3);
+      --green-primary: #22c55e;
+      --green-dark: #16a34a;
+      --gold-primary: #f5c518;
+      --text-primary: #ffffff;
+      --text-secondary: #9a9aaa;
+      --text-muted: #5c5c6a;
+      --divider: #1e1e28;
+      --border: #2a2a36;
+    }
+
+    body {
+      font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: 70px;
+    }
+
+    /* Status Bar */
+    .status-bar {
+      padding: 8px 16px 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-time { font-weight: 600; }
+    .status-icons { display: flex; gap: 6px; align-items: center; }
+    .status-icons svg { width: 14px; height: 14px; fill: var(--text-primary); }
+
+    /* Header */
+    .header {
+      padding: 4px 16px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo-icon {
+      width: 28px;
+      height: 32px;
+      background: linear-gradient(180deg, var(--red-primary) 0%, var(--red-dark) 100%);
+      border-radius: 4px 4px 8px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 12px;
+    }
+    .logo-text {
+      font-size: 14px;
+      font-weight: 800;
+      font-style: italic;
+      letter-spacing: -0.5px;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .header-icon {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-card);
+      border-radius: 10px;
+      position: relative;
+    }
+    .header-icon svg { width: 18px; height: 18px; fill: var(--text-secondary); }
+    .wallet-text {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .notif-dot {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 7px;
+      height: 7px;
+      background: var(--red-primary);
+      border-radius: 50%;
+      border: 1.5px solid var(--bg-primary);
+    }
+
+    /* Sports Nav */
+    .sports-nav {
+      padding: 0 16px 16px;
+      display: flex;
+      gap: 8px;
+    }
+    .sport-tab {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: var(--bg-card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .sport-tab.active {
+      background: rgba(229, 54, 68, 0.1);
+      border-color: var(--red-primary);
+    }
+    .sport-tab.disabled {
+      opacity: 0.5;
+    }
+    .sport-icon {
+      font-size: 18px;
+    }
+    .sport-name {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .sport-tab.active .sport-name { color: var(--red-primary); }
+    .sport-status {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .sport-indicator {
+      width: 16px;
+      height: 3px;
+      background: var(--red-primary);
+      border-radius: 2px;
+      margin-top: 4px;
+    }
+
+    /* Hero Banner */
+    .hero-banner {
+      margin: 0 16px 20px;
+      background: linear-gradient(135deg, #1a0a0d 0%, #2a0a10 50%, #1a0508 100%);
+      border-radius: 16px;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      min-height: 180px;
+    }
+    .hero-bg {
+      position: absolute;
+      right: -20px;
+      bottom: -10px;
+      width: 160px;
+      height: 200px;
+      background: radial-gradient(ellipse at center, rgba(229, 54, 68, 0.3) 0%, transparent 70%);
+    }
+    .hero-player {
+      position: absolute;
+      right: 10px;
+      bottom: 0;
+      width: 120px;
+      height: 160px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      font-size: 80px;
+      opacity: 0.8;
+    }
+    .hero-content {
+      position: relative;
+      z-index: 1;
+    }
+    .hero-title {
+      font-size: 26px;
+      font-weight: 900;
+      line-height: 1.1;
+      margin-bottom: 4px;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+    }
+    .hero-title span { color: var(--red-primary); }
+    .hero-subtitle {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      font-weight: 500;
+    }
+    .hero-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(180deg, var(--red-primary) 0%, var(--red-dark) 100%);
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      color: white;
+      box-shadow: 0 4px 15px var(--red-glow);
+    }
+    .hero-dots {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 16px;
+    }
+    .hero-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .hero-dot.active {
+      background: var(--red-primary);
+      width: 20px;
+      border-radius: 4px;
+    }
+
+    /* Section Header */
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 16px 12px;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .view-all {
+      font-size: 13px;
+      color: var(--red-primary);
+      font-weight: 600;
+    }
+
+    /* Match Cards */
+    .matches-scroll {
+      padding: 0 16px;
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .matches-scroll::-webkit-scrollbar { display: none; }
+
+    .match-card {
+      flex-shrink: 0;
+      width: 280px;
+      background: var(--bg-card);
+      border-radius: 14px;
+      padding: 14px;
+      border: 1px solid var(--border);
+    }
+    .match-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .match-series {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .match-time {
+      font-size: 11px;
+      color: var(--red-primary);
+      font-weight: 600;
+    }
+    .teams-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .team {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+    .team-logo {
+      width: 44px;
+      height: 44px;
+      background: var(--bg-elevated);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+    .team-name {
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .vs {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .mega-contest {
+      margin-top: 12px;
+      background: linear-gradient(135deg, rgba(229, 54, 68, 0.15) 0%, rgba(229, 54, 68, 0.05) 100%);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid rgba(229, 54, 68, 0.2);
+    }
+    .contest-info {}
+    .mega-label {
+      display: inline-block;
+      background: var(--red-primary);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .prize-pool {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--gold-primary);
+    }
+    .join-btn {
+      background: linear-gradient(180deg, var(--green-primary) 0%, var(--green-dark) 100%);
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 3px 10px rgba(34, 197, 94, 0.3);
+    }
+    .join-price {
+      font-size: 14px;
+    }
+
+    /* Contest Badges */
+    .contests-row {
+      padding: 0 16px;
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .contests-row::-webkit-scrollbar { display: none; }
+
+    .contest-badge {
+      flex-shrink: 0;
+      width: 100px;
+      padding: 14px 12px;
+      border-radius: 12px;
+      text-align: center;
+      border: 1px solid var(--border);
+    }
+    .contest-badge.gold {
+      background: linear-gradient(180deg, #3d3000 0%, #2a2200 100%);
+      border-color: rgba(245, 197, 24, 0.3);
+    }
+    .contest-badge.purple {
+      background: linear-gradient(180deg, #2d1f4a 0%, #1e1433 100%);
+      border-color: rgba(139, 92, 246, 0.3);
+    }
+    .contest-badge.blue {
+      background: linear-gradient(180deg, #1a2d4a 0%, #122033 100%);
+      border-color: rgba(59, 130, 246, 0.3);
+    }
+    .contest-badge.orange {
+      background: linear-gradient(180deg, #4a2a1a 0%, #331e14 100%);
+      border-color: rgba(249, 115, 22, 0.3);
+    }
+    .badge-icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+    .badge-type {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .badge-prize {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--gold-primary);
+      margin-bottom: 4px;
+    }
+    .badge-entry {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    /* Why Section */
+    .why-section {
+      padding: 24px 16px;
+      margin-top: 16px;
+    }
+    .why-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    .why-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px;
+      background: var(--bg-card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+    .why-icon {
+      width: 44px;
+      height: 44px;
+      background: rgba(229, 54, 68, 0.1);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+    .why-text {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    /* Bottom Nav */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--divider);
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 0;
+      padding-bottom: max(8px, env(safe-area-inset-bottom));
+      z-index: 100;
+    }
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .nav-icon {
+      font-size: 22px;
+    }
+    .nav-label {
+      font-size: 9px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .nav-item.active { position: relative; }
+    .nav-item.active::before {
+      content: '';
+      position: absolute;
+      top: -6px;
+      width: 44px;
+      height: 28px;
+      background: var(--red-primary);
+      border-radius: 18px;
+      z-index: -1;
+    }
+    .nav-item.active .nav-icon { color: var(--red-primary); }
+    .nav-item.active .nav-label { color: var(--red-primary); }
+  </style>
+</head>
+<body>
+
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <span class="status-time">9:41</span>
+    <div class="status-icons">
+      <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M1 9l2 2c0-3.87 3.13-7 7-7 3.87 0 7 3.13 7 7l2-2C15.93 2.07 8.08 2.07 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">11</div>
+      <span class="logo-text">DREAMER</span>
+    </div>
+    <div class="header-actions">
+      <div class="header-icon">
+        <svg viewBox="0 0 24 24"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+        <span class="wallet-text">₹125.50</span>
+      </div>
+      <div class="header-icon">
+        <div class="notif-dot"></div>
+        <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/></svg>
+      </div>
+      <div class="header-icon" style="background: linear-gradient(135deg, var(--red-primary) 0%, var(--red-dark) 100%);">
+        <svg viewBox="0 0 24 24" fill="white"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+      </div>
+    </div>
+  </header>
+
+  <!-- Sports Navigation -->
+  <nav class="sports-nav">
+    <div class="sport-tab active">
+      <span class="sport-icon">🏏</span>
+      <div>
+        <div class="sport-name">Cricket</div>
+        <div class="sport-indicator"></div>
+      </div>
+    </div>
+    <div class="sport-tab disabled">
+      <span class="sport-icon">⚽</span>
+      <div>
+        <div class="sport-name">Football</div>
+        <div class="sport-status">Coming Soon</div>
+      </div>
+    </div>
+    <div class="sport-tab disabled">
+      <span class="sport-icon">🏀</span>
+      <div>
+        <div class="sport-name">Basketball</div>
+        <div class="sport-status">Coming Soon</div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Banner -->
+  <section class="hero-banner">
+    <div class="hero-bg"></div>
+    <div class="hero-player">🏏</div>
+    <div class="hero-content">
+      <div class="hero-title">PLAY <span>BOLD.</span><br>WIN MORE.</div>
+      <div class="hero-subtitle">MAKE YOUR TEAM. BE A CHAMPION.</div>
+      <div class="hero-cta">▶ PLAY NOW</div>
+    </div>
+    <div class="hero-dots">
+      <div class="hero-dot active"></div>
+      <div class="hero-dot"></div>
+      <div class="hero-dot"></div>
+      <div class="hero-dot"></div>
+      <div class="hero-dot"></div>
+    </div>
+  </section>
+
+  <!-- Upcoming Matches -->
+  <div class="section-header">
+    <span class="section-title">Upcoming Matches</span>
+    <span class="view-all">View All ›</span>
+  </div>
+  <div class="matches-scroll">
+    <div class="match-card">
+      <div class="match-header">
+        <span class="match-series">Indian T20 League</span>
+        <span class="match-time">⏰ 2h 15m • 8:00 PM</span>
+      </div>
+      <div class="teams-row">
+        <div class="team">
+          <div class="team-logo">🦁</div>
+          <span class="team-name">CHE</span>
+        </div>
+        <span class="vs">VS</span>
+        <div class="team">
+          <div class="team-logo">🗡️</div>
+          <span class="team-name">KOL</span>
+        </div>
+      </div>
+      <div class="mega-contest">
+        <div class="contest-info">
+          <div class="mega-label">MEGA CONTEST</div>
+          <div class="prize-pool">₹50 Crores</div>
+        </div>
+        <div class="join-btn">
+          <span class="join-price">JOIN ₹49</span>
+        </div>
+      </div>
+    </div>
+    <div class="match-card">
+      <div class="match-header">
+        <span class="match-series">Indian T20 League</span>
+        <span class="match-time">⏰ 4h 45m • 10:30 PM</span>
+      </div>
+      <div class="teams-row">
+        <div class="team">
+          <div class="team-logo">🐦</div>
+          <span class="team-name">HYD</span>
+        </div>
+        <span class="vs">VS</span>
+        <div class="team">
+          <div class="team-logo">🛡️</div>
+          <span class="team-name">MUM</span>
+        </div>
+      </div>
+      <div class="mega-contest">
+        <div class="contest-info">
+          <div class="mega-label">MEGA CONTEST</div>
+          <div class="prize-pool">₹25 Crores</div>
+        </div>
+        <div class="join-btn">
+          <span class="join-price">JOIN ₹29</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recommended Contests -->
+  <div class="section-header" style="margin-top: 20px;">
+    <span class="section-title">Recommended Contests</span>
+    <span class="view-all">View All ›</span>
+  </div>
+  <div class="contests-row">
+    <div class="contest-badge gold">
+      <div class="badge-icon">👑</div>
+      <div class="badge-type">Mega Contest</div>
+      <div class="badge-prize">₹50 Crores</div>
+      <div class="badge-entry">Entry ₹49</div>
+    </div>
+    <div class="contest-badge purple">
+      <div class="badge-icon">⚔️</div>
+      <div class="badge-type">Head to Head</div>
+      <div class="badge-prize">₹5 Lakhs</div>
+      <div class="badge-entry">Entry ₹25</div>
+    </div>
+    <div class="contest-badge blue">
+      <div class="badge-icon">🎖️</div>
+      <div class="badge-type">Mini Grand</div>
+      <div class="badge-prize">₹2 Lakhs</div>
+      <div class="badge-entry">Entry ₹15</div>
+    </div>
+    <div class="contest-badge orange">
+      <div class="badge-icon">🔥</div>
+      <div class="badge-type">Hot Contest</div>
+      <div class="badge-prize">₹1 Lakh</div>
+      <div class="badge-entry">Entry ₹9</div>
+    </div>
+  </div>
+
+  <!-- Why Section -->
+  <section class="why-section">
+    <div class="section-header">
+      <span class="section-title">Why 11Dreamer?</span>
+    </div>
+    <div class="why-grid">
+      <div class="why-item">
+        <div class="why-icon">🛡️</div>
+        <div class="why-text">100% Safe & Secure</div>
+      </div>
+      <div class="why-item">
+        <div class="why-icon">🏆</div>
+        <div class="why-text">Big Winnings Every Day</div>
+      </div>
+      <div class="why-item">
+        <div class="why-icon">👥</div>
+        <div class="why-text">10 Crore+ Users</div>
+      </div>
+      <div class="why-item">
+        <div class="why-icon">🎧</div>
+        <div class="why-text">24X7 Support</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <div class="nav-item active">
+      <span class="nav-icon">🏠</span>
+      <span class="nav-label">Home</span>
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">🏆</span>
+      <span class="nav-label">My Contests</span>
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">📋</span>
+      <span class="nav-label">My Teams</span>
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">💰</span>
+      <span class="nav-label">Wallet</span>
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">⋮</span>
+      <span class="nav-label">More</span>
+    </div>
+  </nav>
+
+</body>
+</html>

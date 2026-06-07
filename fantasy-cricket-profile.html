@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>11DREAMER Fantasy Cricket</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-primary: #08080d;
+      --bg-secondary: #13131a;
+      --bg-card: #18181f;
+      --bg-card-elevated: #1c1c24;
+      --red-primary: #e53644;
+      --red-dark: #bf2c37;
+      --red-glow: rgba(229, 54, 68, 0.25);
+      --gold-primary: #f5c518;
+      --gold-secondary: #d4a417;
+      --green-success: #1db954;
+      --text-primary: #ffffff;
+      --text-secondary: #8a8a96;
+      --text-muted: #5c5c66;
+      --border-color: #2a2a32;
+      --divider: #22222b;
+    }
+
+    body {
+      font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ============ HEADER ============ */
+    .header {
+      background: var(--bg-secondary);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 1px solid var(--divider);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .menu-icon {
+      width: 22px;
+      height: 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .menu-icon span {
+      display: block;
+      height: 2px;
+      background: var(--text-primary);
+      border-radius: 2px;
+    }
+    .menu-icon span:nth-child(2) { width: 15px; }
+    .menu-icon span:nth-child(3) { width: 10px; }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo-icon {
+      width: 30px;
+      height: 34px;
+      background: linear-gradient(180deg, var(--red-primary) 0%, var(--red-dark) 100%);
+      border-radius: 4px 4px 8px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 13px;
+      color: white;
+      box-shadow: 0 2px 8px var(--red-glow);
+    }
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+    }
+    .logo-text .main {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .logo-text .sub {
+      font-size: 8px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      letter-spacing: 0.5px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .wallet-btn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--bg-card);
+      padding: 7px 12px;
+      border-radius: 18px;
+      border: 1px solid var(--border-color);
+    }
+    .wallet-icon {
+      width: 16px;
+      height: 16px;
+      background: var(--gold-primary);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .wallet-icon::after {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: var(--bg-primary);
+      border-radius: 50%;
+    }
+    .wallet-amount {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .notification-btn {
+      position: relative;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-card);
+      border-radius: 50%;
+      border: 1px solid var(--border-color);
+    }
+    .notification-btn svg { width: 18px; height: 18px; fill: var(--text-secondary); }
+    .notification-dot {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      width: 7px;
+      height: 7px;
+      background: var(--red-primary);
+      border-radius: 50%;
+      border: 1.5px solid var(--bg-secondary);
+    }
+
+    /* ============ PROFILE CARD ============ */
+    .profile-section { padding: 12px 16px 0; }
+
+    .profile-card {
+      background: var(--bg-card);
+      border-radius: 14px;
+      padding: 14px;
+      border: 1px solid var(--border-color);
+    }
+
+    .profile-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .avatar-wrapper {
+      position: relative;
+      flex-shrink: 0;
+    }
+    .profile-avatar {
+      width: 52px;
+      height: 52px;
+      background: linear-gradient(135deg, var(--red-primary) 0%, var(--red-dark) 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 17px;
+    }
+    .avatar-edit {
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      width: 18px;
+      height: 18px;
+      background: var(--bg-secondary);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid var(--bg-card);
+    }
+    .avatar-edit svg { width: 10px; height: 10px; fill: var(--text-secondary); }
+
+    .profile-info { flex: 1; min-width: 0; }
+    .profile-name-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+    .profile-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .edit-btn svg { width: 12px; height: 12px; fill: var(--text-muted); }
+    .profile-tagline {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      font-weight: 400;
+    }
+    .club-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(229, 54, 68, 0.12);
+      padding: 4px 10px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--red-primary);
+      border: 0.5px solid rgba(229, 54, 68, 0.25);
+    }
+    .club-badge svg { width: 10px; height: 10px; }
+
+    /* Rank Badge - Shield Shape */
+    .rank-badge {
+      background: linear-gradient(180deg, var(--red-primary) 0%, var(--red-dark) 100%);
+      border-radius: 10px 10px 14px 14px;
+      padding: 10px 12px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 72px;
+      position: relative;
+      box-shadow: 0 4px 12px rgba(229, 54, 68, 0.3);
+    }
+    .rank-badge::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 20px;
+      height: 6px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 0 0 10px 10px;
+    }
+    .rank-label {
+      font-size: 8px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.85);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 2px;
+    }
+    .rank-number {
+      font-size: 22px;
+      font-weight: 900;
+      color: white;
+      line-height: 1;
+    }
+    .rank-percent {
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--gold-primary);
+      margin-top: 1px;
+    }
+
+    /* Stats Row */
+    .profile-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--divider);
+    }
+    .stat-item {
+      text-align: center;
+      padding: 4px 0;
+    }
+    .stat-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--gold-primary);
+      margin-bottom: 2px;
+    }
+    .stat-label {
+      font-size: 9px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      font-weight: 500;
+    }
+
+    /* ============ BALANCE SECTION ============ */
+    .balance-section { padding: 12px 16px; }
+
+    .balance-card {
+      background: var(--bg-card);
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid var(--border-color);
+    }
+    .balance-left {}
+    .balance-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 2px;
+      font-weight: 500;
+    }
+    .balance-amount {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--gold-primary);
+      display: flex;
+      align-items: baseline;
+      gap: 2px;
+    }
+    .balance-amount .rupee {
+      font-size: 18px;
+      font-weight: 700;
+      margin-right: 1px;
+    }
+    .add-cash-link {
+      font-size: 11px;
+      color: var(--red-primary);
+      margin-top: 3px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .add-cash-link::before { content: '+ '; font-weight: 700; }
+
+    .balance-actions { display: flex; gap: 8px; }
+    .btn {
+      padding: 11px 18px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      letter-spacing: 0.3px;
+    }
+    .btn-primary {
+      background: linear-gradient(180deg, var(--red-primary) 0%, var(--red-dark) 100%);
+      color: white;
+      box-shadow: 0 3px 10px rgba(229, 54, 68, 0.25);
+    }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+    }
+
+    /* ============ QUICK ACTIONS ============ */
+    .quick-actions { padding: 12px 16px; }
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      letter-spacing: 0.2px;
+    }
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+    .action-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 4px 8px;
+      background: var(--bg-card);
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+      cursor: pointer;
+    }
+    .action-icon {
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      font-size: 18px;
+    }
+    .action-icon.gift { background: linear-gradient(135deg, #e53644 0%, #bf2c37 100%); }
+    .action-icon.ticket { background: linear-gradient(135deg, #3b7dd8 0%, #2563b0 100%); }
+    .action-icon.doc { background: linear-gradient(135deg, #10b468 0%, #0a8a4f 100%); }
+    .action-icon.group { background: linear-gradient(135deg, #9b59c9 0%, #7c3aed 100%); }
+    .action-icon.support { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+    .action-label {
+      font-size: 9px;
+      color: var(--text-secondary);
+      text-align: center;
+      line-height: 1.3;
+      font-weight: 500;
+    }
+
+    /* ============ SETTINGS LIST ============ */
+    .settings-section { padding: 12px 16px 110px; }
+    .settings-list {
+      background: var(--bg-card);
+      border-radius: 14px;
+      border: 1px solid var(--border-color);
+      overflow: hidden;
+    }
+    .settings-item {
+      display: flex;
+      align-items: center;
+      padding: 14px 16px;
+      gap: 12px;
+      border-bottom: 1px solid var(--divider);
+      cursor: pointer;
+    }
+    .settings-item:last-child { border-bottom: none; }
+    .settings-icon {
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-card-elevated);
+      border-radius: 10px;
+      font-size: 18px;
+    }
+    .settings-content { flex: 1; }
+    .settings-title {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 1px;
+    }
+    .settings-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .settings-status { display: flex; align-items: center; }
+    .verified-badge {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(29, 185, 84, 0.12);
+      color: var(--green-success);
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .verified-badge svg { width: 12px; height: 12px; fill: var(--green-success); }
+    .chevron {
+      color: var(--text-muted);
+      font-size: 20px;
+      font-weight: 300;
+    }
+
+    /* ============ BOTTOM NAV ============ */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--divider);
+      display: flex;
+      justify-content: space-around;
+      padding: 6px 0;
+      padding-bottom: max(6px, env(safe-area-inset-bottom));
+      z-index: 100;
+    }
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 6px 16px;
+      cursor: pointer;
+      position: relative;
+    }
+    .nav-icon {
+      font-size: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .nav-label {
+      font-size: 9px;
+      color: var(--text-muted);
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    .nav-item.active .nav-label { color: var(--red-primary); }
+    .nav-item.active {
+      position: relative;
+      padding: 6px 12px;
+    }
+    .nav-item.active::before {
+      content: '';
+      position: absolute;
+      top: -4px;
+      width: 48px;
+      height: 32px;
+      background: var(--red-primary);
+      border-radius: 20px;
+      z-index: -1;
+    }
+    .nav-item.active .nav-icon { transform: scale(1.1); }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="menu-icon">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="logo">
+        <div class="logo-icon">11</div>
+        <div class="logo-text">
+          <span class="main">DREAMER</span>
+          <span class="sub">FANTASY CRICKET</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="wallet-btn">
+        <div class="wallet-icon"></div>
+        <span class="wallet-amount">2,500</span>
+      </div>
+      <div class="notification-btn">
+        <div class="notification-dot"></div>
+        <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/></svg>
+      </div>
+    </div>
+  </header>
+
+  <!-- Profile Card -->
+  <section class="profile-section">
+    <div class="profile-card">
+      <div class="profile-header">
+        <div class="avatar-wrapper">
+          <div class="profile-avatar">11</div>
+          <div class="avatar-edit">
+            <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+          </div>
+        </div>
+        <div class="profile-info">
+          <div class="profile-name-row">
+            <span class="profile-name">Aarav Sharma</span>
+            <span class="edit-btn">
+              <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            </span>
+          </div>
+          <div class="profile-tagline">Dream Big. Play Bold. Win More.</div>
+          <div class="club-badge">
+            <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+            11D Club Member Since Feb 2024
+          </div>
+        </div>
+        <div class="rank-badge">
+          <span class="rank-label">Rank</span>
+          <span class="rank-number">1256</span>
+          <span class="rank-percent">Top 12%</span>
+        </div>
+      </div>
+      <div class="profile-stats">
+        <div class="stat-item">
+          <div class="stat-value">₹2,500</div>
+          <div class="stat-label">Total Balance</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">23</div>
+          <div class="stat-label">Contests Won</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">₹12,450</div>
+          <div class="stat-label">Total Winnings</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value">24,137</div>
+          <div class="stat-label">Total Matches</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Balance Section -->
+  <section class="balance-section">
+    <div class="balance-card">
+      <div class="balance-left">
+        <div class="balance-label">My Balance</div>
+        <div class="balance-amount">
+          <span class="rupee">₹</span>2,500
+        </div>
+        <div class="add-cash-link">Add Cash</div>
+      </div>
+      <div class="balance-actions">
+        <button class="btn btn-primary">ADD CASH</button>
+        <button class="btn btn-secondary">WITHDRAW</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Actions -->
+  <section class="quick-actions">
+    <div class="section-title">Quick Actions</div>
+    <div class="actions-grid">
+      <div class="action-item">
+        <div class="action-icon gift">🎁</div>
+        <div class="action-label">Refer &<br>Earn</div>
+      </div>
+      <div class="action-item">
+        <div class="action-icon ticket">🎫</div>
+        <div class="action-label">My<br>Contests</div>
+      </div>
+      <div class="action-item">
+        <div class="action-icon doc">📄</div>
+        <div class="action-label">My<br>Teams</div>
+      </div>
+      <div class="action-item">
+        <div class="action-icon group">👥</div>
+        <div class="action-label">Private<br>Contest</div>
+      </div>
+      <div class="action-item">
+        <div class="action-icon support">🎧</div>
+        <div class="action-label">Help &<br>Support</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Settings Menu -->
+  <section class="settings-section">
+    <div class="section-title">Account</div>
+    <div class="settings-list">
+      <div class="settings-item">
+        <div class="settings-icon">🔒</div>
+        <div class="settings-content">
+          <div class="settings-title">KYC Verification</div>
+          <div class="settings-desc">Verify your identity to unlock all features</div>
+        </div>
+        <div class="settings-status">
+          <div class="verified-badge">
+            <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+            Verified
+          </div>
+        </div>
+      </div>
+      <div class="settings-item">
+        <div class="settings-icon">👤</div>
+        <div class="settings-content">
+          <div class="settings-title">Personal Information</div>
+          <div class="settings-desc">Manage your profile details</div>
+        </div>
+        <span class="chevron">›</span>
+      </div>
+      <div class="settings-item">
+        <div class="settings-icon">💳</div>
+        <div class="settings-content">
+          <div class="settings-title">Transaction History</div>
+          <div class="settings-desc">View all your deposits and withdrawals</div>
+        </div>
+        <span class="chevron">›</span>
+      </div>
+      <div class="settings-item">
+        <div class="settings-icon">📊</div>
+        <div class="settings-content">
+          <div class="settings-title">My Performance</div>
+          <div class="settings-desc">Check your stats and analytics</div>
+        </div>
+        <span class="chevron">›</span>
+      </div>
+      <div class="settings-item">
+        <div class="settings-icon">⚙️</div>
+        <div class="settings-content">
+          <div class="settings-title">Settings</div>
+          <div class="settings-desc">App preferences and configuration</div>
+        </div>
+        <span class="chevron">›</span>
+      </div>
+      <div class="settings-item">
+        <div class="settings-icon">🛡️</div>
+        <div class="settings-content">
+          <div class="settings-title">Privacy & Security</div>
+          <div class="settings-desc">Manage your privacy settings</div>
+        </div>
+        <span class="chevron">›</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <div class="nav-item">
+      <span class="nav-icon">🏠</span>
+      <span class="nav-label">HOME</span>
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">📡</span>
+      <span class="nav-label">WATCH LIVE</span>
+    </div>
+    <div class="nav-item">
+      <span class="nav-icon">👥</span>
+      <span class="nav-label">CLUBS</span>
+    </div>
+    <div class="nav-item active">
+      <span class="nav-icon">👤</span>
+      <span class="nav-label">ACCOUNT</span>
+    </div>
+  </nav>
+
+</body>
+</html>

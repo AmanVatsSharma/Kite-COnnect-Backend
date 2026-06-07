@@ -147,6 +147,7 @@ Polls every 1s for up to `SSE_DEFAULT_TTL_MS` (default 30s). Each frame is keyed
 
 ## Changelog
 
+- **2026-06-05** — **`ltp_only` primary-index fallback.** When the regular Meili probe returns 0 live-priced rows for a query like `NIFTY` (because the top 10 MeiliSearch hits are stale equity/derivatives, not the live NIFTY 50 INDEX), the controller now looks up the curated `PRIMARY_INDEX_UIR` map (NIFTY, NIFTY 50, BANKNIFTY, NIFTY BANK, SENSEX, NIFTY IT, NIFTY AUTO, NIFTY FIN SERVICE / FINNIFTY, NIFTY NEXT 50 / NIFTYNXT50) and hydrates the canonical INDEX UIR via the existing `q:ltp:uid:${id}` Redis cache. Pure in-memory template lookup, no MeiliSearch round-trip, no HTTP call. Same path in `/api/search` and `/api/search/suggest`. No new env, no breaking changes — the non-`ltp_only` path is untouched.
 - **2026-05-01** — **Provider name masking + field projection + admin panel.**
   - Public response now uses brand names (`falcon`/`vayu`/`atlas`/`drift`) for `streamProvider`. Internal token fields (`kiteToken`, `vortexToken`, `vortexExchange`, `massiveToken`, `binanceToken`) are stripped from the default response.
   - `?include=internal` + `x-admin-token` opens up the admin payload (adds `_internalProvider` plus the raw token fields).
