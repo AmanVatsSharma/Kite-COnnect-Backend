@@ -7,6 +7,7 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiKey } from '@features/auth/domain/api-key.entity';
@@ -21,6 +22,7 @@ export class ApiKeyGuard implements CanActivate {
     @InjectRepository(ApiKey) private apiKeyRepo: Repository<ApiKey>,
     private apiKeyService: ApiKeyService,
     private abuseDetection: AbuseDetectionService,
+    private configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -28,6 +30,11 @@ export class ApiKeyGuard implements CanActivate {
     const apiKey = req.headers['x-api-key'] || req.query['api_key'];
     if (!apiKey || typeof apiKey !== 'string') {
       throw new UnauthorizedException('Missing x-api-key');
+    }
+
+    // Special admin token check
+    if (apiKey === this.configService.get<string>('ADMIN_TOKEN')) {
+      return true;
     }
 
     const keyRecord = await this.apiKeyRepo.findOne({

@@ -25,6 +25,7 @@ import { NativeWsService } from '@features/market-data/application/native-ws.ser
 import { VortexInstrumentService } from '@features/stock/application/vortex-instrument.service';
 import { Inject, forwardRef } from '@nestjs/common';
 import { LtpMemoryCacheService } from '@features/market-data/application/ltp-memory-cache.service';
+import { InstrumentRegistryService } from '@features/market-data/application/instrument-registry.service';
 import { MetricsService } from '@infra/observability/metrics.service';
 import { MarketTickEmitOptions } from '@features/market-data/application/tick-shape.util';
 
@@ -52,6 +53,7 @@ export class StockService {
     private nativeWsService: NativeWsService,
     private ltpCache: LtpMemoryCacheService,
     private metrics: MetricsService,
+    private registry: InstrumentRegistryService,
   ) {}
 
   async syncInstruments(
@@ -612,8 +614,29 @@ export class StockService {
     data: any,
   ): Promise<void> {
     try {
+      // 2026-06-05: FK bug fix. The live tick path passes the UIR id (a
+      // Postgres bigserial), but the `market_data.instrument_token` column
+      // has a FK to `instruments.instrument_token` (the Kite/numeric token).
+      // Resolve UIR → Kite token via the in-memory registry before persisting.
+      const kiteTokenStr = this.registry
+        .getProviderTokens(instrumentToken)
+        ?.get('kite');
+      if (!kiteTokenStr) {
+        this.logger.debug(
+          `Skipping market_data DB persist for uir=${instrumentToken}: no kite provider token in registry`,
+        );
+        return;
+      }
+      const kiteToken = Number(kiteTokenStr);
+      if (!Number.isFinite(kiteToken)) {
+        this.logger.debug(
+          `Skipping market_data DB persist for uir=${instrumentToken}: kite token "${kiteTokenStr}" is not numeric`,
+        );
+        return;
+      }
+
       const marketData = this.marketDataRepository.create({
-        instrument_token: instrumentToken,
+        instrument_token: kiteToken,
         last_price: data.last_price || 0,
         open: data.ohlc?.open || 0,
         high: data.ohlc?.high || 0,
@@ -632,16 +655,16 @@ export class StockService {
       try {
         await this.marketDataRepository.save(marketData);
         this.logger.debug(
-          `Stored market data for instrument ${instrumentToken} (async path)`,
+          `Stored market data for uir=${instrumentToken} (kite_token=${kiteToken}) (async path)`,
         );
       } catch (dbError: any) {
         this.logger.warn(
-          `Failed to store market data in DB for token ${instrumentToken}: ${dbError?.message || dbError}`,
+          `Failed to store market data in DB for uir=${instrumentToken} (kite_token=${kiteToken}): ${dbError?.message || dbError}`,
         );
       }
 
       try {
-        await this.redisService.cacheMarketData(instrumentToken, data, 60);
+        await this.redisService.cacheMarketData(kiteToken, data, 60);
       } catch (cacheError: any) {
         this.logger.warn(
           `Failed to cache market data: ${cacheError?.message || cacheError}`,
