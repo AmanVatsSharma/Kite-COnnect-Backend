@@ -259,7 +259,12 @@ export class FalconInstrumentService implements OnModuleInit {
       const payloads: FalconInstrument[] = [];
       for (const row of rows) {
         const token = Number(row.instrument_token);
-        if (!Number.isFinite(token)) continue;
+        // Kite's instruments CSV can include a header/summary row with token=0
+        // or empty tradingsymbol; without this guard those rows reach the DB
+        // and surface as the first row in any unfiltered list query.
+        if (!Number.isFinite(token) || token === 0) continue;
+        const tradingsymbol = String(row.tradingsymbol || '').trim();
+        if (!tradingsymbol) continue;
         const payload = this.falconInstrumentRepo.create({
           instrument_token: token,
           exchange_token: Number(row.exchange_token) || 0,

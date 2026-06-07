@@ -34,7 +34,7 @@ export class MarketData {
   @Column('decimal', { precision: 10, scale: 2 })
   close: number;
 
-  @Column('bigint')
+  @Column('decimal', { precision: 20, scale: 8, default: 0 })
   volume: number;
 
   @Column('decimal', { precision: 10, scale: 2 })
@@ -49,7 +49,7 @@ export class MarketData {
   @Column('decimal', { precision: 10, scale: 2 })
   ohlc_close: number;
 
-  @Column('bigint')
+  @Column('decimal', { precision: 20, scale: 8, default: 0 })
   ohlc_volume: number;
 
   @Column()

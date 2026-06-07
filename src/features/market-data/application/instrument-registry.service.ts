@@ -67,6 +67,11 @@ export class InstrumentRegistryService implements OnModuleInit {
   private uirIdToIsin = new Map<number, string>(); // 42 -> "INE002A01018"
   // Underlying name (uppercase) -> all UIR entries with that underlying, for flex symbol resolution
   private underlyingToEntries = new Map<string, UnderlyingEntry[]>();
+  // Parsed "base" of the Kite-style underlying (e.g. GOLD, NIFTYIT) -> all entries whose
+  // underlying matches <base><YY><MON><FUT|CE|PE>. Used to resolve shorthand like
+  // "MCX:GOLD:FUT" against the production data which stores underlyings as
+  // "GOLD26JUNFUT" / "GOLDM26JUNFUT" / "GOLDGUINEA26JUNFUT" / "NIFTYIT26JUNFUT".
+  private baseUnderlyingToEntries = new Map<string, UnderlyingEntry[]>();
 
   /**
    * In-flight warm-up promise. Resolves when warmMaps() completes (success or failure).
@@ -161,6 +166,27 @@ export class InstrumentRegistryService implements OnModuleInit {
           canonical: row.canonical_symbol,
           expiry: row.expiry ?? null,
         });
+
+        // 2026-06-05: also index by the parsed Kite "base" symbol so callers can
+        // resolve shorthand like "MCX:GOLD:FUT" against production data where
+        // underlyings are stored as "GOLD26JUNFUT" / "GOLDM26JUNFUT" /
+        // "GOLDGUINEA26JUNFUT" / "NIFTYIT26JUNFUT" etc.
+        const baseMatch = underlyingKey.match(/^([A-Z]+)\d{2}[A-Z]{3}(FUT|CE|PE)$/);
+        if (baseMatch) {
+          const baseKey = baseMatch[1];
+          let baseExisting = this.baseUnderlyingToEntries.get(baseKey);
+          if (!baseExisting) {
+            baseExisting = [];
+            this.baseUnderlyingToEntries.set(baseKey, baseExisting);
+          }
+          baseExisting.push({
+            uirId: id,
+            exchange: row.exchange,
+            instrument_type: row.instrument_type,
+            canonical: row.canonical_symbol,
+            expiry: row.expiry ?? null,
+          });
+        }
       }
 
       // Yield every 5000 records to prevent freezing the Event Loop
@@ -467,8 +493,15 @@ export class InstrumentRegistryService implements OnModuleInit {
     const underlyingKey = underlyingRaw.toUpperCase();
     const explicitExchange = parts.length === 3 ? parts[0].toUpperCase() : null;
 
-    const allEntries = this.underlyingToEntries.get(underlyingKey);
-    if (!allEntries || allEntries.length === 0) {
+    // 2026-06-05: merge the exact-key and parsed-Kite-base maps. The base map
+    // catches production data where the underlying is stored as "GOLD26JUNFUT"
+    // (with the Kite date+type code baked in) but the user types the shorthand
+    // "GOLD". Both sets are returned so the downstream type/exchange/sort
+    // pipeline can pick the right contract.
+    const exactEntries = this.underlyingToEntries.get(underlyingKey) ?? [];
+    const baseEntries = this.baseUnderlyingToEntries.get(underlyingKey) ?? [];
+    const allEntries = [...exactEntries, ...baseEntries];
+    if (allEntries.length === 0) {
       return { status: 'not_found', reason: `Underlying not found: ${underlyingRaw}` };
     }
 
@@ -593,6 +626,7 @@ export class InstrumentRegistryService implements OnModuleInit {
     this.uirIdToProviderTokens.clear();
     this.uirIdToExchange.clear();
     this.underlyingToEntries.clear();
+    this.baseUnderlyingToEntries.clear();
     await this.warmMaps();
   }
 
