@@ -921,6 +921,9 @@ export class MarketDataGateway
 
               // 1. Try TOKEN as UIR ID (if canonical exists, it's valid)
               const canonical = this.instrumentRegistry.getCanonicalSymbol(numTok);
+              this.logger.debug(
+                `[PairMatch] input=${trimmed} ex=${ex} tok=${tok} numTok=${numTok} canonical=${canonical || 'null'}`,
+              );
               if (canonical) {
                 uirId = numTok;
               }
