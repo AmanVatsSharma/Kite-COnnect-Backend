@@ -61,6 +61,8 @@ const DEFAULT_CORS_ORIGINS = [
   'https://www.tradebazar.live',
   'https://stocktrade.ltd',
   'https://www.stocktrade.ltd',
+  'https://titanfx.live',
+  'https://www.titanfx.live',
   'https://tradingpro-platform.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',

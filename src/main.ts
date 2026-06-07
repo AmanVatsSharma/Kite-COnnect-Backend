@@ -145,6 +145,8 @@ async function bootstrap() {
       'https://marketdata.vedpragya.com',
       'https://marketpulse360.live',
       'https://www.marketpulse360.live',
+      'https://titanfx.live',
+      'https://www.titanfx.live',
     ];
     const extraOrigins = configService.get('CORS_ORIGIN', '');
     if (extraOrigins && extraOrigins !== '*') {

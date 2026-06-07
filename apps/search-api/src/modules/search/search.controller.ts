@@ -384,9 +384,39 @@ export class SearchController {
       ),
     );
 
-    const data = (
+    let data: PublicSearchResultItem[] = (
       ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched
     ).slice(0, limit);
+
+    // 2026-06-05: ltp_only fallback for primary index queries. When the
+    // regular probe returns 0 live rows AND the query matches a curated
+    // primary-index alias (NIFTY/BANKNIFTY/SENSEX/...), look up the
+    // canonical UIR and hydrate it via the existing q:ltp:uid:${id} cache.
+    // Pure in-memory template lookup; no MeiliSearch round-trip, no DB hit.
+    if (ltpOnly && data.length === 0) {
+      const primary = this.searchService.fetchPrimaryUir(q);
+      if (primary) {
+        const fallbackQuotes = await this.searchService.hydrateLtpByItems([
+          primary,
+        ]);
+        const fp = fallbackQuotes?.[String(primary.id)]?.last_price ?? null;
+        if (Number.isFinite(fp) && (fp as number) > 0) {
+          data = [
+            buildResponseRow(
+              primary,
+              fp,
+              selectedFields,
+              includeInternal,
+              fallbackQuotes?.[String(primary.id)]?.change ?? null,
+              fallbackQuotes?.[String(primary.id)]?.pchange ?? null,
+            ),
+          ];
+          this.logger.log(
+            `[Search] ltp_only primary-index fallback hit: q="${q}" uir=${primary.id} fp=${fp}`,
+          );
+        }
+      }
+    }
 
     this.logger.log(
       `[Search] q="${q}" limit=${limit} probe=${probeLimit} ltp_only=${ltpOnly} ` +
@@ -483,9 +513,35 @@ export class SearchController {
       ),
     );
 
-    const data = (
+    let data: PublicSearchResultItem[] = (
       ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched
     ).slice(0, limit);
+
+    // 2026-06-05: same primary-index fallback as search() — see comment there.
+    if (ltpOnly && data.length === 0) {
+      const primary = this.searchService.fetchPrimaryUir(q);
+      if (primary) {
+        const fallbackQuotes = await this.searchService.hydrateLtpByItems([
+          primary,
+        ]);
+        const fp = fallbackQuotes?.[String(primary.id)]?.last_price ?? null;
+        if (Number.isFinite(fp) && (fp as number) > 0) {
+          data = [
+            buildResponseRow(
+              primary,
+              fp,
+              selectedFields,
+              includeInternal,
+              fallbackQuotes?.[String(primary.id)]?.change ?? null,
+              fallbackQuotes?.[String(primary.id)]?.pchange ?? null,
+            ),
+          ];
+          this.logger.log(
+            `[Suggest] ltp_only primary-index fallback hit: q="${q}" uir=${primary.id} fp=${fp}`,
+          );
+        }
+      }
+    }
 
     this.logger.log(
       `[Suggest] q="${q}" limit=${limit} ltp_only=${ltpOnly} ` +
