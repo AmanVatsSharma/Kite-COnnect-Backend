@@ -910,24 +910,31 @@ export class MarketDataGateway
           }
 
           // Exchange-token pair shape: `<EXCHANGE>-<TOKEN>` (e.g. "NSE_EQ-12345")
-          // Try mapping NSE_FO→NFO, NSE_EQ→NSE_EQ, etc. Vortex stores with exchange prefix,
-          // kite stores bare number. Try all permutations for best match.
+          // TOKEN can be UIR ID or provider token. Try UIR ID first.
           const pairMatch = trimmed.match(/^([A-Z_]+)-(\d+)$/i);
           if (pairMatch) {
             const ex = pairMatch[1].toUpperCase();
             const tok = pairMatch[2];
             const numTok = Number(tok);
             if (Number.isFinite(numTok)) {
-              // Try vortex-style key: `vortex:NSE_FO-12345` in provider storage
-              let uirId =
-                this.instrumentRegistry.resolveProviderToken('vortex', `${ex}-${tok}`) ??
-                this.instrumentRegistry.resolveProviderToken('vortex', tok) ??
-                // Also try with lowercase exchange
-                this.instrumentRegistry.resolveProviderToken(
-                  'vortex',
-                  `${ex.toLowerCase()}-${tok}`,
-                );
-              // Fall back to kite token
+              let uirId: number | undefined;
+
+              // 1. Try TOKEN as UIR ID (if canonical exists, it's valid)
+              const canonical = this.instrumentRegistry.getCanonicalSymbol(numTok);
+              if (canonical) {
+                uirId = numTok;
+              }
+
+              // 2. Fall back to provider token lookup
+              if (uirId == null) {
+                uirId =
+                  this.instrumentRegistry.resolveProviderToken('vortex', `${ex}-${tok}`) ??
+                  this.instrumentRegistry.resolveProviderToken('vortex', tok) ??
+                  this.instrumentRegistry.resolveProviderToken(
+                    'vortex',
+                    `${ex.toLowerCase()}-${tok}`,
+                  );
+              }
               if (uirId == null) {
                 uirId = this.instrumentRegistry.resolveProviderToken(
                   'kite',
@@ -946,15 +953,17 @@ export class MarketDataGateway
                   tok,
                 );
               }
+
               if (uirId != null) {
+                const resolvedCanonical =
+                  this.instrumentRegistry.getCanonicalSymbol(uirId) ??
+                  trimmed;
                 directUirIds.push(uirId);
                 forcedConfirm.push({
                   symbol: trimmed,
                   uirId,
                   provider: internalToClientProviderName(providerForPair),
-                  canonical:
-                    this.instrumentRegistry.getCanonicalSymbol(uirId) ??
-                    trimmed,
+                  canonical: resolvedCanonical,
                 });
                 consumedStringSet.add(trimmed);
                 consumedStringSet.add(trimmed.toUpperCase());
@@ -1217,10 +1226,15 @@ export class MarketDataGateway
           if (m) {
             const ex = m[1] as any;
             const tok = Number(m[2]);
-            if (
-              ['NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO'].includes(ex) &&
-              Number.isFinite(tok)
-            ) {
+            // Accept any standard Indian broker exchange segment: NSE, BSE, NFO, BFO,
+            // MCX, CDS, BCD, NCO and the canonical NSE_EQ / NSE_FO / NSE_CUR / MCX_FO.
+            // This is the explicit-pair path used by clients that pre-resolve the
+            // exchange. The leftover-pass above handles the same shape via UIR lookup.
+            const validExchanges = new Set([
+              'NSE_EQ', 'NSE_FO', 'NSE_CUR', 'MCX_FO',
+              'NSE', 'BSE', 'NFO', 'BFO', 'MCX', 'CDS', 'BCD', 'NCO', 'BSE_EQ',
+            ]);
+            if (validExchanges.has(ex) && Number.isFinite(tok)) {
               explicitPairs.push({ token: tok, exchange: ex });
               continue;
             }
@@ -1259,6 +1273,34 @@ export class MarketDataGateway
       ).map(([token, exchange]) => ({ token, exchange }));
 
       const unresolved = numericTokens.filter((t) => !pairByToken.has(t));
+
+      // Map exchange aliases to canonical form for entitlement check
+      const normalizeExchangeAlias = (ex: string): string => {
+        const aliasMap = new Map([
+          // Client aliases → Canonical
+          ['NFO', 'NSE_FO'],
+          ['BFO', 'MCX_FO'],
+          ['CDS', 'NSE_CUR'],
+          ['BCD', 'NSE_CUR'],
+          ['NCO', 'NSE_CUR'],
+          // Canonical → canonical
+          ['NSE_EQ', 'NSE_EQ'],
+          ['NSE_FO', 'NSE_FO'],
+          ['NSE_CUR', 'NSE_CUR'],
+          ['MCX_FO', 'MCX_FO'],
+          // Broker aliases → Canonical
+          ['NSE', 'NSE_EQ'],
+          ['BSE', 'BSE_EQ'],
+          ['MCX', 'MCX_FO'],
+        ]);
+        return aliasMap.get(ex.toUpperCase()) || ex;
+      };
+
+      // Normalize exchanges to canonical form
+      finalPairs = finalPairs.map((p) => ({
+        ...p,
+        exchange: normalizeExchangeAlias(String(p.exchange)),
+      }));
 
       // Entitlement enforcement: filter pairs by allowed exchanges from API key metadata
       const record: any = (client.data as any)?.apiKeyRecord;
