@@ -508,9 +508,6 @@ export class InstrumentRegistryService implements OnModuleInit {
     const baseEntries = this.baseUnderlyingToEntries.get(underlyingKey) ?? [];
     const exactEntries = this.underlyingToEntries.get(underlyingKey) ?? [];
     const allEntries = [...baseEntries, ...exactEntries];
-    this.logger.debug(
-      `[resolveDerivativeSymbol] ${underlyingRaw}:${type} underlyingKey=${underlyingKey} baseCount=${baseEntries.length} exactCount=${exactEntries.length} allCount=${allEntries.length} baseUirIds=${JSON.stringify(baseEntries.map(e => e.uirId))} exactUirIds=${JSON.stringify(exactEntries.map(e => e.uirId))}`,
-    );
     if (allEntries.length === 0) {
       return { status: 'not_found', reason: `Underlying not found: ${underlyingRaw}` };
     }
@@ -574,9 +571,6 @@ export class InstrumentRegistryService implements OnModuleInit {
     // Only return ambiguous if expiry dates are equal (truly duplicate contracts).
     const nearestExpiry = sorted[0].expiry?.getTime() ?? 0;
     const hasSameExpiry = sorted.every(e => e.expiry?.getTime() === nearestExpiry);
-    this.logger.debug(
-      `[resolveDerivativeSymbol] ${underlyingRaw}:${type} sorted[0]=UIR ${sorted[0].uirId} (${sorted[0].canonical}) expiry=${sorted[0].expiry?.toISOString()}, sorted.length=${sorted.length}, hasSameExpiry=${hasSameExpiry}, allExpiries=${JSON.stringify(sorted.slice(0, 10).map(e => ({ u: e.uirId, e: e.expiry?.toISOString() })))}`,
-    );
     if (!hasSameExpiry) {
       return {
         status: 'resolved',
@@ -594,9 +588,6 @@ export class InstrumentRegistryService implements OnModuleInit {
     // provider for MCX via EXCHANGE_TO_PROVIDER).
     if (explicitExchange) {
       const targetProvider = getProviderForExchange(explicitExchange);
-      this.logger.debug(
-        `[resolveDerivativeSymbol] ${underlyingRaw}:${type} ${sorted.length} candidates with same expiry; explicitExchange=${explicitExchange} targetProvider=${targetProvider}; uirIds=${JSON.stringify(sorted.map(e => e.uirId))}`,
-      );
       if (targetProvider) {
         const withProvider = sorted.find(e => {
           const providerMap = this.uirIdToProviderTokens.get(e.uirId);
