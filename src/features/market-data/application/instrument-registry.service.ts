@@ -564,6 +564,9 @@ export class InstrumentRegistryService implements OnModuleInit {
     // Only return ambiguous if expiry dates are equal (truly duplicate contracts).
     const nearestExpiry = sorted[0].expiry?.getTime() ?? 0;
     const hasSameExpiry = sorted.every(e => e.expiry?.getTime() === nearestExpiry);
+    this.logger.debug(
+      `[resolveDerivativeSymbol] ${underlyingRaw}:${type} sorted[0]=UIR ${sorted[0].uirId} (${sorted[0].canonical}) expiry=${sorted[0].expiry?.toISOString()}, sorted.length=${sorted.length}, hasSameExpiry=${hasSameExpiry}, allExpiries=${JSON.stringify(sorted.slice(0, 10).map(e => ({ u: e.uirId, e: e.expiry?.toISOString() })))}`,
+    );
     if (!hasSameExpiry) {
       return {
         status: 'resolved',
