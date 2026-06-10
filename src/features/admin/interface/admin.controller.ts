@@ -1097,6 +1097,54 @@ export class AdminController {
     return this.vortexProvider.getDebugStatus?.() || {};
   }
 
+  @Get('debug/uir/:id')
+  @ApiOperation({
+    summary:
+      'Dump in-memory registry state for a UIR id (exchange, canonical, provider tokens, best provider)',
+  })
+  async uirDebug(@Param('id') id: string) {
+    const uirId = Number(id);
+    if (!Number.isFinite(uirId)) {
+      throw new BadRequestException('Invalid UIR id');
+    }
+    const exchange = this.instrumentRegistry.getExchange(uirId);
+    const canonical = this.instrumentRegistry.getCanonicalSymbol(uirId);
+    const providerMap = this.instrumentRegistry.getProviderTokens(uirId);
+    const bestProvider = this.instrumentRegistry.getBestProviderForUirId(uirId);
+    const providerTokens: Record<string, string | undefined> = {};
+    if (providerMap) {
+      for (const [k, v] of providerMap.entries()) {
+        providerTokens[k] = v;
+      }
+    }
+    return {
+      uirId,
+      exchange,
+      canonical,
+      bestProvider,
+      providerTokens,
+    };
+  }
+
+  @Get('debug/uir/resolve')
+  @ApiOperation({
+    summary:
+      'Test derivative/flex symbol resolution against the in-memory registry',
+  })
+  @ApiQuery({ name: 'symbol', required: true, example: 'MCX:GOLD:FUT' })
+  async uirResolveDebug(@Query('symbol') symbol: string) {
+    if (!symbol) {
+      throw new BadRequestException('symbol query param is required');
+    }
+    const derivative = this.instrumentRegistry.resolveDerivativeSymbol(symbol);
+    const flex = this.instrumentRegistry.resolveFlexSymbol(symbol);
+    return {
+      symbol,
+      derivativeResolution: derivative ?? null,
+      flexResolution: flex ?? null,
+    };
+  }
+
   // ===== Provider Credential Management =====
 
   @Get('provider/kite/config')

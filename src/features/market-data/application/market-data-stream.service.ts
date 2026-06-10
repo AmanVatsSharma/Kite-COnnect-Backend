@@ -819,7 +819,10 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
           const pinned = this.forcedProviderByUir.get(uirId);
           const prov =
             pinned ?? this.instrumentRegistry.getBestProviderForUirId(uirId);
-          if (!prov) continue;
+          if (!prov) {
+            this.logger.debug(`[StreamBatching] UIR ${uirId} has no provider - skipping`);
+            continue;
+          }
           // Lazy-init provider ticker on first subscription (e.g. massive for US stocks)
           if (!this.activeProviderState.has(prov)) {
             await this.lazyInitProvider(prov);
@@ -947,9 +950,12 @@ export class MarketDataStreamService implements OnModuleInit, OnModuleDestroy {
                 uirId,
                 providerName,
               );
+              const canonical = this.instrumentRegistry.getCanonicalSymbol(uirId);
               if (pt != null) {
                 const numPt = Number(pt);
                 providerTokens.push(Number.isFinite(numPt) ? numPt : pt);
+              } else {
+                this.logger.debug(`[StreamBatching][${providerName}] UIR ${uirId} (${canonical}) has no token for provider ${providerName}`);
               }
             }
             this.logger.log(

@@ -574,6 +574,33 @@ export class InstrumentRegistryService implements OnModuleInit {
       };
     }
 
+    // 2026-06-10: All candidates have the same expiry — pick the one with
+    // an active provider mapping for the target exchange. This prevents
+    // returning a UIR ID that has no streaming support (e.g., MCX:GOLD:FUT
+    // returning 546557 which only has vortex when kite is the preferred
+    // provider for MCX via EXCHANGE_TO_PROVIDER).
+    if (explicitExchange) {
+      const targetProvider = getProviderForExchange(explicitExchange);
+      if (targetProvider) {
+        const withProvider = sorted.find(e => {
+          const providerMap = this.uirIdToProviderTokens.get(e.uirId);
+          return providerMap?.has(targetProvider);
+        });
+        if (withProvider) {
+          this.logger.debug(
+            `[resolveDerivativeSymbol] ${underlyingRaw}:${type} resolved to ${withProvider.canonical} (UIR ${withProvider.uirId}) via provider-preference`,
+          );
+          return {
+            status: 'resolved',
+            uirId: withProvider.uirId,
+            canonical: withProvider.canonical,
+            expiry: withProvider.expiry,
+            instrument_type: withProvider.instrument_type,
+          };
+        }
+      }
+    }
+
     return {
       status: 'ambiguous',
       candidates: sorted.map(e => e.canonical),
