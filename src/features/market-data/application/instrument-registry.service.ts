@@ -581,6 +581,9 @@ export class InstrumentRegistryService implements OnModuleInit {
     // provider for MCX via EXCHANGE_TO_PROVIDER).
     if (explicitExchange) {
       const targetProvider = getProviderForExchange(explicitExchange);
+      this.logger.debug(
+        `[resolveDerivativeSymbol] ${underlyingRaw}:${type} ${sorted.length} candidates with same expiry; explicitExchange=${explicitExchange} targetProvider=${targetProvider}; uirIds=${JSON.stringify(sorted.map(e => e.uirId))}`,
+      );
       if (targetProvider) {
         const withProvider = sorted.find(e => {
           const providerMap = this.uirIdToProviderTokens.get(e.uirId);
