@@ -501,6 +501,9 @@ export class InstrumentRegistryService implements OnModuleInit {
     const exactEntries = this.underlyingToEntries.get(underlyingKey) ?? [];
     const baseEntries = this.baseUnderlyingToEntries.get(underlyingKey) ?? [];
     const allEntries = [...exactEntries, ...baseEntries];
+    this.logger.debug(
+      `[resolveDerivativeSymbol] ${underlyingRaw}:${type} underlyingKey=${underlyingKey} exactCount=${exactEntries.length} baseCount=${baseEntries.length} allCount=${allEntries.length} exactUirIds=${JSON.stringify(exactEntries.map(e => e.uirId))} baseUirIds=${JSON.stringify(baseEntries.map(e => e.uirId))}`,
+    );
     if (allEntries.length === 0) {
       return { status: 'not_found', reason: `Underlying not found: ${underlyingRaw}` };
     }
