@@ -498,11 +498,18 @@ export class InstrumentRegistryService implements OnModuleInit {
     // (with the Kite date+type code baked in) but the user types the shorthand
     // "GOLD". Both sets are returned so the downstream type/exchange/sort
     // pipeline can pick the right contract.
-    const exactEntries = this.underlyingToEntries.get(underlyingKey) ?? [];
+    //
+    // 2026-06-10: base entries are concatenated FIRST so that the
+    // kite-mapped "GOLD26AUGFUT" (UIR 26305) wins the expiry-tie break over
+    // the plain "GOLD" (UIR 546557) which has only a vortex mapping. Without
+    // this, the nearest-expiry sort returns 546557 first and the upstream
+    // kite subscription fails because the kite provider token for that UIR
+    // is absent.
     const baseEntries = this.baseUnderlyingToEntries.get(underlyingKey) ?? [];
-    const allEntries = [...exactEntries, ...baseEntries];
+    const exactEntries = this.underlyingToEntries.get(underlyingKey) ?? [];
+    const allEntries = [...baseEntries, ...exactEntries];
     this.logger.debug(
-      `[resolveDerivativeSymbol] ${underlyingRaw}:${type} underlyingKey=${underlyingKey} exactCount=${exactEntries.length} baseCount=${baseEntries.length} allCount=${allEntries.length} exactUirIds=${JSON.stringify(exactEntries.map(e => e.uirId))} baseUirIds=${JSON.stringify(baseEntries.map(e => e.uirId))}`,
+      `[resolveDerivativeSymbol] ${underlyingRaw}:${type} underlyingKey=${underlyingKey} baseCount=${baseEntries.length} exactCount=${exactEntries.length} allCount=${allEntries.length} baseUirIds=${JSON.stringify(baseEntries.map(e => e.uirId))} exactUirIds=${JSON.stringify(exactEntries.map(e => e.uirId))}`,
     );
     if (allEntries.length === 0) {
       return { status: 'not_found', reason: `Underlying not found: ${underlyingRaw}` };
