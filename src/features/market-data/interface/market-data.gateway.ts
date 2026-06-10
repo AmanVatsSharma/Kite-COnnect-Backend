@@ -796,7 +796,9 @@ export class MarketDataGateway
 
           // Derivative shape: `<EXCHANGE>:<UNDERLYING>:(FUT|CE|PE)` — case-insensitive.
           if (/^[^:]+:[^:]+:(FUT|CE|PE)$/i.test(trimmed)) {
+            this.logger.debug(`[Gateway] Calling resolveDerivativeSymbol for ${trimmed}`);
             const result = this.instrumentRegistry.resolveDerivativeSymbol(trimmed);
+            this.logger.debug(`[Gateway] resolveDerivativeSymbol result: ${JSON.stringify(result)}`);
             if (result.status === 'resolved') {
               directUirIds.push(result.uirId);
               derivativeResolved.push({
