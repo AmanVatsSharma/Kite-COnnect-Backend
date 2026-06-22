@@ -8,7 +8,19 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "start:dev": "ts-node -r tsconfig-paths/register src/main.ts",
-    "lint": "echo 'No linter configured for search-api'"
+    "lint": "echo 'No linter configured for search-api'",
+    "test": "jest"
+  },
+  "jest": {
+    "rootDir": ".",
+    "roots": [
+      "src"
+    ],
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "testEnvironment": "node"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.5",
