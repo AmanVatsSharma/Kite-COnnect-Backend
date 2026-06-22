@@ -1,4 +1,4 @@
-import { FnoQueryParserService } from '../src/services/fno-query-parser.service';
+import { FnoQueryParserService } from '../src/features/market-data/application/fno-query-parser.service';
 
 describe('FnoQueryParserService (trading-style F&O queries)', () => {
   const parser = new FnoQueryParserService();
@@ -55,5 +55,40 @@ describe('FnoQueryParserService (trading-style F&O queries)', () => {
     expect(parsed.underlying).toBeUndefined();
     expect(parsed.strike).toBeUndefined();
     expect(parsed.optionType).toBeUndefined();
+  });
+
+  it('parses "monthly nifty" → isMonthly=true with NIFTY underlying', () => {
+    const parsed = parser.parse('monthly nifty');
+    expect(parsed.underlying).toBe('NIFTY');
+    expect(parsed.isMonthly).toBe(true);
+  });
+
+  it('parses "nifty weekly expiry" → isWeekly=true', () => {
+    const parsed = parser.parse('nifty weekly expiry');
+    expect(parsed.underlying).toBe('NIFTY');
+    expect(parsed.isWeekly).toBe(true);
+  });
+
+  it('parses "this thursday" → expiryFrom=expiryTo=next Thursday YYYYMMDD', () => {
+    const parsed = parser.parse('this thursday');
+    expect(parsed.expiryFrom).toBeDefined();
+    expect(parsed.expiryFrom).toBe(parsed.expiryTo);
+    expect(parsed.expiryFrom!.length).toBe(8);
+  });
+
+  it('parses "m&m" → underlying=MM', () => {
+    const parsed = parser.parse('m&m');
+    expect(parsed.underlying).toBe('MM');
+  });
+
+  it('parses "reliance industries" → underlying=RELIANCE', () => {
+    const parsed = parser.parse('reliance industries');
+    expect(parsed.underlying).toBe('RELIANCE');
+  });
+
+  it('does NOT set isMonthly when neither "monthly" nor related NL tokens are present', () => {
+    const parsed = parser.parse('nifty 26000 ce');
+    expect(parsed.isMonthly).toBeUndefined();
+    expect(parsed.isWeekly).toBeUndefined();
   });
 });

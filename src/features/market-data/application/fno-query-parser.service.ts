@@ -32,6 +32,16 @@ export interface ParsedFoQuery {
    */
   expiryFrom?: string;
   expiryTo?: string;
+  /**
+   * True when the parser detected "monthly" / "monthly expiry" / "month end"
+   * phrasing. Caller should filter MeiliSearch docs on `isMonthly = true`.
+   */
+  isMonthly?: boolean;
+  /**
+   * True when the parser detected "weekly" / "weekly expiry" phrasing.
+   * Caller should filter MeiliSearch docs on `isWeekly = true`.
+   */
+  isWeekly?: boolean;
 }
 
 @Injectable()
@@ -66,6 +76,8 @@ export class FnoQueryParserService {
     let underlying: string | undefined;
     let strike: number | undefined;
     let optionType: 'CE' | 'PE' | undefined;
+    let isMonthly = false;
+    let isWeekly = false;
     let expiryFrom: string | undefined;
     let expiryTo: string | undefined;
 
@@ -98,9 +110,48 @@ export class FnoQueryParserService {
       }
     }
 
+    // NL expiry detection: monthly / weekly / weekday tokens
+    const NL_MONTHLY = new Set(['MONTHLY', 'MONTHEND', 'MONTH']);
+    const NL_WEEKLY = new Set(['WEEKLY']);
+    const NL_WEEKDAYS: Record<string, number> = {
+      MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3, THURSDAY: 4,
+      FRIDAY: 5, SATURDAY: 6, SUNDAY: 0,
+    };
+    for (const token of tokens) {
+      const t = token.toUpperCase();
+      if (NL_MONTHLY.has(t)) isMonthly = true;
+      if (NL_WEEKLY.has(t)) isWeekly = true;
+      if (Object.prototype.hasOwnProperty.call(NL_WEEKDAYS, t)) {
+        const target = NL_WEEKDAYS[t];
+        const today = new Date();
+        const cur = today.getDay();
+        let delta = (target - cur + 7) % 7;
+        if (delta === 0) delta = 7;
+        const next = new Date(today.getTime() + delta * 86400000);
+        const ymd = this.toYmd(next.getFullYear(), next.getMonth() + 1, next.getDate());
+        if (!expiryFrom) expiryFrom = ymd;
+        if (!expiryTo) expiryTo = ymd;
+      }
+    }
+
+    const lowerTokens = tokens.map((t) => t.toLowerCase());
+    if (
+      lowerTokens.includes('next') &&
+      lowerTokens.some((t) => t === 'week' || t === 'weekly')
+    ) {
+      const today = new Date();
+      const tomorrow = new Date(today.getTime() + 86400000);
+      const weekOut = new Date(today.getTime() + 7 * 86400000);
+      const from = this.toYmd(tomorrow.getFullYear(), tomorrow.getMonth() + 1, tomorrow.getDate());
+      const to = this.toYmd(weekOut.getFullYear(), weekOut.getMonth() + 1, weekOut.getDate());
+      if (!expiryFrom || expiryFrom < from) expiryFrom = from;
+      if (!expiryTo || expiryTo > to) expiryTo = to;
+    }
+
     // 2) Detect strike as the first reasonably sized numeric token.
     //    Supports relaxed formats like \"26k\" (→ 26000) in addition to plain numbers.
     for (const token of tokens) {
+      if (usedAsExpiry.has(token)) continue;
       const parsedStrike = this.parseStrikeToken(token);
       if (parsedStrike === null) continue;
       // Only take the first candidate; callers can always override via query params
@@ -114,6 +165,9 @@ export class FnoQueryParserService {
       const t = token.toUpperCase();
       if (optionTokens.has(t)) continue;
       if (usedAsExpiry.has(t)) continue;
+      if (NL_MONTHLY.has(t)) continue;
+      if (NL_WEEKLY.has(t)) continue;
+      if (Object.prototype.hasOwnProperty.call(NL_WEEKDAYS, t)) continue;
       if (/^\d+(\.\d+)?$/.test(t)) continue;
 
       // Skip pure month names when not accompanied by a year – too ambiguous
@@ -135,6 +189,8 @@ export class FnoQueryParserService {
       optionType,
       expiryFrom,
       expiryTo,
+      isMonthly: isMonthly || undefined,
+      isWeekly: isWeekly || undefined,
     };
 
     // Debug-level only to avoid noisy logs in production, but extremely useful during tuning
@@ -293,19 +349,23 @@ export class FnoQueryParserService {
     if (!raw) return null;
 
     // 26K / 26.5K style shorthand
-    const kMatch = raw.match(/^(\d+(?:\.\d+)?)[K]$/);
-    if (kMatch) {
+    if (/^\d+(\.\d+)?[K]$/.test(raw)) {
+      const kMatch = raw.match(/^(\d+(?:\.\d+)?)[K]$/)!;
       const base = Number(kMatch[1]);
       if (!Number.isFinite(base)) return null;
       const value = base * 1000;
       return value > 1 ? value : null;
     }
 
-    // Fallback: strip non-digits (and dot) and parse as plain number
-    const n = Number(raw.replace(/[^\d.]/g, ''));
-    if (!Number.isFinite(n)) return null;
-    if (n <= 1) return null;
-    return n;
+    // Plain numeric strike (e.g. 26000)
+    if (/^\d+$/.test(raw)) {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return null;
+      if (n <= 1) return null;
+      return n;
+    }
+
+    return null;
   }
 
   /**
@@ -315,9 +375,12 @@ export class FnoQueryParserService {
   private normalizeUnderlying(symbol: string): string {
     const s = (symbol || '').toUpperCase();
     const aliases: Record<string, string> = {
-      // NIFTY index
       NIFTY50: 'NIFTY',
-      // Other well-known underlyings can be added here as we see real-world usage
+      MM: 'MM',
+      MANDM: 'MM',
+      BAJAJAUTO: 'BAJAJ_AUTO',
+      BAJAJFINANCE: 'BAJFINANCE',
+      HUL: 'HINDUNILVR',
     };
     return aliases[s] || s;
   }
