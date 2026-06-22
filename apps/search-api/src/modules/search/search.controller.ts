@@ -36,7 +36,13 @@
  *     streamProvider) are always returned regardless of ?fields=
  *
  * Author:      BharatERP
- * Last-updated: 2026-05-04
+ * Last-updated: 2026-06-23
+ *
+ * @updated 2026-06-23 — Wired FnoQueryParserService into search() and suggest() to
+ *                       derive structured filters (isMonthly, isWeekly, parsedExpiry*)
+ *                       from the raw `?q=` string. Switched both endpoints to
+ *                       SearchQueryDto for class-validator enforcement. Added
+ *                       toIsoDate() helper to convert YYYYMMDD → YYYY-MM-DD.
  */
 
 import {
@@ -66,6 +72,8 @@ import {
   internalToPublicProvider,
   type InternalProviderName,
 } from './provider-aliases';
+import { FnoQueryParserService } from '../../fno/fno-query-parser';
+import { SearchQueryDto } from './dto/search-query.dto';
 
 /**
  * Public response shape — internal tokens stripped, streamProvider mapped to public brand.
@@ -272,6 +280,7 @@ const MODE_TO_VORTEX_EXCHANGE: Record<string, string> = {
 @Controller('search')
 export class SearchController {
   private readonly logger = new Logger('SearchController');
+  private readonly parser = new FnoQueryParserService();
   constructor(private readonly searchService: SearchService) {}
 
   /**
@@ -299,62 +308,57 @@ export class SearchController {
    */
   @Get()
   async search(
-    @Query('q') q: string,
-    @Query('limit') limitRaw?: string,
-    @Query('exchange') exchange?: string,
-    @Query('segment') segment?: string,
-    @Query('instrumentType') instrumentType?: string,
-    @Query('vortexExchange') vortexExchange?: string,
-    @Query('optionType') optionType?: string,
-    @Query('assetClass') assetClass?: string,
-    @Query('streamProvider') streamProvider?: string,
-    @Query('mode') mode?: string,
-    @Query('expiry_from') expiry_from?: string,
-    @Query('expiry_to') expiry_to?: string,
-    @Query('strike_min') strike_min?: string,
-    @Query('strike_max') strike_max?: string,
-    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
-    @Query('live') liveRaw?: string | boolean,
-    @Query('fields') fieldsRaw?: string,
-    @Query('include') includeRaw?: string,
+    @Query() dto: SearchQueryDto,
     @Headers('x-admin-token') adminTokenHeader?: string,
   ) {
-    if (!q || q.trim().length === 0) {
+    if (!dto.q || dto.q.trim().length === 0) {
       throw new HttpException(
         { success: false, message: 'q is required' },
         HttpStatus.BAD_REQUEST,
       );
     }
 
-    const limit = Math.min(Number(limitRaw || 10), 50);
+    const limit = dto.limit ?? 10;
+    const q = dto.q.trim();
     const ltpOnly =
-      String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
-      ltpOnlyRaw === true ||
-      String(liveRaw || '').toLowerCase() === 'true' ||
-      liveRaw === true;
-    const modeVe = mode
-      ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()]
+      String(dto.ltp_only || '').toLowerCase() === 'true' ||
+      String(dto.live || '').toLowerCase() === 'true';
+    const modeVe = dto.mode
+      ? MODE_TO_VORTEX_EXCHANGE[String(dto.mode).toLowerCase()]
       : undefined;
 
     const includeInternal = isInternalIncludeAuthorized(
-      includeRaw,
+      dto.include,
       adminTokenHeader,
     );
-    const selectedFields = parseFieldsParam(fieldsRaw);
+    const selectedFields = parseFieldsParam(dto.fields);
     const meiliAttrs = buildMeiliAttrs(selectedFields, includeInternal);
 
+    // ── Natural-language parser (additive) ─────────────────────────────────
+    // Never throws. Always returns a result we can layer on top of explicit
+    // query params. Explicit user range wins; parsed values fill in.
+    const parsed = this.parser.parse(q);
+
     const filters = {
-      exchange,
-      segment,
-      instrumentType,
-      vortexExchange: vortexExchange || modeVe,
-      optionType,
-      assetClass,
-      streamProvider: normalizeStreamProvider(streamProvider),
-      expiry_from,
-      expiry_to,
-      strike_min,
-      strike_max,
+      exchange: dto.exchange,
+      segment: dto.segment,
+      instrumentType: dto.instrumentType,
+      vortexExchange: dto.vortexExchange || modeVe,
+      optionType: dto.optionType,
+      assetClass: dto.assetClass,
+      streamProvider: normalizeStreamProvider(dto.streamProvider),
+      expiry_from: dto.expiry_from,
+      expiry_to: dto.expiry_to,
+      strike_min: dto.strike_min,
+      strike_max: dto.strike_max,
+      isMonthly: parsed.isMonthly,
+      isWeekly: parsed.isWeekly,
+      parsedExpiryFrom: parsed.expiryFrom
+        ? this.toIsoDate(parsed.expiryFrom)
+        : undefined,
+      parsedExpiryTo: parsed.expiryTo
+        ? this.toIsoDate(parsed.expiryTo)
+        : undefined,
     };
 
     const probeMult = Number(process.env.LTP_ONLY_PROBE_MULTIPLIER || 5);
@@ -364,7 +368,7 @@ export class SearchController {
       : limit;
 
     const items = await this.searchService.searchInstruments(
-      q.trim(),
+      q,
       probeLimit,
       filters,
       meiliAttrs,
@@ -433,57 +437,52 @@ export class SearchController {
    */
   @Get('suggest')
   async suggest(
-    @Query('q') q: string,
-    @Query('limit') limitRaw?: string,
-    @Query('exchange') exchange?: string,
-    @Query('segment') segment?: string,
-    @Query('instrumentType') instrumentType?: string,
-    @Query('vortexExchange') vortexExchange?: string,
-    @Query('optionType') optionType?: string,
-    @Query('streamProvider') streamProvider?: string,
-    @Query('mode') mode?: string,
-    @Query('expiry_from') expiry_from?: string,
-    @Query('expiry_to') expiry_to?: string,
-    @Query('strike_min') strike_min?: string,
-    @Query('strike_max') strike_max?: string,
-    @Query('ltp_only') ltpOnlyRaw?: string | boolean,
-    @Query('live') liveRaw?: string | boolean,
-    @Query('fields') fieldsRaw?: string,
-    @Query('include') includeRaw?: string,
+    @Query() dto: SearchQueryDto,
     @Headers('x-admin-token') adminTokenHeader?: string,
   ) {
-    const limit = Math.min(Number(limitRaw || 5), 20);
-    if (!q || q.trim().length === 0) {
+    const limit = Math.min(Number(dto.limit || 5), 20);
+    if (!dto.q || dto.q.trim().length === 0) {
       return { success: true, data: [], timestamp: new Date().toISOString() };
     }
 
     const ltpOnly =
-      String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
-      ltpOnlyRaw === true ||
-      String(liveRaw || '').toLowerCase() === 'true' ||
-      liveRaw === true;
-    const modeVe = mode
-      ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()]
+      String(dto.ltp_only || '').toLowerCase() === 'true' ||
+      String(dto.live || '').toLowerCase() === 'true';
+    const modeVe = dto.mode
+      ? MODE_TO_VORTEX_EXCHANGE[String(dto.mode).toLowerCase()]
       : undefined;
 
     const includeInternal = isInternalIncludeAuthorized(
-      includeRaw,
+      dto.include,
       adminTokenHeader,
     );
-    const selectedFields = parseFieldsParam(fieldsRaw);
+    const selectedFields = parseFieldsParam(dto.fields);
     const meiliAttrs = buildMeiliAttrs(selectedFields, includeInternal);
 
+    // ── Natural-language parser (additive) ─────────────────────────────────
+    const q = dto.q.trim();
+    const parsed = this.parser.parse(q);
+
     const filters = {
-      exchange,
-      segment,
-      instrumentType,
-      vortexExchange: vortexExchange || modeVe,
-      optionType,
-      streamProvider: normalizeStreamProvider(streamProvider),
-      expiry_from,
-      expiry_to,
-      strike_min,
-      strike_max,
+      exchange: dto.exchange,
+      segment: dto.segment,
+      instrumentType: dto.instrumentType,
+      vortexExchange: dto.vortexExchange || modeVe,
+      optionType: dto.optionType,
+      assetClass: dto.assetClass,
+      streamProvider: normalizeStreamProvider(dto.streamProvider),
+      expiry_from: dto.expiry_from,
+      expiry_to: dto.expiry_to,
+      strike_min: dto.strike_min,
+      strike_max: dto.strike_max,
+      isMonthly: parsed.isMonthly,
+      isWeekly: parsed.isWeekly,
+      parsedExpiryFrom: parsed.expiryFrom
+        ? this.toIsoDate(parsed.expiryFrom)
+        : undefined,
+      parsedExpiryTo: parsed.expiryTo
+        ? this.toIsoDate(parsed.expiryTo)
+        : undefined,
     };
 
     const probeMult = Number(process.env.LTP_ONLY_PROBE_MULTIPLIER || 5);
@@ -493,7 +492,7 @@ export class SearchController {
       : limit;
 
     const items = await this.searchService.searchInstruments(
-      q.trim(),
+      q,
       probeLimit,
       filters,
       meiliAttrs,
@@ -891,5 +890,19 @@ export class SearchController {
     }, 1000);
 
     req.on('close', () => clearInterval(timer));
+  }
+
+  /**
+   * Convert a parser-emitted YYYYMMDD (e.g. "20250626") into YYYY-MM-DD for
+   * MeiliSearch filter comparison against `expiry` (also stored as YYYY-MM-DD).
+   * Returns the input unchanged if it's already in ISO format or empty.
+   */
+  private toIsoDate(ymd: string): string {
+    const s = String(ymd || '').trim();
+    if (!s) return s;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = /^(\d{4})(\d{2})(\d{2})$/.exec(s);
+    if (!m) return s;
+    return `${m[1]}-${m[2]}-${m[3]}`;
   }
 }
