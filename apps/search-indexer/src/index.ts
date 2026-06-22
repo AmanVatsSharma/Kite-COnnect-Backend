@@ -7,12 +7,14 @@
  *              Supports modes: backfill | incremental | backfill-and-watch | synonyms-apply | settings-apply.
  * @author BharatERP
  * @created 2025-12-01
- * @updated 2026-05-04
+ * @updated 2026-06-23
  */
 
 import axios from 'axios';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Client } = require('pg');
+
+import { lastThursdayOfMonth, weekOfMonth } from './index-helpers';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,20 @@ type MeiliDoc = {
    * and lets clients filter `?streamProvider=binance` for crypto-only views.
    */
   streamProvider?: StreamProviderName;
+  /** True if the expiry is the last Thursday of its calendar month AND the instrument is an F&O derivative. Null for non-derivatives. */
+  isMonthly?: boolean;
+  /** True if the expiry falls on a Thursday AND the instrument is an F&O derivative. Null for non-derivatives. */
+  isWeekly?: boolean;
+  /** Week-of-month (1-5) for the expiry date. Null for non-derivatives. */
+  expiryWeek?: number;
+  /** Calendar month (1-12) for the expiry date. Null for non-derivatives. */
+  expiryMonth?: number;
+  /** Calendar year for the expiry date. Null for non-derivatives. */
+  expiryYear?: number;
+  /** Unix seconds (UTC, 09:15 IST) of the expiry — used for sort when isMonthly=true. Null for non-derivatives. */
+  monthlyExpiryDate?: number;
+  /** Alias tokens for symbol-name lookups (e.g. ['RELIANCE', 'RIL', ...]). Additive to existing searchKeywords. */
+  tokenKeywords?: string[];
   searchKeywords: string[];
   /** Full human name of the coin (e.g. "Bitcoin" for BTCUSDT). Only set for crypto instruments.
    *  Placed first in searchableAttributes so crypto name searches rank above US equity funds. */
@@ -293,6 +309,32 @@ function toDoc(r: UniversalRow): MeiliDoc {
     else if (massiveToken) streamProvider = 'massive';
   }
 
+  // Compute expiry-derived enrichment fields (only meaningful for F&O derivatives with non-null expiry).
+  let isMonthly: boolean | undefined;
+  let isWeekly: boolean | undefined;
+  let expiryWeek: number | undefined;
+  let expiryMonth: number | undefined;
+  let expiryYear: number | undefined;
+  let monthlyExpiryDate: number | undefined;
+  if (isDerivative && r.expiry) {
+    const expiryStr = String(r.expiry).slice(0, 10);
+    const [yy, mm, dd] = expiryStr.split('-').map((s) => Number(s));
+    if (Number.isFinite(yy) && Number.isFinite(mm) && Number.isFinite(dd)) {
+      const expiryDate = new Date(yy, mm - 1, dd);
+      const dow = expiryDate.getDay();
+      isWeekly = dow === 4;
+      isMonthly = dow === 4 && dd === lastThursdayOfMonth(yy, mm);
+      expiryWeek = weekOfMonth(yy, mm, dd);
+      expiryMonth = mm;
+      expiryYear = yy;
+      monthlyExpiryDate = isMonthly
+        ? Math.floor(
+            new Date(expiryStr + 'T09:15:00Z').getTime() / 1000,
+          )
+        : undefined;
+    }
+  }
+
   return {
     id: Number(r.id),
     canonicalSymbol: r.canonical_symbol,
@@ -325,14 +367,25 @@ function toDoc(r: UniversalRow): MeiliDoc {
     massiveToken,
     binanceToken,
     streamProvider,
+    isMonthly,
+    isWeekly,
+    expiryWeek,
+    expiryMonth,
+    expiryYear,
+    monthlyExpiryDate,
     ...(() => {
       const isCrypto =
         r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto';
-      if (!isCrypto)
+      if (!isCrypto) {
+        const tk = [symbol, r.name].filter(Boolean) as string[];
+        const strippedName = r.name ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '') : undefined;
+        if (strippedName) tk.push(strippedName);
         return {
-          searchKeywords: [symbol, r.name].filter(Boolean) as string[],
-          exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
+          searchKeywords: tk,
+          exactName: strippedName,
+          tokenKeywords: tk,
         };
+      }
       const base = extractCoinBase(symbol);
       const fullName = CRYPTO_BASE_NAMES[base];
       const kw: string[] = [symbol, r.name].filter(Boolean) as string[];
@@ -352,6 +405,7 @@ function toDoc(r: UniversalRow): MeiliDoc {
         searchKeywords: kw,
         coinFullName: fullName && isUsdtQuoted ? fullName : undefined,
         exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
+        tokenKeywords: kw,
       };
     })(),
   };
@@ -494,6 +548,7 @@ async function applySettings(
         'canonicalSymbol', // P4: "NSE:RELIANCE"
         'underlyingSymbol', // P5: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
         'searchKeywords', // P6: combined fallback bag
+        'tokenKeywords', // P7: alias tokens (e.g. RELIANCE+RIL); additive to existing fields
       ],
       filterableAttributes: [
         'exchange',
@@ -509,6 +564,13 @@ async function applySettings(
         'lotSize',
         // New routing/coverage facets — let clients filter "all binance pairs", "all massive crypto", etc.
         'streamProvider',
+        // Natural-language expiry classification (only set on F&O derivatives)
+        'isMonthly',
+        'isWeekly',
+        'expiryWeek',
+        'expiryMonth',
+        'expiryYear',
+        'monthlyExpiryDate',
       ],
       sortableAttributes: [
         'symbol',
@@ -519,6 +581,7 @@ async function applySettings(
         'expiryTs', // numeric sort = nearest expiry first
         'strike',
         'optionType',
+        'monthlyExpiryDate', // numeric sort for nearest-monthly-expiry first
       ],
       rankingRules: [
         'typo', // P0: typo-tolerant (makes "nifty" match "NIFTY 50")
