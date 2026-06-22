@@ -147,6 +147,14 @@ Polls every 1s for up to `SSE_DEFAULT_TTL_MS` (default 30s). Each frame is keyed
 
 ## Changelog
 
+## 2026-06-23
+- **feat**: Wired `FnoQueryParserService` into `SearchController.search()` and `SearchController.suggest()`. Supports `nifty 24000 ce`, `m&m`, `reliance industries`, `nifty monthly`, `nifty weekly`, `this thursday nifty`, `next week expiry nifty`, `nifty 26k ce`, etc.
+- **feat**: Added `SearchQueryDto` with class-validator decorators for `/api/search` and `/api/search/suggest` query params. Replaces bare `@Query()` strings; validation enforced via existing `ValidationPipe` in `main.ts`.
+- **feat**: Added `fetchPrimaryUir(q)` to `SearchService` to close the latent `TypeError` surfaced when `ltp_only=true` returned 0 live hits for primary-index queries like `NIFTY`.
+- **response shape (additive)**: `parsed` field echoes the structured parser output; present only when the parser detected at least one of `underlying` / `strike` / `optionType` / `isMonthly` / `isWeekly` / `expiryFrom`. Existing `data` array is unchanged.
+- **response shape (additive)**: `expiryGroups` field appears when `isMonthly` or `isWeekly` was set, grouping hits by expiry date. Existing clients that don't read this field are unaffected.
+- **no breaking changes**: All existing query params and response fields preserved exactly.
+
 - **2026-06-05** — **`ltp_only` primary-index fallback.** When the regular Meili probe returns 0 live-priced rows for a query like `NIFTY` (because the top 10 MeiliSearch hits are stale equity/derivatives, not the live NIFTY 50 INDEX), the controller now looks up the curated `PRIMARY_INDEX_UIR` map (NIFTY, NIFTY 50, BANKNIFTY, NIFTY BANK, SENSEX, NIFTY IT, NIFTY AUTO, NIFTY FIN SERVICE / FINNIFTY, NIFTY NEXT 50 / NIFTYNXT50) and hydrates the canonical INDEX UIR via the existing `q:ltp:uid:${id}` Redis cache. Pure in-memory template lookup, no MeiliSearch round-trip, no HTTP call. Same path in `/api/search` and `/api/search/suggest`. No new env, no breaking changes — the non-`ltp_only` path is untouched.
 - **2026-05-01** — **Provider name masking + field projection + admin panel.**
   - Public response now uses brand names (`falcon`/`vayu`/`atlas`/`drift`) for `streamProvider`. Internal token fields (`kiteToken`, `vortexToken`, `vortexExchange`, `massiveToken`, `binanceToken`) are stripped from the default response.

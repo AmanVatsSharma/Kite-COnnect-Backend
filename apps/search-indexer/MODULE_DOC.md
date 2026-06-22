@@ -136,6 +136,12 @@ docker compose logs -f search-indexer
 
 ## Changelog
 
+## 2026-06-23
+- **feat (doc fields, additive)**: `MeiliDoc` extended with `isMonthly`, `isWeekly`, `expiryWeek`, `expiryMonth`, `expiryYear`, `monthlyExpiryDate` (all nullable; only set for F&O derivatives with non-null expiry), plus `tokenKeywords` (alias tokens for symbol-name lookups, e.g. RELIANCE+RIL).
+- **feat (indexer settings, additive)**: `filterableAttributes` now includes `isMonthly`, `isWeekly`, `expiryWeek`, `expiryMonth`, `expiryYear`, `monthlyExpiryDate`. `sortableAttributes` now includes `monthlyExpiryDate`. `searchableAttributes` now includes `tokenKeywords`. No existing entries removed.
+- **feat (helpers)**: Extracted `lastThursdayOfMonth()` and `weekOfMonth()` to `index-helpers.ts` for unit-testability.
+- **no breaking changes**: All existing doc fields, all existing settings entries preserved exactly. Existing clients that read `expiry`, `strike`, `expiryTs`, etc. see no schema diff.
+
 - **2026-05-28** — Expired-futures purging. Added two new indexer capabilities:
   - **`expired-cleanup`** mode (`INDEXER_MODE=expired-cleanup`): one-shot deletion of expired FUT/CE/PE contracts from MeiliSearch. Queries `universal_instruments` for `is_active=false` + `expiry < today` + derivative types, then issues batched DELETE to MeiliSearch.
   - **`expired-cleanup`** endpoint (`POST /api/indexer/cleanup-expired`): HTTP trigger usable by the NestJS backend cron job. Enabled via `INDEXER_HTTP_ENABLED=true`. Listens on `INDEXER_HTTP_PORT` (default `3003`). Both modes share the same `expiredCleanup()` fn.
