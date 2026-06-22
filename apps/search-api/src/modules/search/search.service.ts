@@ -36,7 +36,7 @@
  *   3. SearchService    — main service: searchInstruments, hydrateQuotes, telemetry
  *
  * Author:      BharatERP
- * Last-updated: 2026-05-04
+ * Last-updated: 2026-06-23
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -287,6 +287,11 @@ export class SearchService {
       expiry_to?: string;
       strike_min?: number | string;
       strike_max?: number | string;
+      // Additive: emitted by FnoQueryParserService, layered into the Meili filter.
+      isMonthly?: boolean;
+      isWeekly?: boolean;
+      parsedExpiryFrom?: string;
+      parsedExpiryTo?: string;
     } = {},
     /**
      * Optional override for Meili's `attributesToRetrieve`. When the caller knows
@@ -536,10 +541,19 @@ export class SearchService {
     if (filters.isDerivative !== undefined)
       parts.push(`isDerivative = ${!!filters.isDerivative}`);
 
-    if (filters.expiry_from)
-      parts.push(`expiry >= ${JSON.stringify(filters.expiry_from)}`);
-    if (filters.expiry_to)
-      parts.push(`expiry <= ${JSON.stringify(filters.expiry_to)}`);
+    // Natural-language expiry (additive — explicit user range wins; parsed values
+    // fill in only when the user didn't pass expiry_from / expiry_to).
+    const expFrom = filters.expiry_from || filters.parsedExpiryFrom;
+    const expTo = filters.expiry_to || filters.parsedExpiryTo;
+    if (expFrom) parts.push(`expiry >= ${JSON.stringify(expFrom)}`);
+    if (expTo) parts.push(`expiry <= ${JSON.stringify(expTo)}`);
+
+    if (filters.isMonthly === true) {
+      parts.push('isMonthly = true');
+    }
+    if (filters.isWeekly === true) {
+      parts.push('isWeekly = true');
+    }
 
     if (Number.isFinite(Number(filters.strike_min)))
       parts.push(`strike >= ${Number(filters.strike_min)}`);
@@ -559,5 +573,38 @@ export class SearchService {
       }
     }
     return out;
+  }
+
+  /**
+   * Look up the canonical UIR row for a primary-index query (NIFTY, BANKNIFTY, SENSEX, ...).
+   * Used as the `ltp_only` fallback when MeiliSearch returns 0 live-priced hits
+   * for a query like `?ltp_only=true&q=NIFTY`. Returns a stub SearchResultItem
+   * or undefined.
+   *
+   * Pure in-memory template lookup; no MeiliSearch round-trip, no DB hit.
+   */
+  fetchPrimaryUir(q: string): SearchResultItem | undefined {
+    const norm = String(q || '').trim().toUpperCase();
+    const PRIMARY_INDEX_MAP: Record<string, { symbol: string; canonicalSymbol: string }> = {
+      NIFTY: { symbol: 'NIFTY', canonicalSymbol: 'NSE:NIFTY' },
+      NIFTY50: { symbol: 'NIFTY', canonicalSymbol: 'NSE:NIFTY' },
+      BANKNIFTY: { symbol: 'BANKNIFTY', canonicalSymbol: 'NSE:BANKNIFTY' },
+      SENSEX: { symbol: 'SENSEX', canonicalSymbol: 'BSE:SENSEX' },
+      FINNIFTY: { symbol: 'FINNIFTY', canonicalSymbol: 'NSE:FINNIFTY' },
+      MIDCPNIFTY: { symbol: 'MIDCPNIFTY', canonicalSymbol: 'NSE:MIDCPNIFTY' },
+    };
+    const hit = PRIMARY_INDEX_MAP[norm];
+    if (!hit) return undefined;
+    return {
+      id: 0,
+      canonicalSymbol: hit.canonicalSymbol,
+      symbol: hit.symbol,
+      name: hit.symbol,
+      exchange: hit.canonicalSymbol.split(':')[0],
+      instrumentType: 'IDX',
+      assetClass: 'equity',
+      isDerivative: false,
+      streamProvider: 'kite',
+    };
   }
 }
