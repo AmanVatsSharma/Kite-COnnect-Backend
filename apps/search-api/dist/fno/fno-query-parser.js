@@ -57,6 +57,25 @@ class FnoQueryParserService {
         }
         const NL_MONTHLY = new Set(['MONTHLY', 'MONTHEND', 'MONTH']);
         const NL_WEEKLY = new Set(['WEEKLY']);
+        const NL_FILLER = new Set([
+            'EXPIRY',
+            'EXPIRING',
+            'OPTIONS',
+            'OPTION',
+            'FUTURES',
+            'FUTURE',
+            'CONTRACTS',
+            'CONTRACT',
+            'INSTRUMENT',
+            'INSTRUMENTS',
+            'STOCKS',
+            'STOCK',
+            'SHARE',
+            'SHARES',
+            'SYMBOL',
+            'TODAY',
+            'TOMORROW',
+        ]);
         const NL_WEEKDAYS = {
             MONDAY: 1,
             TUESDAY: 2,
@@ -75,6 +94,10 @@ class FnoQueryParserService {
             }
             if (NL_WEEKLY.has(t)) {
                 isWeekly = true;
+                consumed.add(tokens.indexOf(token));
+                continue;
+            }
+            if (NL_FILLER.has(t)) {
                 consumed.add(tokens.indexOf(token));
                 continue;
             }
@@ -132,6 +155,8 @@ class FnoQueryParserService {
             if (NL_MONTHLY.has(t))
                 continue;
             if (NL_WEEKLY.has(t))
+                continue;
+            if (NL_FILLER.has(t))
                 continue;
             if (Object.prototype.hasOwnProperty.call(NL_WEEKDAYS, t))
                 continue;

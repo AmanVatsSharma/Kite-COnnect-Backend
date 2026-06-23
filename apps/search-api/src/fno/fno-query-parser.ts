@@ -173,6 +173,42 @@ export class FnoQueryParserService {
     // NL expiry detection: monthly / weekly / weekday tokens
     const NL_MONTHLY = new Set(['MONTHLY', 'MONTHEND', 'MONTH']);
     const NL_WEEKLY = new Set(['WEEKLY']);
+    // NL filler words that the user uses as intent markers but which do NOT
+    // appear in any Meili document field. Stripping them keeps the text
+    // search useful: 'nifty monthly expiry' → 'NIFTY' (instead of needing
+    // 'NIFTY EXPIRY' to be a literal substring of a document's name).
+    // - EXPIRY     : "monthly expiry" / "this thursday expiry"
+    // - EXPIRING   : future-tense filler
+    // - OPTIONS    : "nifty options" / "reliance options"
+    // - OPTION     : singular form
+    // - FUTURES    : "nifty futures"
+    // - FUTURE     : singular form
+    // - CONTRACTS  : "options contracts"
+    // - INSTRUMENT : "futures instrument"
+    // - INSTRUMENTS: plural
+    // - STOCKS     : "stocks to buy" (we'd rather let the underlying drive it)
+    // - SHARE      : "reliance share"
+    // - SHARES     : plural
+    // - SYMBOL     : "nse symbol"
+    const NL_FILLER = new Set([
+      'EXPIRY',
+      'EXPIRING',
+      'OPTIONS',
+      'OPTION',
+      'FUTURES',
+      'FUTURE',
+      'CONTRACTS',
+      'CONTRACT',
+      'INSTRUMENT',
+      'INSTRUMENTS',
+      'STOCKS',
+      'STOCK',
+      'SHARE',
+      'SHARES',
+      'SYMBOL',
+      'TODAY',
+      'TOMORROW',
+    ]);
     const NL_WEEKDAYS: Record<string, number> = {
       MONDAY: 1,
       TUESDAY: 2,
@@ -191,6 +227,11 @@ export class FnoQueryParserService {
       }
       if (NL_WEEKLY.has(t)) {
         isWeekly = true;
+        consumed.add(tokens.indexOf(token));
+        continue;
+      }
+      if (NL_FILLER.has(t)) {
+        // Pure intent markers — never sent to Meili text search.
         consumed.add(tokens.indexOf(token));
         continue;
       }
@@ -262,6 +303,7 @@ export class FnoQueryParserService {
       if (usedAsExpiry.has(t)) continue;
       if (NL_MONTHLY.has(t)) continue;
       if (NL_WEEKLY.has(t)) continue;
+      if (NL_FILLER.has(t)) continue;
       if (Object.prototype.hasOwnProperty.call(NL_WEEKDAYS, t)) continue;
       if (/^\d+(\.\d+)?$/.test(t)) continue;
 
