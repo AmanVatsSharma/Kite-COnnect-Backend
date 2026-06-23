@@ -331,8 +331,15 @@ function toDoc(r: UniversalRow): MeiliDoc {
       // Friday (5). Unknown underlyings fall back to Thursday (4) for legacy
       // compatibility.
       const weeklyDow = weeklyDowForUnderlying(underlyingSymbol) ?? 4;
-      isWeekly = dow === weeklyDow;
-      isMonthly = dow === weeklyDow && dd === lastDowOfMonth(yy, mm, weeklyDow);
+      // Only classify OPTIONS (CE/PE) as weekly/monthly — FUT contracts
+      // also have an expiry, but a user asking for "NIFTY monthly options"
+      // means the last-Tuesday-of-month CE/PE chain, not the FUT that
+      // happens to share the same expiry date.
+      const isOption = it === 'CE' || it === 'PE';
+      if (isOption) {
+        isWeekly = dow === weeklyDow;
+        isMonthly = dow === weeklyDow && dd === lastDowOfMonth(yy, mm, weeklyDow);
+      }
       expiryWeek = weekOfMonth(yy, mm, dd);
       expiryMonth = mm;
       expiryYear = yy;

@@ -552,10 +552,13 @@ export class SearchService {
     if (expTo) parts.push(`expiry <= ${JSON.stringify(expTo)}`);
 
     if (filters.isMonthly === true) {
-      parts.push('isMonthly = true');
+      // isMonthly is set on OPTIONS only by the indexer, but defensively
+      // scope to CE/PE so an indexer regression that sets it on FUT can't
+      // pollute /api/search?q=...monthly results.
+      parts.push('(isMonthly = true AND (optionType = "CE" OR optionType = "PE"))');
     }
     if (filters.isWeekly === true) {
-      parts.push('isWeekly = true');
+      parts.push('(isWeekly = true AND (optionType = "CE" OR optionType = "PE"))');
     }
 
     if (Number.isFinite(Number(filters.strike_min)))

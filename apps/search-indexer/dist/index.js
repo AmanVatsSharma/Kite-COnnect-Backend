@@ -251,8 +251,15 @@ function toDoc(r) {
             // Friday (5). Unknown underlyings fall back to Thursday (4) for legacy
             // compatibility.
             const weeklyDow = (_c = (0, index_helpers_1.weeklyDowForUnderlying)(underlyingSymbol)) !== null && _c !== void 0 ? _c : 4;
-            isWeekly = dow === weeklyDow;
-            isMonthly = dow === weeklyDow && dd === (0, index_helpers_1.lastDowOfMonth)(yy, mm, weeklyDow);
+            // Only classify OPTIONS (CE/PE) as weekly/monthly — FUT contracts
+            // also have an expiry, but a user asking for "NIFTY monthly options"
+            // means the last-Tuesday-of-month CE/PE chain, not the FUT that
+            // happens to share the same expiry date.
+            const isOption = it === 'CE' || it === 'PE';
+            if (isOption) {
+                isWeekly = dow === weeklyDow;
+                isMonthly = dow === weeklyDow && dd === (0, index_helpers_1.lastDowOfMonth)(yy, mm, weeklyDow);
+            }
             expiryWeek = (0, index_helpers_1.weekOfMonth)(yy, mm, dd);
             expiryMonth = mm;
             expiryYear = yy;

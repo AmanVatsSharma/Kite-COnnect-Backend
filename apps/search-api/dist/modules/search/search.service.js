@@ -331,10 +331,10 @@ let SearchService = SearchService_1 = class SearchService {
         if (expTo)
             parts.push(`expiry <= ${JSON.stringify(expTo)}`);
         if (filters.isMonthly === true) {
-            parts.push('isMonthly = true');
+            parts.push('(isMonthly = true AND (optionType = "CE" OR optionType = "PE"))');
         }
         if (filters.isWeekly === true) {
-            parts.push('isWeekly = true');
+            parts.push('(isWeekly = true AND (optionType = "CE" OR optionType = "PE"))');
         }
         if (Number.isFinite(Number(filters.strike_min)))
             parts.push(`strike >= ${Number(filters.strike_min)}`);
