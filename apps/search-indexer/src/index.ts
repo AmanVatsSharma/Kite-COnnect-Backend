@@ -435,6 +435,38 @@ async function fetchExpiredDerivativeIds(): Promise<number[]> {
 }
 
 /**
+ * Fetch every MeiliSearch document id (paginated). Used by `backfill()` to
+ * detect stale rows — docs that exist in the index but no longer in the DB.
+ * Meili's documents endpoint is paginated; we walk all pages with the
+ * `offset`/`limit` cursor and only request the `id` field to keep payload
+ * small on large indexes.
+ */
+async function fetchAllIndexedIds(
+  meiliBase: string,
+  headers: Record<string, string>,
+  index: string,
+): Promise<number[]> {
+  const ids: number[] = [];
+  let offset = 0;
+  const pageSize = 5000;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const resp = await axios.get(`${meiliBase}/indexes/${index}/documents`, {
+      headers,
+      params: { offset, limit: pageSize, fields: 'id' },
+    });
+    const results = (resp.data?.results || []) as Array<{
+      id: number | string;
+    }>;
+    if (results.length === 0) break;
+    for (const row of results) ids.push(Number(row.id));
+    if (results.length < pageSize) break;
+    offset += pageSize;
+  }
+  return ids;
+}
+
+/**
  * Delete expired instruments from MeiliSearch by their UIR ids.
  * MeiliSearch deleteDocuments accepts an array of primary keys.
  */
@@ -773,6 +805,31 @@ async function backfill(): Promise<void> {
     offset += rows.length;
     // eslint-disable-next-line no-console
     console.log(`[indexer] upserted ${offset}/${total}`);
+  }
+
+  // After upserting all current DB rows, prune any docs that exist in Meili
+  // but no longer exist in the DB. This prevents the index from accumulating
+  // stale rows from previous indexer runs (e.g. when the schema/catalog
+  // changes, when mappings are rebuilt, or when a provider stops streaming
+  // an instrument). Without this, the index can balloon to 2x the DB size.
+  const indexedIds = await fetchAllIndexedIds(meiliBase, headers, index);
+  const dbIds = new Set<number>();
+  await withPg(async (pg) => {
+    const r = await pg.query(
+      `SELECT id FROM universal_instruments WHERE is_active = true ${filterClause}`,
+    );
+    for (const row of r.rows) dbIds.add(Number(row.id));
+  });
+  const staleIds = indexedIds.filter((id) => !dbIds.has(id));
+  if (staleIds.length > 0) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[indexer] pruning ${staleIds.length} stale docs from Meili (not in DB)`,
+    );
+    await deleteFromMeiliSearch(meiliBase, headers, index, staleIds);
+  } else {
+    // eslint-disable-next-line no-console
+    console.log(`[indexer] no stale docs to prune`);
   }
 
   // eslint-disable-next-line no-console
