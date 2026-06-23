@@ -8,8 +8,41 @@
  *              Supports modes: backfill | incremental | backfill-and-watch | synonyms-apply | settings-apply.
  * @author BharatERP
  * @created 2025-12-01
- * @updated 2026-05-04
+ * @updated 2026-06-23
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -17,6 +50,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const axios_1 = __importDefault(require("axios"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Client } = require('pg');
+const index_helpers_1 = require("./index-helpers");
 /**
  * Canonical exchange → streaming provider map. **Mirror of**
  * `src/shared/utils/exchange-to-provider.util.ts` — duplicated here because the
@@ -199,6 +233,29 @@ function toDoc(r) {
         else if (massiveToken)
             streamProvider = 'massive';
     }
+    // Compute expiry-derived enrichment fields (only meaningful for F&O derivatives with non-null expiry).
+    let isMonthly;
+    let isWeekly;
+    let expiryWeek;
+    let expiryMonth;
+    let expiryYear;
+    let monthlyExpiryDate;
+    if (isDerivative && r.expiry) {
+        const expiryStr = String(r.expiry).slice(0, 10);
+        const [yy, mm, dd] = expiryStr.split('-').map((s) => Number(s));
+        if (Number.isFinite(yy) && Number.isFinite(mm) && Number.isFinite(dd)) {
+            const expiryDate = new Date(yy, mm - 1, dd);
+            const dow = expiryDate.getDay();
+            isWeekly = dow === 4;
+            isMonthly = dow === 4 && dd === (0, index_helpers_1.lastThursdayOfMonth)(yy, mm);
+            expiryWeek = (0, index_helpers_1.weekOfMonth)(yy, mm, dd);
+            expiryMonth = mm;
+            expiryYear = yy;
+            monthlyExpiryDate = isMonthly
+                ? Math.floor(new Date(expiryStr + 'T09:15:00Z').getTime() / 1000)
+                : undefined;
+        }
+    }
     return {
         id: Number(r.id),
         canonicalSymbol: r.canonical_symbol,
@@ -211,7 +268,8 @@ function toDoc(r) {
         optionType: r.option_type || null,
         expiry: r.expiry ? String(r.expiry).slice(0, 10) : null,
         expiryTs: r.expiry
-            ? Math.floor(new Date(String(r.expiry).slice(0, 10) + 'T09:15:00Z').getTime() / 1000)
+            ? Math.floor(new Date(String(r.expiry).slice(0, 10) + 'T09:15:00Z').getTime() /
+                1000)
             : 9999999999,
         strike: r.strike !== null ? Number(r.strike) : null,
         lotSize: r.lot_size || 1,
@@ -227,13 +285,27 @@ function toDoc(r) {
         massiveToken,
         binanceToken,
         streamProvider,
+        isMonthly,
+        isWeekly,
+        expiryWeek,
+        expiryMonth,
+        expiryYear,
+        monthlyExpiryDate,
         ...(() => {
             const isCrypto = r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto';
-            if (!isCrypto)
+            if (!isCrypto) {
+                const tk = [symbol, r.name].filter(Boolean);
+                const strippedName = r.name
+                    ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '')
+                    : undefined;
+                if (strippedName)
+                    tk.push(strippedName);
                 return {
-                    searchKeywords: [symbol, r.name].filter(Boolean),
-                    exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
+                    searchKeywords: tk,
+                    exactName: strippedName,
+                    tokenKeywords: tk,
                 };
+            }
             const base = extractCoinBase(symbol);
             const fullName = CRYPTO_BASE_NAMES[base];
             const kw = [symbol, r.name].filter(Boolean);
@@ -251,10 +323,112 @@ function toDoc(r) {
             return {
                 searchKeywords: kw,
                 coinFullName: fullName && isUsdtQuoted ? fullName : undefined,
-                exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
+                exactName: r.name
+                    ? r.name.toUpperCase().replace(/\s+/g, '')
+                    : undefined,
+                tokenKeywords: kw,
             };
         })(),
     };
+}
+// ─── Expired derivatives cleanup ─────────────────────────────────────────────
+/**
+ * Fetch IDs of expired FUT/CE/PE contracts from the DB.
+ * Returns numeric UIR ids as number[] for MeiliSearch deletion.
+ */
+async function fetchExpiredDerivativeIds() {
+    return withPg(async (pg) => {
+        const cutoff = new Date().toISOString().slice(0, 10);
+        const r = await pg.query(`SELECT id::bigint AS id FROM universal_instruments
+       WHERE expiry < $1
+         AND instrument_type IN ('FUT', 'CE', 'PE')
+         AND is_active = false`, [cutoff]);
+        return r.rows.map((row) => Number(row.id.toString()));
+    });
+}
+/**
+ * Delete expired instruments from MeiliSearch by their UIR ids.
+ * MeiliSearch deleteDocuments accepts an array of primary keys.
+ */
+async function deleteFromMeiliSearch(meiliBase, headers, index, ids) {
+    if (ids.length === 0)
+        return;
+    const batchSize = 1000;
+    for (let i = 0; i < ids.length; i += batchSize) {
+        const batch = ids.slice(i, i + batchSize);
+        await axios_1.default.delete(`${meiliBase}/indexes/${index}/documents`, {
+            headers,
+            data: batch,
+        });
+        // eslint-disable-next-line no-console
+        console.log(`[expired-cleanup] deleted batch ${Math.floor(i / batchSize) + 1} (${batch.length} docs)`);
+    }
+}
+/**
+ * Standalone expired-cleanup mode: run once, delete expired instruments from MeiliSearch.
+ * Called by the cron trigger HTTP endpoint AND when INDEXER_MODE=expired-cleanup.
+ */
+async function expiredCleanup() {
+    const meiliBase = env('MEILI_HOST', 'http://meilisearch:7700');
+    const meiliKey = env('MEILI_MASTER_KEY', '');
+    const index = env('MEILI_INDEX', 'instruments_v1');
+    const headers = meiliKey
+        ? { Authorization: `Bearer ${meiliKey}` }
+        : {};
+    const ids = await fetchExpiredDerivativeIds();
+    if (ids.length === 0) {
+        // eslint-disable-next-line no-console
+        console.log('[expired-cleanup] no expired derivatives to remove from MeiliSearch');
+        return { deleted: 0 };
+    }
+    await deleteFromMeiliSearch(meiliBase, headers, index, ids);
+    // eslint-disable-next-line no-console
+    console.log(`[expired-cleanup] deleted ${ids.length} expired instruments from MeiliSearch`);
+    return { deleted: ids.length };
+}
+/**
+ * Tiny HTTP server that exposes POST /api/indexer/cleanup-expired
+ * so the NestJS backend can trigger MeiliSearch cleanup after deactivating
+ * expired rows in the DB. Runs alongside the normal indexer process when
+ * INDEXER_HTTP_ENABLED=true.
+ */
+async function startHttpTriggerServer() {
+    const port = Number(env('INDEXER_HTTP_PORT', '3003'));
+    const http = await Promise.resolve().then(() => __importStar(require('http')));
+    const server = http.createServer(async (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        if (req.method === 'OPTIONS') {
+            res.writeHead(204);
+            res.end();
+            return;
+        }
+        if (req.method === 'POST' && req.url === '/api/indexer/cleanup-expired') {
+            let body = '';
+            req.on('data', (chunk) => {
+                body += chunk;
+            });
+            req.on('end', async () => {
+                try {
+                    const result = await expiredCleanup();
+                    res.writeHead(200);
+                    res.end(JSON.stringify({ ok: true, ...result }));
+                }
+                catch (e) {
+                    // eslint-disable-next-line no-console
+                    console.error('[expired-cleanup] HTTP trigger failed', e);
+                    res.writeHead(500);
+                    res.end(JSON.stringify({ ok: false, error: String(e) }));
+                }
+            });
+            return;
+        }
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'Not found' }));
+    });
+    await new Promise((res) => server.listen(port, res));
+    // eslint-disable-next-line no-console
+    console.log(`[indexer-http] trigger server listening on port ${port}`);
 }
 // ─── MeiliSearch index settings ──────────────────────────────────────────────
 async function applySettings(meiliBase, apiKey, index) {
@@ -269,6 +443,7 @@ async function applySettings(meiliBase, apiKey, index) {
             'canonicalSymbol', // P4: "NSE:RELIANCE"
             'underlyingSymbol', // P5: for F&O: "NIFTY" extracted from "NIFTY24JAN22000CE"
             'searchKeywords', // P6: combined fallback bag
+            'tokenKeywords', // P7: alias tokens (e.g. RELIANCE+RIL); additive to existing fields
         ],
         filterableAttributes: [
             'exchange',
@@ -284,6 +459,13 @@ async function applySettings(meiliBase, apiKey, index) {
             'lotSize',
             // New routing/coverage facets — let clients filter "all binance pairs", "all massive crypto", etc.
             'streamProvider',
+            // Natural-language expiry classification (only set on F&O derivatives)
+            'isMonthly',
+            'isWeekly',
+            'expiryWeek',
+            'expiryMonth',
+            'expiryYear',
+            'monthlyExpiryDate',
         ],
         sortableAttributes: [
             'symbol',
@@ -294,6 +476,7 @@ async function applySettings(meiliBase, apiKey, index) {
             'expiryTs', // numeric sort = nearest expiry first
             'strike',
             'optionType',
+            'monthlyExpiryDate', // numeric sort for nearest-monthly-expiry first
         ],
         rankingRules: [
             'typo', // P0: typo-tolerant (makes "nifty" match "NIFTY 50")
@@ -552,8 +735,9 @@ async function applySynonymsFromRedis() {
 // ─── Entry ───────────────────────────────────────────────────────────────────
 async function main() {
     const mode = env('INDEXER_MODE', 'backfill');
+    const httpEnabled = env('INDEXER_HTTP_ENABLED', 'false') === 'true';
     // eslint-disable-next-line no-console
-    console.log(`[indexer] mode=${mode}`);
+    console.log(`[indexer] mode=${mode}, httpTrigger=${httpEnabled}`);
     if (mode === 'backfill') {
         await backfill();
     }
@@ -575,10 +759,16 @@ async function main() {
         // eslint-disable-next-line no-console
         console.log('[indexer] settings-apply complete');
     }
-    else {
+    else if (mode === 'expired-cleanup') {
+        // One-shot cleanup run (e.g. from a cron job in k8s/CI)
+        const result = await expiredCleanup();
         // eslint-disable-next-line no-console
-        console.error(`[indexer] unknown INDEXER_MODE=${mode}`);
-        process.exit(2);
+        console.log(`[indexer] expired-cleanup done: deleted=${result.deleted}`);
+        return;
+    }
+    if (httpEnabled) {
+        // Keep the HTTP trigger server alive alongside the main loop
+        await startHttpTriggerServer();
     }
 }
 main().catch((e) => {

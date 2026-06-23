@@ -1,5 +1,6 @@
 import { Response, Request } from 'express';
 import { SearchService } from './search.service';
+import { SearchQueryDto } from './dto/search-query.dto';
 type PublicSearchResultItem = {
     id: number;
     canonicalSymbol: string;
@@ -13,13 +14,14 @@ type PublicSearchResultItem = {
 export declare class SearchController {
     private readonly searchService;
     private readonly logger;
+    private readonly parser;
     constructor(searchService: SearchService);
-    search(q: string, limitRaw?: string, exchange?: string, segment?: string, instrumentType?: string, vortexExchange?: string, optionType?: string, assetClass?: string, streamProvider?: string, mode?: string, expiry_from?: string, expiry_to?: string, strike_min?: string, strike_max?: string, ltpOnlyRaw?: string | boolean, liveRaw?: string | boolean, fieldsRaw?: string, includeRaw?: string, adminTokenHeader?: string): Promise<{
+    search(dto: SearchQueryDto, adminTokenHeader?: string): Promise<{
         success: boolean;
         data: PublicSearchResultItem[];
         timestamp: string;
     }>;
-    suggest(q: string, limitRaw?: string, exchange?: string, segment?: string, instrumentType?: string, vortexExchange?: string, optionType?: string, streamProvider?: string, mode?: string, expiry_from?: string, expiry_to?: string, strike_min?: string, strike_max?: string, ltpOnlyRaw?: string | boolean, liveRaw?: string | boolean, fieldsRaw?: string, includeRaw?: string, adminTokenHeader?: string): Promise<{
+    suggest(dto: SearchQueryDto, adminTokenHeader?: string): Promise<{
         success: boolean;
         data: PublicSearchResultItem[];
         timestamp: string;
@@ -161,5 +163,6 @@ export declare class SearchController {
         success: boolean;
     }>;
     stream(res: Response, req: Request, idsRaw?: string, tokensRaw?: string, q?: string, ltpOnlyRaw?: string | boolean): Promise<void>;
+    private toIsoDate;
 }
 export {};

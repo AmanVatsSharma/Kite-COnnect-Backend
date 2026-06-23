@@ -16,6 +16,8 @@ exports.SearchController = void 0;
 const common_1 = require("@nestjs/common");
 const search_service_1 = require("./search.service");
 const provider_aliases_1 = require("./provider-aliases");
+const fno_query_parser_1 = require("../../fno/fno-query-parser");
+const search_query_dto_1 = require("./dto/search-query.dto");
 function buildResponseRow(raw, last_price, selectedFields, includeInternal, change, pchange) {
     const live = Number.isFinite(last_price) && (last_price !== null && last_price !== void 0 ? last_price : 0) > 0;
     let logo_url = null;
@@ -154,91 +156,141 @@ let SearchController = class SearchController {
     constructor(searchService) {
         this.searchService = searchService;
         this.logger = new common_1.Logger('SearchController');
+        this.parser = new fno_query_parser_1.FnoQueryParserService();
     }
-    async search(q, limitRaw, exchange, segment, instrumentType, vortexExchange, optionType, assetClass, streamProvider, mode, expiry_from, expiry_to, strike_min, strike_max, ltpOnlyRaw, liveRaw, fieldsRaw, includeRaw, adminTokenHeader) {
-        if (!q || q.trim().length === 0) {
+    async search(dto, adminTokenHeader) {
+        var _a, _b, _c, _d, _e, _f, _g;
+        if (!dto.q || dto.q.trim().length === 0) {
             throw new common_1.HttpException({ success: false, message: 'q is required' }, common_1.HttpStatus.BAD_REQUEST);
         }
-        const limit = Math.min(Number(limitRaw || 10), 50);
-        const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
-            ltpOnlyRaw === true ||
-            String(liveRaw || '').toLowerCase() === 'true' ||
-            liveRaw === true;
-        const modeVe = mode
-            ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()]
+        const limit = (_a = dto.limit) !== null && _a !== void 0 ? _a : 10;
+        const q = dto.q.trim();
+        const ltpOnly = String(dto.ltp_only || '').toLowerCase() === 'true' ||
+            String(dto.live || '').toLowerCase() === 'true';
+        const modeVe = dto.mode
+            ? MODE_TO_VORTEX_EXCHANGE[String(dto.mode).toLowerCase()]
             : undefined;
-        const includeInternal = isInternalIncludeAuthorized(includeRaw, adminTokenHeader);
-        const selectedFields = parseFieldsParam(fieldsRaw);
+        const includeInternal = isInternalIncludeAuthorized(dto.include, adminTokenHeader);
+        const selectedFields = parseFieldsParam(dto.fields);
         const meiliAttrs = buildMeiliAttrs(selectedFields, includeInternal);
+        const parsed = this.parser.parse(q);
         const filters = {
-            exchange,
-            segment,
-            instrumentType,
-            vortexExchange: vortexExchange || modeVe,
-            optionType,
-            assetClass,
-            streamProvider: normalizeStreamProvider(streamProvider),
-            expiry_from,
-            expiry_to,
-            strike_min,
-            strike_max,
+            exchange: dto.exchange,
+            segment: dto.segment,
+            instrumentType: dto.instrumentType,
+            vortexExchange: dto.vortexExchange || modeVe,
+            optionType: dto.optionType,
+            assetClass: dto.assetClass,
+            streamProvider: normalizeStreamProvider(dto.streamProvider),
+            expiry_from: dto.expiry_from,
+            expiry_to: dto.expiry_to,
+            strike_min: dto.strike_min,
+            strike_max: dto.strike_max,
+            isMonthly: parsed.isMonthly,
+            isWeekly: parsed.isWeekly,
+            parsedExpiryFrom: parsed.expiryFrom
+                ? this.toIsoDate(parsed.expiryFrom)
+                : undefined,
+            parsedExpiryTo: parsed.expiryTo
+                ? this.toIsoDate(parsed.expiryTo)
+                : undefined,
         };
         const probeMult = Number(process.env.LTP_ONLY_PROBE_MULTIPLIER || 5);
         const searchCap = Number(process.env.SEARCH_LTP_ONLY_HYDRATE_CAP || 200);
         const probeLimit = ltpOnly
             ? Math.min(Math.max(limit * probeMult, limit), searchCap)
             : limit;
-        const items = await this.searchService.searchInstruments(q.trim(), probeLimit, filters, meiliAttrs);
+        const items = await this.searchService.searchInstruments(q, probeLimit, filters, meiliAttrs);
         const quotes = await this.searchService.hydrateLtpByItems(items.slice(0, probeLimit));
         const enriched = items.map((it) => {
             var _a, _b, _c, _d, _e, _f;
             return buildResponseRow(it, (_b = (_a = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _a === void 0 ? void 0 : _a.last_price) !== null && _b !== void 0 ? _b : null, selectedFields, includeInternal, (_d = (_c = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _c === void 0 ? void 0 : _c.change) !== null && _d !== void 0 ? _d : null, (_f = (_e = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _e === void 0 ? void 0 : _e.pchange) !== null && _f !== void 0 ? _f : null);
         });
-        const data = (ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched).slice(0, limit);
+        let data = (ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched).slice(0, limit);
+        if (ltpOnly && data.length === 0) {
+            const primary = this.searchService.fetchPrimaryUir(q);
+            if (primary) {
+                const fallbackQuotes = await this.searchService.hydrateLtpByItems([
+                    primary,
+                ]);
+                const fp = (_c = (_b = fallbackQuotes === null || fallbackQuotes === void 0 ? void 0 : fallbackQuotes[String(primary.id)]) === null || _b === void 0 ? void 0 : _b.last_price) !== null && _c !== void 0 ? _c : null;
+                if (Number.isFinite(fp) && fp > 0) {
+                    data = [
+                        buildResponseRow(primary, fp, selectedFields, includeInternal, (_e = (_d = fallbackQuotes === null || fallbackQuotes === void 0 ? void 0 : fallbackQuotes[String(primary.id)]) === null || _d === void 0 ? void 0 : _d.change) !== null && _e !== void 0 ? _e : null, (_g = (_f = fallbackQuotes === null || fallbackQuotes === void 0 ? void 0 : fallbackQuotes[String(primary.id)]) === null || _f === void 0 ? void 0 : _f.pchange) !== null && _g !== void 0 ? _g : null),
+                    ];
+                    this.logger.log(`[Search] ltp_only primary-index fallback hit: q="${q}" uir=${primary.id} fp=${fp}`);
+                }
+            }
+        }
         this.logger.log(`[Search] q="${q}" limit=${limit} probe=${probeLimit} ltp_only=${ltpOnly} ` +
             `fields=${selectedFields ? Array.from(selectedFields).join('|') : '*'} ` +
             `include_internal=${includeInternal} returned=${data.length}`);
         return { success: true, data, timestamp: new Date().toISOString() };
     }
-    async suggest(q, limitRaw, exchange, segment, instrumentType, vortexExchange, optionType, streamProvider, mode, expiry_from, expiry_to, strike_min, strike_max, ltpOnlyRaw, liveRaw, fieldsRaw, includeRaw, adminTokenHeader) {
-        const limit = Math.min(Number(limitRaw || 5), 20);
-        if (!q || q.trim().length === 0) {
+    async suggest(dto, adminTokenHeader) {
+        var _a, _b, _c, _d, _e, _f;
+        const limit = Math.min(Number(dto.limit || 5), 20);
+        if (!dto.q || dto.q.trim().length === 0) {
             return { success: true, data: [], timestamp: new Date().toISOString() };
         }
-        const ltpOnly = String(ltpOnlyRaw || '').toLowerCase() === 'true' ||
-            ltpOnlyRaw === true ||
-            String(liveRaw || '').toLowerCase() === 'true' ||
-            liveRaw === true;
-        const modeVe = mode
-            ? MODE_TO_VORTEX_EXCHANGE[String(mode).toLowerCase()]
+        const ltpOnly = String(dto.ltp_only || '').toLowerCase() === 'true' ||
+            String(dto.live || '').toLowerCase() === 'true';
+        const modeVe = dto.mode
+            ? MODE_TO_VORTEX_EXCHANGE[String(dto.mode).toLowerCase()]
             : undefined;
-        const includeInternal = isInternalIncludeAuthorized(includeRaw, adminTokenHeader);
-        const selectedFields = parseFieldsParam(fieldsRaw);
+        const includeInternal = isInternalIncludeAuthorized(dto.include, adminTokenHeader);
+        const selectedFields = parseFieldsParam(dto.fields);
         const meiliAttrs = buildMeiliAttrs(selectedFields, includeInternal);
+        const q = dto.q.trim();
+        const parsed = this.parser.parse(q);
         const filters = {
-            exchange,
-            segment,
-            instrumentType,
-            vortexExchange: vortexExchange || modeVe,
-            optionType,
-            streamProvider: normalizeStreamProvider(streamProvider),
-            expiry_from,
-            expiry_to,
-            strike_min,
-            strike_max,
+            exchange: dto.exchange,
+            segment: dto.segment,
+            instrumentType: dto.instrumentType,
+            vortexExchange: dto.vortexExchange || modeVe,
+            optionType: dto.optionType,
+            assetClass: dto.assetClass,
+            streamProvider: normalizeStreamProvider(dto.streamProvider),
+            expiry_from: dto.expiry_from,
+            expiry_to: dto.expiry_to,
+            strike_min: dto.strike_min,
+            strike_max: dto.strike_max,
+            isMonthly: parsed.isMonthly,
+            isWeekly: parsed.isWeekly,
+            parsedExpiryFrom: parsed.expiryFrom
+                ? this.toIsoDate(parsed.expiryFrom)
+                : undefined,
+            parsedExpiryTo: parsed.expiryTo
+                ? this.toIsoDate(parsed.expiryTo)
+                : undefined,
         };
         const probeMult = Number(process.env.LTP_ONLY_PROBE_MULTIPLIER || 5);
         const suggestCap = Number(process.env.SUGGEST_LTP_ONLY_HYDRATE_CAP || 100);
         const probeLimit = ltpOnly
             ? Math.min(Math.max(limit * probeMult, limit), suggestCap)
             : limit;
-        const items = await this.searchService.searchInstruments(q.trim(), probeLimit, filters, meiliAttrs);
+        const items = await this.searchService.searchInstruments(q, probeLimit, filters, meiliAttrs);
         const quotes = await this.searchService.hydrateLtpByItems(items.slice(0, probeLimit));
         const enriched = items.map((it) => {
             var _a, _b, _c, _d, _e, _f;
             return buildResponseRow(it, (_b = (_a = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _a === void 0 ? void 0 : _a.last_price) !== null && _b !== void 0 ? _b : null, selectedFields, includeInternal, (_d = (_c = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _c === void 0 ? void 0 : _c.change) !== null && _d !== void 0 ? _d : null, (_f = (_e = quotes === null || quotes === void 0 ? void 0 : quotes[String(it.id)]) === null || _e === void 0 ? void 0 : _e.pchange) !== null && _f !== void 0 ? _f : null);
         });
-        const data = (ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched).slice(0, limit);
+        let data = (ltpOnly ? enriched.filter((v) => v.priceStatus === 'live') : enriched).slice(0, limit);
+        if (ltpOnly && data.length === 0) {
+            const primary = this.searchService.fetchPrimaryUir(q);
+            if (primary) {
+                const fallbackQuotes = await this.searchService.hydrateLtpByItems([
+                    primary,
+                ]);
+                const fp = (_b = (_a = fallbackQuotes === null || fallbackQuotes === void 0 ? void 0 : fallbackQuotes[String(primary.id)]) === null || _a === void 0 ? void 0 : _a.last_price) !== null && _b !== void 0 ? _b : null;
+                if (Number.isFinite(fp) && fp > 0) {
+                    data = [
+                        buildResponseRow(primary, fp, selectedFields, includeInternal, (_d = (_c = fallbackQuotes === null || fallbackQuotes === void 0 ? void 0 : fallbackQuotes[String(primary.id)]) === null || _c === void 0 ? void 0 : _c.change) !== null && _d !== void 0 ? _d : null, (_f = (_e = fallbackQuotes === null || fallbackQuotes === void 0 ? void 0 : fallbackQuotes[String(primary.id)]) === null || _e === void 0 ? void 0 : _e.pchange) !== null && _f !== void 0 ? _f : null),
+                    ];
+                    this.logger.log(`[Suggest] ltp_only primary-index fallback hit: q="${q}" uir=${primary.id} fp=${fp}`);
+                }
+            }
+        }
         this.logger.log(`[Suggest] q="${q}" limit=${limit} ltp_only=${ltpOnly} ` +
             `fields=${selectedFields ? Array.from(selectedFields).join('|') : '*'} ` +
             `include_internal=${includeInternal} returned=${data.length}`);
@@ -483,55 +535,33 @@ let SearchController = class SearchController {
         }, 1000);
         req.on('close', () => clearInterval(timer));
     }
+    toIsoDate(ymd) {
+        const s = String(ymd || '').trim();
+        if (!s)
+            return s;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s))
+            return s;
+        const m = /^(\d{4})(\d{2})(\d{2})$/.exec(s);
+        if (!m)
+            return s;
+        return `${m[1]}-${m[2]}-${m[3]}`;
+    }
 };
 exports.SearchController = SearchController;
 __decorate([
     (0, common_1.Get)(),
-    __param(0, (0, common_1.Query)('q')),
-    __param(1, (0, common_1.Query)('limit')),
-    __param(2, (0, common_1.Query)('exchange')),
-    __param(3, (0, common_1.Query)('segment')),
-    __param(4, (0, common_1.Query)('instrumentType')),
-    __param(5, (0, common_1.Query)('vortexExchange')),
-    __param(6, (0, common_1.Query)('optionType')),
-    __param(7, (0, common_1.Query)('assetClass')),
-    __param(8, (0, common_1.Query)('streamProvider')),
-    __param(9, (0, common_1.Query)('mode')),
-    __param(10, (0, common_1.Query)('expiry_from')),
-    __param(11, (0, common_1.Query)('expiry_to')),
-    __param(12, (0, common_1.Query)('strike_min')),
-    __param(13, (0, common_1.Query)('strike_max')),
-    __param(14, (0, common_1.Query)('ltp_only')),
-    __param(15, (0, common_1.Query)('live')),
-    __param(16, (0, common_1.Query)('fields')),
-    __param(17, (0, common_1.Query)('include')),
-    __param(18, (0, common_1.Headers)('x-admin-token')),
+    __param(0, (0, common_1.Query)()),
+    __param(1, (0, common_1.Headers)('x-admin-token')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String, String, String, String, String, String, String, String, String, String, String, String, Object, Object, String, String, String]),
+    __metadata("design:paramtypes", [search_query_dto_1.SearchQueryDto, String]),
     __metadata("design:returntype", Promise)
 ], SearchController.prototype, "search", null);
 __decorate([
     (0, common_1.Get)('suggest'),
-    __param(0, (0, common_1.Query)('q')),
-    __param(1, (0, common_1.Query)('limit')),
-    __param(2, (0, common_1.Query)('exchange')),
-    __param(3, (0, common_1.Query)('segment')),
-    __param(4, (0, common_1.Query)('instrumentType')),
-    __param(5, (0, common_1.Query)('vortexExchange')),
-    __param(6, (0, common_1.Query)('optionType')),
-    __param(7, (0, common_1.Query)('streamProvider')),
-    __param(8, (0, common_1.Query)('mode')),
-    __param(9, (0, common_1.Query)('expiry_from')),
-    __param(10, (0, common_1.Query)('expiry_to')),
-    __param(11, (0, common_1.Query)('strike_min')),
-    __param(12, (0, common_1.Query)('strike_max')),
-    __param(13, (0, common_1.Query)('ltp_only')),
-    __param(14, (0, common_1.Query)('live')),
-    __param(15, (0, common_1.Query)('fields')),
-    __param(16, (0, common_1.Query)('include')),
-    __param(17, (0, common_1.Headers)('x-admin-token')),
+    __param(0, (0, common_1.Query)()),
+    __param(1, (0, common_1.Headers)('x-admin-token')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, String, String, String, String, String, String, String, String, String, String, String, Object, Object, String, String, String]),
+    __metadata("design:paramtypes", [search_query_dto_1.SearchQueryDto, String]),
     __metadata("design:returntype", Promise)
 ], SearchController.prototype, "suggest", null);
 __decorate([

@@ -323,10 +323,18 @@ let SearchService = SearchService_1 = class SearchService {
             parts.push(`streamProvider = ${JSON.stringify(filters.streamProvider)}`);
         if (filters.isDerivative !== undefined)
             parts.push(`isDerivative = ${!!filters.isDerivative}`);
-        if (filters.expiry_from)
-            parts.push(`expiry >= ${JSON.stringify(filters.expiry_from)}`);
-        if (filters.expiry_to)
-            parts.push(`expiry <= ${JSON.stringify(filters.expiry_to)}`);
+        const expFrom = filters.expiry_from || filters.parsedExpiryFrom;
+        const expTo = filters.expiry_to || filters.parsedExpiryTo;
+        if (expFrom)
+            parts.push(`expiry >= ${JSON.stringify(expFrom)}`);
+        if (expTo)
+            parts.push(`expiry <= ${JSON.stringify(expTo)}`);
+        if (filters.isMonthly === true) {
+            parts.push('isMonthly = true');
+        }
+        if (filters.isWeekly === true) {
+            parts.push('isWeekly = true');
+        }
         if (Number.isFinite(Number(filters.strike_min)))
             parts.push(`strike >= ${Number(filters.strike_min)}`);
         if (Number.isFinite(Number(filters.strike_max)))
@@ -343,6 +351,33 @@ let SearchService = SearchService_1 = class SearchService {
             }
         }
         return out;
+    }
+    fetchPrimaryUir(q) {
+        const norm = String(q || '')
+            .trim()
+            .toUpperCase();
+        const PRIMARY_INDEX_MAP = {
+            NIFTY: { symbol: 'NIFTY', canonicalSymbol: 'NSE:NIFTY' },
+            NIFTY50: { symbol: 'NIFTY', canonicalSymbol: 'NSE:NIFTY' },
+            BANKNIFTY: { symbol: 'BANKNIFTY', canonicalSymbol: 'NSE:BANKNIFTY' },
+            SENSEX: { symbol: 'SENSEX', canonicalSymbol: 'BSE:SENSEX' },
+            FINNIFTY: { symbol: 'FINNIFTY', canonicalSymbol: 'NSE:FINNIFTY' },
+            MIDCPNIFTY: { symbol: 'MIDCPNIFTY', canonicalSymbol: 'NSE:MIDCPNIFTY' },
+        };
+        const hit = PRIMARY_INDEX_MAP[norm];
+        if (!hit)
+            return undefined;
+        return {
+            id: 0,
+            canonicalSymbol: hit.canonicalSymbol,
+            symbol: hit.symbol,
+            name: hit.symbol,
+            exchange: hit.canonicalSymbol.split(':')[0],
+            instrumentType: 'IDX',
+            assetClass: 'equity',
+            isDerivative: false,
+            streamProvider: 'kite',
+        };
     }
 };
 exports.SearchService = SearchService;

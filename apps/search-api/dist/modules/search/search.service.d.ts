@@ -49,6 +49,10 @@ export declare class SearchService {
         expiry_to?: string;
         strike_min?: number | string;
         strike_max?: number | string;
+        isMonthly?: boolean;
+        isWeekly?: boolean;
+        parsedExpiryFrom?: string;
+        parsedExpiryTo?: string;
     }, attributesToRetrieve?: readonly string[]): Promise<SearchResultItem[]>;
     facetCounts(filters?: Record<string, string | undefined>): Promise<Record<string, any>>;
     hydrateQuotes(tokens: number[], mode?: 'ltp' | 'ohlc' | 'full'): Promise<Record<string, any>>;
@@ -56,4 +60,5 @@ export declare class SearchService {
     logSelectionTelemetry(q: string, symbol: string, universalId?: number): Promise<void>;
     buildFilter(filters: Record<string, any>): string | undefined;
     private dedupeById;
+    fetchPrimaryUir(q: string): SearchResultItem | undefined;
 }
