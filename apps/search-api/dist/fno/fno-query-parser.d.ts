@@ -9,6 +9,7 @@ export interface ParsedFoQuery {
     expiryTo?: string;
     isMonthly?: boolean;
     isWeekly?: boolean;
+    textTerms?: string[];
 }
 export declare class FnoQueryParserService {
     private readonly logger;

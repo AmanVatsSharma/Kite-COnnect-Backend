@@ -174,6 +174,9 @@ let SearchController = class SearchController {
         const selectedFields = parseFieldsParam(dto.fields);
         const meiliAttrs = buildMeiliAttrs(selectedFields, includeInternal);
         const parsed = this.parser.parse(q);
+        const meiliQ = parsed.textTerms && parsed.textTerms.length > 0
+            ? parsed.textTerms.join(' ')
+            : q;
         const filters = {
             exchange: dto.exchange,
             segment: dto.segment,
@@ -200,7 +203,7 @@ let SearchController = class SearchController {
         const probeLimit = ltpOnly
             ? Math.min(Math.max(limit * probeMult, limit), searchCap)
             : limit;
-        const items = await this.searchService.searchInstruments(q, probeLimit, filters, meiliAttrs);
+        const items = await this.searchService.searchInstruments(meiliQ, probeLimit, filters, meiliAttrs);
         const quotes = await this.searchService.hydrateLtpByItems(items.slice(0, probeLimit));
         const enriched = items.map((it) => {
             var _a, _b, _c, _d, _e, _f;
@@ -243,6 +246,9 @@ let SearchController = class SearchController {
         const meiliAttrs = buildMeiliAttrs(selectedFields, includeInternal);
         const q = dto.q.trim();
         const parsed = this.parser.parse(q);
+        const meiliQ = parsed.textTerms && parsed.textTerms.length > 0
+            ? parsed.textTerms.join(' ')
+            : q;
         const filters = {
             exchange: dto.exchange,
             segment: dto.segment,
@@ -269,7 +275,7 @@ let SearchController = class SearchController {
         const probeLimit = ltpOnly
             ? Math.min(Math.max(limit * probeMult, limit), suggestCap)
             : limit;
-        const items = await this.searchService.searchInstruments(q, probeLimit, filters, meiliAttrs);
+        const items = await this.searchService.searchInstruments(meiliQ, probeLimit, filters, meiliAttrs);
         const quotes = await this.searchService.hydrateLtpByItems(items.slice(0, probeLimit));
         const enriched = items.map((it) => {
             var _a, _b, _c, _d, _e, _f;

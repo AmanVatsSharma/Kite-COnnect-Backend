@@ -339,6 +339,17 @@ export class SearchController {
     // query params. Explicit user range wins; parsed values fill in.
     const parsed = this.parser.parse(q);
 
+    // `textTerms` is the original query minus NL keywords, option type, strike,
+    // and expiry tokens. We send THAT to MeiliSearch's text search because the
+    // stripped tokens don't appear in any document field (e.g. "monthly" is
+    // represented as `isMonthly=true` filter, not as text). The underlying
+    // symbol IS kept in textTerms so Meili can still rank by `name`/`symbol`.
+    // Falls back to the raw `q` when the parser had nothing to strip.
+    const meiliQ =
+      parsed.textTerms && parsed.textTerms.length > 0
+        ? parsed.textTerms.join(' ')
+        : q;
+
     const filters = {
       exchange: dto.exchange,
       segment: dto.segment,
@@ -368,7 +379,7 @@ export class SearchController {
       : limit;
 
     const items = await this.searchService.searchInstruments(
-      q,
+      meiliQ,
       probeLimit,
       filters,
       meiliAttrs,
@@ -462,6 +473,10 @@ export class SearchController {
     // ── Natural-language parser (additive) ─────────────────────────────────
     const q = dto.q.trim();
     const parsed = this.parser.parse(q);
+    const meiliQ =
+      parsed.textTerms && parsed.textTerms.length > 0
+        ? parsed.textTerms.join(' ')
+        : q;
 
     const filters = {
       exchange: dto.exchange,
@@ -492,7 +507,7 @@ export class SearchController {
       : limit;
 
     const items = await this.searchService.searchInstruments(
-      q,
+      meiliQ,
       probeLimit,
       filters,
       meiliAttrs,

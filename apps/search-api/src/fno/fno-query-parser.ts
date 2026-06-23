@@ -68,6 +68,34 @@ export interface ParsedFoQuery {
    * Caller should filter MeiliSearch docs on `isWeekly = true`.
    */
   isWeekly?: boolean;
+  /**
+   * Tokens that should be sent to MeiliSearch's text search (`q`).
+   *
+   * Excludes:
+   * - NL keywords: `monthly`, `weekly`, `expiry`, `month end`, `next week`
+   * - Weekday names: `monday`, `tuesday`, …
+   * - Strike numbers (consumed into `strike`)
+   * - Option type tokens (`CE`, `PE`, `CALL`, `PUT`)
+   * - Expiry date tokens (e.g., `28MAR2025`)
+   * - The first alphabetic token (consumed into `underlying`)
+   *
+   * Why this exists: MeiliSearch's text search requires all `q` words to match
+   * (with `matchingStrategy: "all"`). NL keywords like "monthly" and "expiry"
+   * don't appear in document fields — only as `isMonthly=true` filter — so
+   * passing them to Meili would yield 0 hits. The controller should use
+   * `textTerms.join(' ')` (or fall back to `q`) as the Meili `q` parameter.
+   *
+   * Example:
+   *   `q="nifty 24000 monthly expiry"`
+   *     → underlying="NIFTY", strike=24000, isMonthly=true,
+   *       textTerms=["nifty"]  ← underlying is still in terms so Meili ranks by name match
+   *
+   *   `q="reliance"`
+   *     → underlying="RELIANCE", textTerms=["reliance"]
+   *
+   * Tokens are returned in their original (upper-cased) form, preserving order.
+   */
+  textTerms?: string[];
 }
 
 export class FnoQueryParserService {
@@ -108,6 +136,10 @@ export class FnoQueryParserService {
 
     const optionTokens = new Set(['CE', 'PE', 'CALL', 'PUT', 'C', 'P']);
     const usedAsExpiry = new Set<string>();
+    // Track which tokens were consumed by the NL parser so we can return a
+    // clean textTerms[] for MeiliSearch text matching. We never strip the
+    // underlying itself — Meili's name/symbol fields are what we want to hit.
+    const consumed = new Set<number>();
 
     // 1) Detect option type and expiry tokens first
     for (const token of tokens) {
@@ -117,10 +149,12 @@ export class FnoQueryParserService {
       if (!optionType && optionTokens.has(t)) {
         if (t === 'CE' || t === 'C' || t === 'CALL') {
           optionType = 'CE';
+          consumed.add(tokens.indexOf(token));
           continue;
         }
         if (t === 'PE' || t === 'P' || t === 'PUT') {
           optionType = 'PE';
+          consumed.add(tokens.indexOf(token));
           continue;
         }
       }
@@ -132,6 +166,7 @@ export class FnoQueryParserService {
         if (!expiryFrom) expiryFrom = exp.from;
         if (!expiryTo) expiryTo = exp.to;
         usedAsExpiry.add(t);
+        consumed.add(tokens.indexOf(token));
       }
     }
 
@@ -149,8 +184,16 @@ export class FnoQueryParserService {
     };
     for (const token of tokens) {
       const t = token.toUpperCase();
-      if (NL_MONTHLY.has(t)) isMonthly = true;
-      if (NL_WEEKLY.has(t)) isWeekly = true;
+      if (NL_MONTHLY.has(t)) {
+        isMonthly = true;
+        consumed.add(tokens.indexOf(token));
+        continue;
+      }
+      if (NL_WEEKLY.has(t)) {
+        isWeekly = true;
+        consumed.add(tokens.indexOf(token));
+        continue;
+      }
       if (Object.prototype.hasOwnProperty.call(NL_WEEKDAYS, t)) {
         const target = NL_WEEKDAYS[t];
         const today = new Date();
@@ -165,6 +208,7 @@ export class FnoQueryParserService {
         );
         if (!expiryFrom) expiryFrom = ymd;
         if (!expiryTo) expiryTo = ymd;
+        consumed.add(tokens.indexOf(token));
       }
     }
 
@@ -188,6 +232,14 @@ export class FnoQueryParserService {
       );
       if (!expiryFrom || expiryFrom < from) expiryFrom = from;
       if (!expiryTo || expiryTo > to) expiryTo = to;
+      // Mark "next" + "week"/"weekly" tokens as consumed so they don't pollute
+      // the textTerms[] that the controller sends to Meili.
+      const nextIdx = lowerTokens.indexOf('next');
+      if (nextIdx >= 0) consumed.add(nextIdx);
+      const weekIdx = lowerTokens.findIndex(
+        (t) => t === 'week' || t === 'weekly',
+      );
+      if (weekIdx >= 0) consumed.add(weekIdx);
     }
 
     // 2) Detect strike as the first reasonably sized numeric token.
@@ -198,6 +250,7 @@ export class FnoQueryParserService {
       if (parsedStrike === null) continue;
       // Only take the first candidate; callers can always override via query params
       strike = parsedStrike;
+      consumed.add(tokens.indexOf(token));
       break;
     }
 
@@ -221,6 +274,11 @@ export class FnoQueryParserService {
 
       // Normalize common aliases to their canonical underlying (e.g., NIFTY50 -> NIFTY).
       underlying = this.normalizeUnderlying(alpha);
+      // NOTE: we deliberately do NOT add this token to `consumed` — the
+      // underlying (e.g. "NIFTY") is exactly what we want Meili to text-match
+      // against the `name` / `symbol` fields of the index documents. Stripping
+      // it would leave Meili with no text signal and rely entirely on
+      // filterable attrs (which `underlyingSymbol` is not, in our index).
       break;
     }
 
@@ -233,6 +291,10 @@ export class FnoQueryParserService {
       expiryTo,
       isMonthly: isMonthly || undefined,
       isWeekly: isWeekly || undefined,
+      textTerms:
+        consumed.size > 0
+          ? tokens.filter((_, i) => !consumed.has(i))
+          : tokens.slice(),
     };
 
     // Debug-level only to avoid noisy logs in production, but extremely useful during tuning

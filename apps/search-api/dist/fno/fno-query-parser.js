@@ -30,15 +30,18 @@ class FnoQueryParserService {
         let expiryTo;
         const optionTokens = new Set(['CE', 'PE', 'CALL', 'PUT', 'C', 'P']);
         const usedAsExpiry = new Set();
+        const consumed = new Set();
         for (const token of tokens) {
             const t = token.toUpperCase();
             if (!optionType && optionTokens.has(t)) {
                 if (t === 'CE' || t === 'C' || t === 'CALL') {
                     optionType = 'CE';
+                    consumed.add(tokens.indexOf(token));
                     continue;
                 }
                 if (t === 'PE' || t === 'P' || t === 'PUT') {
                     optionType = 'PE';
+                    consumed.add(tokens.indexOf(token));
                     continue;
                 }
             }
@@ -49,6 +52,7 @@ class FnoQueryParserService {
                 if (!expiryTo)
                     expiryTo = exp.to;
                 usedAsExpiry.add(t);
+                consumed.add(tokens.indexOf(token));
             }
         }
         const NL_MONTHLY = new Set(['MONTHLY', 'MONTHEND', 'MONTH']);
@@ -64,10 +68,16 @@ class FnoQueryParserService {
         };
         for (const token of tokens) {
             const t = token.toUpperCase();
-            if (NL_MONTHLY.has(t))
+            if (NL_MONTHLY.has(t)) {
                 isMonthly = true;
-            if (NL_WEEKLY.has(t))
+                consumed.add(tokens.indexOf(token));
+                continue;
+            }
+            if (NL_WEEKLY.has(t)) {
                 isWeekly = true;
+                consumed.add(tokens.indexOf(token));
+                continue;
+            }
             if (Object.prototype.hasOwnProperty.call(NL_WEEKDAYS, t)) {
                 const target = NL_WEEKDAYS[t];
                 const today = new Date();
@@ -81,6 +91,7 @@ class FnoQueryParserService {
                     expiryFrom = ymd;
                 if (!expiryTo)
                     expiryTo = ymd;
+                consumed.add(tokens.indexOf(token));
             }
         }
         const lowerTokens = tokens.map((t) => t.toLowerCase());
@@ -95,6 +106,12 @@ class FnoQueryParserService {
                 expiryFrom = from;
             if (!expiryTo || expiryTo > to)
                 expiryTo = to;
+            const nextIdx = lowerTokens.indexOf('next');
+            if (nextIdx >= 0)
+                consumed.add(nextIdx);
+            const weekIdx = lowerTokens.findIndex((t) => t === 'week' || t === 'weekly');
+            if (weekIdx >= 0)
+                consumed.add(weekIdx);
         }
         for (const token of tokens) {
             if (usedAsExpiry.has(token))
@@ -103,6 +120,7 @@ class FnoQueryParserService {
             if (parsedStrike === null)
                 continue;
             strike = parsedStrike;
+            consumed.add(tokens.indexOf(token));
             break;
         }
         for (const token of tokens) {
@@ -136,6 +154,9 @@ class FnoQueryParserService {
             expiryTo,
             isMonthly: isMonthly || undefined,
             isWeekly: isWeekly || undefined,
+            textTerms: consumed.size > 0
+                ? tokens.filter((_, i) => !consumed.has(i))
+                : tokens.slice(),
         };
         (_b = (_a = this.logger).debug) === null || _b === void 0 ? void 0 : _b.call(_a, `[FnoQueryParser] Parsed query="${safeRaw}" -> ` +
             JSON.stringify({

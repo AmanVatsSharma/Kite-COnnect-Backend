@@ -330,13 +330,16 @@ export class SearchService {
     const primary: SearchResultItem[] = precise.hits || [];
     if (primary.length >= limit) return primary.slice(0, limit);
 
-    // Fallback: any-word matching (catches single-token queries like "nifty" → "NIFTY 50")
+    // Fallback: relaxed matching (`last` — supported in Meili v1.8+) catches
+    // single-word misspellings and partial terms. We do NOT use `any` here
+    // because Meili v1.8 (the pinned production version) doesn't support it.
+    // See https://www.meilisearch.com/docs/reference/api/search#matching-strategy
     const broad = await this.meili.search(index, {
       q,
       limit,
       attributesToRetrieve: attrs,
       filter: filterExpr,
-      matchingStrategy: 'any',
+      matchingStrategy: 'last',
       sort: brokerSort,
     });
 

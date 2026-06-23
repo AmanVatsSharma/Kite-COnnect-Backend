@@ -148,7 +148,7 @@ let SearchService = SearchService_1 = class SearchService {
             limit,
             attributesToRetrieve: attrs,
             filter: filterExpr,
-            matchingStrategy: 'any',
+            matchingStrategy: 'last',
             sort: brokerSort,
         });
         return this.dedupeById([...primary, ...(broad.hits || [])]).slice(0, limit);
