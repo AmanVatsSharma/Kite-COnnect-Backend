@@ -14,7 +14,11 @@ import axios from 'axios';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Client } = require('pg');
 
-import { lastThursdayOfMonth, weekOfMonth } from './index-helpers';
+import {
+  lastDowOfMonth,
+  weekOfMonth,
+  weeklyDowForUnderlying,
+} from './index-helpers';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -322,8 +326,13 @@ function toDoc(r: UniversalRow): MeiliDoc {
     if (Number.isFinite(yy) && Number.isFinite(mm) && Number.isFinite(dd)) {
       const expiryDate = new Date(yy, mm - 1, dd);
       const dow = expiryDate.getDay();
-      isWeekly = dow === 4;
-      isMonthly = dow === 4 && dd === lastThursdayOfMonth(yy, mm);
+      // `weeklyDow` = the day-of-week on which this underlying's WEEKLY
+      // contracts expire. NIFTY/BANKNIFTY/FINNIFTY → Tuesday (2), SENSEX →
+      // Friday (5). Unknown underlyings fall back to Thursday (4) for legacy
+      // compatibility.
+      const weeklyDow = weeklyDowForUnderlying(underlyingSymbol) ?? 4;
+      isWeekly = dow === weeklyDow;
+      isMonthly = dow === weeklyDow && dd === lastDowOfMonth(yy, mm, weeklyDow);
       expiryWeek = weekOfMonth(yy, mm, dd);
       expiryMonth = mm;
       expiryYear = yy;

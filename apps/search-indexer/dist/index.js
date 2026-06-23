@@ -180,7 +180,7 @@ function toVortexExchange(exchange, segment, instrumentType) {
     return 'NSE_EQ';
 }
 function toDoc(r) {
-    var _a, _b;
+    var _a, _b, _c;
     const symbol = (r.underlying || '').toUpperCase();
     const it = (r.instrument_type || '').toUpperCase();
     const isDerivative = it === 'FUT' || it === 'CE' || it === 'PE';
@@ -246,8 +246,13 @@ function toDoc(r) {
         if (Number.isFinite(yy) && Number.isFinite(mm) && Number.isFinite(dd)) {
             const expiryDate = new Date(yy, mm - 1, dd);
             const dow = expiryDate.getDay();
-            isWeekly = dow === 4;
-            isMonthly = dow === 4 && dd === (0, index_helpers_1.lastThursdayOfMonth)(yy, mm);
+            // `weeklyDow` = the day-of-week on which this underlying's WEEKLY
+            // contracts expire. NIFTY/BANKNIFTY/FINNIFTY → Tuesday (2), SENSEX →
+            // Friday (5). Unknown underlyings fall back to Thursday (4) for legacy
+            // compatibility.
+            const weeklyDow = (_c = (0, index_helpers_1.weeklyDowForUnderlying)(underlyingSymbol)) !== null && _c !== void 0 ? _c : 4;
+            isWeekly = dow === weeklyDow;
+            isMonthly = dow === weeklyDow && dd === (0, index_helpers_1.lastDowOfMonth)(yy, mm, weeklyDow);
             expiryWeek = (0, index_helpers_1.weekOfMonth)(yy, mm, dd);
             expiryMonth = mm;
             expiryYear = yy;
