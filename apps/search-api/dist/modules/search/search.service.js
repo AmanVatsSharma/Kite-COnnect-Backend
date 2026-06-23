@@ -304,6 +304,7 @@ let SearchService = SearchService_1 = class SearchService {
         }
     }
     buildFilter(filters) {
+        var _a, _b;
         const parts = [];
         if (!filters)
             return undefined;
@@ -339,7 +340,9 @@ let SearchService = SearchService_1 = class SearchService {
             parts.push(`strike >= ${Number(filters.strike_min)}`);
         if (Number.isFinite(Number(filters.strike_max)))
             parts.push(`strike <= ${Number(filters.strike_max)}`);
-        return parts.length ? parts.join(' AND ') : undefined;
+        const filterExpr = parts.length ? parts.join(' AND ') : undefined;
+        (_b = (_a = this.logger).debug) === null || _b === void 0 ? void 0 : _b.call(_a, `[SearchService] buildFilter q=${filters['q']} -> ${filterExpr !== null && filterExpr !== void 0 ? filterExpr : '(none)'}`);
+        return filterExpr;
     }
     dedupeById(items) {
         const seen = new Set();

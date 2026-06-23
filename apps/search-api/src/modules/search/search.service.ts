@@ -563,7 +563,11 @@ export class SearchService {
     if (Number.isFinite(Number(filters.strike_max)))
       parts.push(`strike <= ${Number(filters.strike_max)}`);
 
-    return parts.length ? parts.join(' AND ') : undefined;
+    const filterExpr = parts.length ? parts.join(' AND ') : undefined;
+    this.logger.debug?.(
+      `[SearchService] buildFilter q=${filters['q']} -> ${filterExpr ?? '(none)'}`,
+    );
+    return filterExpr;
   }
 
   private dedupeById(items: SearchResultItem[]): SearchResultItem[] {
