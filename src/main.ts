@@ -140,6 +140,8 @@ async function bootstrap() {
     const allowedOrigins = [
       'https://tradebazar.live',
       'https://www.tradebazar.live',
+      'https://tradifi.live',
+      'https://www.tradifi.live',
       'https://stocktrade.ltd',
       'https://www.stocktrade.ltd',
       'https://marketdata.vedpragya.com',
