@@ -68,7 +68,16 @@ export class SearchQueryDto {
   assetClass?: string;
 
   @IsOptional()
-  @IsIn(['falcon', 'vayu', 'atlas', 'drift', 'kite', 'vortex', 'massive', 'binance'])
+  @IsIn([
+    'falcon',
+    'vayu',
+    'atlas',
+    'drift',
+    'kite',
+    'vortex',
+    'massive',
+    'binance',
+  ])
   streamProvider?: string;
 
   @IsOptional()

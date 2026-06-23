@@ -328,9 +328,7 @@ function toDoc(r: UniversalRow): MeiliDoc {
       expiryMonth = mm;
       expiryYear = yy;
       monthlyExpiryDate = isMonthly
-        ? Math.floor(
-            new Date(expiryStr + 'T09:15:00Z').getTime() / 1000,
-          )
+        ? Math.floor(new Date(expiryStr + 'T09:15:00Z').getTime() / 1000)
         : undefined;
     }
   }
@@ -348,9 +346,8 @@ function toDoc(r: UniversalRow): MeiliDoc {
     expiry: r.expiry ? String(r.expiry).slice(0, 10) : null,
     expiryTs: r.expiry
       ? Math.floor(
-          new Date(
-            String(r.expiry).slice(0, 10) + 'T09:15:00Z',
-          ).getTime() / 1000,
+          new Date(String(r.expiry).slice(0, 10) + 'T09:15:00Z').getTime() /
+            1000,
         )
       : 9999999999,
     strike: r.strike !== null ? Number(r.strike) : null,
@@ -378,7 +375,9 @@ function toDoc(r: UniversalRow): MeiliDoc {
         r.exchange === 'BINANCE' || (r.asset_class || '') === 'crypto';
       if (!isCrypto) {
         const tk = [symbol, r.name].filter(Boolean) as string[];
-        const strippedName = r.name ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '') : undefined;
+        const strippedName = r.name
+          ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '')
+          : undefined;
         if (strippedName) tk.push(strippedName);
         return {
           searchKeywords: tk,
@@ -404,7 +403,9 @@ function toDoc(r: UniversalRow): MeiliDoc {
       return {
         searchKeywords: kw,
         coinFullName: fullName && isUsdtQuoted ? fullName : undefined,
-        exactName: r.name ? r.name.toUpperCase().replace(/\s+/g, '') : undefined,
+        exactName: r.name
+          ? r.name.toUpperCase().replace(/\s+/g, '')
+          : undefined,
         tokenKeywords: kw,
       };
     })(),
@@ -452,7 +453,9 @@ async function deleteFromMeiliSearch(
       data: batch,
     });
     // eslint-disable-next-line no-console
-    console.log(`[expired-cleanup] deleted batch ${Math.floor(i / batchSize) + 1} (${batch.length} docs)`);
+    console.log(
+      `[expired-cleanup] deleted batch ${Math.floor(i / batchSize) + 1} (${batch.length} docs)`,
+    );
   }
 }
 
@@ -471,13 +474,17 @@ async function expiredCleanup(): Promise<{ deleted: number }> {
   const ids = await fetchExpiredDerivativeIds();
   if (ids.length === 0) {
     // eslint-disable-next-line no-console
-    console.log('[expired-cleanup] no expired derivatives to remove from MeiliSearch');
+    console.log(
+      '[expired-cleanup] no expired derivatives to remove from MeiliSearch',
+    );
     return { deleted: 0 };
   }
 
   await deleteFromMeiliSearch(meiliBase, headers, index, ids);
   // eslint-disable-next-line no-console
-  console.log(`[expired-cleanup] deleted ${ids.length} expired instruments from MeiliSearch`);
+  console.log(
+    `[expired-cleanup] deleted ${ids.length} expired instruments from MeiliSearch`,
+  );
   return { deleted: ids.length };
 }
 
@@ -503,7 +510,9 @@ async function startHttpTriggerServer(): Promise<void> {
 
     if (req.method === 'POST' && req.url === '/api/indexer/cleanup-expired') {
       let body = '';
-      req.on('data', (chunk) => { body += chunk; });
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
       req.on('end', async () => {
         try {
           const result = await expiredCleanup();

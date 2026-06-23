@@ -584,8 +584,13 @@ export class SearchService {
    * Pure in-memory template lookup; no MeiliSearch round-trip, no DB hit.
    */
   fetchPrimaryUir(q: string): SearchResultItem | undefined {
-    const norm = String(q || '').trim().toUpperCase();
-    const PRIMARY_INDEX_MAP: Record<string, { symbol: string; canonicalSymbol: string }> = {
+    const norm = String(q || '')
+      .trim()
+      .toUpperCase();
+    const PRIMARY_INDEX_MAP: Record<
+      string,
+      { symbol: string; canonicalSymbol: string }
+    > = {
       NIFTY: { symbol: 'NIFTY', canonicalSymbol: 'NSE:NIFTY' },
       NIFTY50: { symbol: 'NIFTY', canonicalSymbol: 'NSE:NIFTY' },
       BANKNIFTY: { symbol: 'BANKNIFTY', canonicalSymbol: 'NSE:BANKNIFTY' },

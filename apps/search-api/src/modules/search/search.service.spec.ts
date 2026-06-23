@@ -68,7 +68,11 @@ describe('SearchService.buildFilter (additive parser wiring)', () => {
   });
 
   it('combines isMonthly with strike range in AND', () => {
-    const f = svc.buildFilter({ isMonthly: true, strike_min: 24000, strike_max: 26000 });
+    const f = svc.buildFilter({
+      isMonthly: true,
+      strike_min: 24000,
+      strike_max: 26000,
+    });
     expect(f).toContain('isMonthly = true');
     expect(f).toContain('strike >= 24000');
     expect(f).toContain('strike <= 26000');

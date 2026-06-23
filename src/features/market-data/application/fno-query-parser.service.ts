@@ -114,8 +114,13 @@ export class FnoQueryParserService {
     const NL_MONTHLY = new Set(['MONTHLY', 'MONTHEND', 'MONTH']);
     const NL_WEEKLY = new Set(['WEEKLY']);
     const NL_WEEKDAYS: Record<string, number> = {
-      MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3, THURSDAY: 4,
-      FRIDAY: 5, SATURDAY: 6, SUNDAY: 0,
+      MONDAY: 1,
+      TUESDAY: 2,
+      WEDNESDAY: 3,
+      THURSDAY: 4,
+      FRIDAY: 5,
+      SATURDAY: 6,
+      SUNDAY: 0,
     };
     for (const token of tokens) {
       const t = token.toUpperCase();
@@ -128,7 +133,11 @@ export class FnoQueryParserService {
         let delta = (target - cur + 7) % 7;
         if (delta === 0) delta = 7;
         const next = new Date(today.getTime() + delta * 86400000);
-        const ymd = this.toYmd(next.getFullYear(), next.getMonth() + 1, next.getDate());
+        const ymd = this.toYmd(
+          next.getFullYear(),
+          next.getMonth() + 1,
+          next.getDate(),
+        );
         if (!expiryFrom) expiryFrom = ymd;
         if (!expiryTo) expiryTo = ymd;
       }
@@ -142,8 +151,16 @@ export class FnoQueryParserService {
       const today = new Date();
       const tomorrow = new Date(today.getTime() + 86400000);
       const weekOut = new Date(today.getTime() + 7 * 86400000);
-      const from = this.toYmd(tomorrow.getFullYear(), tomorrow.getMonth() + 1, tomorrow.getDate());
-      const to = this.toYmd(weekOut.getFullYear(), weekOut.getMonth() + 1, weekOut.getDate());
+      const from = this.toYmd(
+        tomorrow.getFullYear(),
+        tomorrow.getMonth() + 1,
+        tomorrow.getDate(),
+      );
+      const to = this.toYmd(
+        weekOut.getFullYear(),
+        weekOut.getMonth() + 1,
+        weekOut.getDate(),
+      );
       if (!expiryFrom || expiryFrom < from) expiryFrom = from;
       if (!expiryTo || expiryTo > to) expiryTo = to;
     }
