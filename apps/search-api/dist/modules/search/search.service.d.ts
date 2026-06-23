@@ -59,6 +59,7 @@ export declare class SearchService {
     hydrateLtpByItems(items: SearchResultItem[]): Promise<Record<string, any>>;
     logSelectionTelemetry(q: string, symbol: string, universalId?: number): Promise<void>;
     buildFilter(filters: Record<string, any>): string | undefined;
+    private dateStringToExpiryTs;
     private dedupeById;
     fetchPrimaryUir(q: string): SearchResultItem | undefined;
 }

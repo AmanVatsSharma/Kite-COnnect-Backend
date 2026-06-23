@@ -546,10 +546,15 @@ export class SearchService {
 
     // Natural-language expiry (additive — explicit user range wins; parsed values
     // fill in only when the user didn't pass expiry_from / expiry_to).
+    // Use `expiryTs` (Unix seconds, numeric) for range filtering since the `expiry`
+    // field is stored as an ISO date string and Meili rejects string `>=`/`<=`
+    // compares against numeric-formatted values.
     const expFrom = filters.expiry_from || filters.parsedExpiryFrom;
     const expTo = filters.expiry_to || filters.parsedExpiryTo;
-    if (expFrom) parts.push(`expiry >= ${JSON.stringify(expFrom)}`);
-    if (expTo) parts.push(`expiry <= ${JSON.stringify(expTo)}`);
+    const expFromTs = expFrom ? this.dateStringToExpiryTs(expFrom) : null;
+    const expToTs = expTo ? this.dateStringToExpiryTs(expTo) : null;
+    if (expFromTs !== null) parts.push(`expiryTs >= ${expFromTs}`);
+    if (expToTs !== null) parts.push(`expiryTs <= ${expToTs}`);
 
     if (filters.isMonthly === true) {
       // isMonthly is set on OPTIONS only by the indexer, but defensively
@@ -571,6 +576,28 @@ export class SearchService {
       `[SearchService] buildFilter q=${filters['q']} -> ${filterExpr ?? '(none)'}`,
     );
     return filterExpr;
+  }
+
+  /**
+   * Convert an ISO-8601 date string (`YYYY-MM-DD`) to the Unix-seconds
+   * (UTC) value the indexer stores in `expiryTs`. The indexer writes
+   * `expiryTs` as 09:15 UTC of the expiry day (a normalized expiry-cutoff
+   * time used for sorting/range filtering, not the actual market-close
+   * which is 09:15 UTC of the trading session).
+   * Returns null for unparseable inputs.
+   */
+  private dateStringToExpiryTs(dateStr: string): number | null {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (!m) return null;
+    const ts = Date.UTC(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      9,
+      15,
+      0,
+    );
+    return Math.floor(ts / 1000);
   }
 
   private dedupeById(items: SearchResultItem[]): SearchResultItem[] {

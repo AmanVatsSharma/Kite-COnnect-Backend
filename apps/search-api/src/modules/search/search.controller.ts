@@ -355,13 +355,18 @@ export class SearchController {
       segment: dto.segment,
       instrumentType: dto.instrumentType,
       vortexExchange: dto.vortexExchange || modeVe,
-      optionType: dto.optionType,
+      optionType: parsed.optionType || dto.optionType,
       assetClass: dto.assetClass,
       streamProvider: normalizeStreamProvider(dto.streamProvider),
       expiry_from: dto.expiry_from,
       expiry_to: dto.expiry_to,
-      strike_min: dto.strike_min,
-      strike_max: dto.strike_max,
+      // NL-parsed strike wins over DTO bounds; if only one side is set, use
+      // it for both ends so 'nifty 24000 ce' becomes strike_min=24000 +
+      // strike_max=24000 instead of relying on Meili's text relevance alone.
+      strike_min:
+        parsed.strike !== undefined ? parsed.strike : dto.strike_min,
+      strike_max:
+        parsed.strike !== undefined ? parsed.strike : dto.strike_max,
       isMonthly: parsed.isMonthly,
       isWeekly: parsed.isWeekly,
       parsedExpiryFrom: parsed.expiryFrom
@@ -483,13 +488,18 @@ export class SearchController {
       segment: dto.segment,
       instrumentType: dto.instrumentType,
       vortexExchange: dto.vortexExchange || modeVe,
-      optionType: dto.optionType,
+      optionType: parsed.optionType || dto.optionType,
       assetClass: dto.assetClass,
       streamProvider: normalizeStreamProvider(dto.streamProvider),
       expiry_from: dto.expiry_from,
       expiry_to: dto.expiry_to,
-      strike_min: dto.strike_min,
-      strike_max: dto.strike_max,
+      // NL-parsed strike wins over DTO bounds; if only one side is set, use
+      // it for both ends so 'nifty 24000 ce' becomes strike_min=24000 +
+      // strike_max=24000 instead of relying on Meili's text relevance alone.
+      strike_min:
+        parsed.strike !== undefined ? parsed.strike : dto.strike_min,
+      strike_max:
+        parsed.strike !== undefined ? parsed.strike : dto.strike_max,
       isMonthly: parsed.isMonthly,
       isWeekly: parsed.isWeekly,
       parsedExpiryFrom: parsed.expiryFrom

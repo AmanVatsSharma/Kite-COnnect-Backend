@@ -235,6 +235,68 @@ export class FnoQueryParserService {
         consumed.add(tokens.indexOf(token));
         continue;
       }
+      // 1a) DD-MonthName expiry: "25 june", "30 JUNE", "7 jun" — a 1–2 digit
+      //     number followed (next token) by a recognised month name.
+      //     Capture only if a strike has not yet been claimed and the numeric
+      //     range looks like a day-of-month (1–31), not a strike (>100 typically
+      //     for NIFTY/BANKNIFTY/SENSEX, and even indices).
+      if (!expiryFrom && /^\d{1,2}$/.test(t)) {
+        const day = parseInt(t, 10);
+        const idx = tokens.indexOf(token);
+        const nextTok = tokens[idx + 1];
+        if (
+          day >= 1 &&
+          day <= 31 &&
+          nextTok &&
+          this.isMonthToken(nextTok.toUpperCase())
+        ) {
+          const monthNum = this.monthFromToken(nextTok.toUpperCase());
+          if (monthNum) {
+            const today = new Date();
+            let yr = today.getFullYear();
+            // If month/day already passed this year, roll into next year.
+            const candidate = new Date(yr, monthNum - 1, day);
+            if (candidate.getTime() < today.getTime() - 86400000) {
+              yr += 1;
+            }
+            const ymd = this.toYmd(yr, monthNum, day);
+            if (!expiryFrom) expiryFrom = ymd;
+            if (!expiryTo) expiryTo = ymd;
+            usedAsExpiry.add(token);
+            usedAsExpiry.add(nextTok);
+            consumed.add(idx);
+            consumed.add(idx + 1);
+            continue;
+          }
+        }
+      }
+      // 1a-reverse) MonthName-DD expiry: "june 30", "JULY 7" — a month name
+      //     followed (next token) by a 1–2 digit day. Common in NSE
+      //     colloquial speech ("nifty june 30 monthly").
+      if (!expiryFrom && this.isMonthToken(t)) {
+        const idx = tokens.indexOf(token);
+        const nextTok = tokens[idx + 1];
+        if (nextTok && /^\d{1,2}$/.test(nextTok)) {
+          const day = parseInt(nextTok, 10);
+          const monthNum = this.monthFromToken(t);
+          if (monthNum && day >= 1 && day <= 31) {
+            const today = new Date();
+            let yr = today.getFullYear();
+            const candidate = new Date(yr, monthNum - 1, day);
+            if (candidate.getTime() < today.getTime() - 86400000) {
+              yr += 1;
+            }
+            const ymd = this.toYmd(yr, monthNum, day);
+            if (!expiryFrom) expiryFrom = ymd;
+            if (!expiryTo) expiryTo = ymd;
+            usedAsExpiry.add(token);
+            usedAsExpiry.add(nextTok);
+            consumed.add(idx);
+            consumed.add(idx + 1);
+            continue;
+          }
+        }
+      }
       if (Object.prototype.hasOwnProperty.call(NL_WEEKDAYS, t)) {
         const target = NL_WEEKDAYS[t];
         const today = new Date();
@@ -418,7 +480,7 @@ export class FnoQueryParserService {
   private toYmd(year: number, month: number, day: number): string {
     const mm = month.toString().padStart(2, '0');
     const dd = day.toString().padStart(2, '0');
-    return `${year}${mm}${dd}`;
+    return `${year}-${mm}-${dd}`;
   }
 
   /** Check if a Y/M/D triple is a valid calendar date. */
@@ -445,18 +507,18 @@ export class FnoQueryParserService {
   /** Map a month token like JAN/MAR/APR to a month number. */
   private monthFromToken(mon: string): number | null {
     const map: Record<string, number> = {
-      JAN: 1,
-      FEB: 2,
-      MAR: 3,
-      APR: 4,
+      JAN: 1, JANUARY: 1,
+      FEB: 2, FEBRUARY: 2,
+      MAR: 3, MARCH: 3,
+      APR: 4, APRIL: 4,
       MAY: 5,
-      JUN: 6,
-      JUL: 7,
-      AUG: 8,
-      SEP: 9,
-      OCT: 10,
-      NOV: 11,
-      DEC: 12,
+      JUN: 6, JUNE: 6,
+      JUL: 7, JULY: 7,
+      AUG: 8, AUGUST: 8,
+      SEP: 9, SEPT: 9, SEPTEMBER: 9,
+      OCT: 10, OCTOBER: 10,
+      NOV: 11, NOVEMBER: 11,
+      DEC: 12, DECEMBER: 12,
     };
     return map[mon.toUpperCase()] ?? null;
   }

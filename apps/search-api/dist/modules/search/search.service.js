@@ -326,10 +326,12 @@ let SearchService = SearchService_1 = class SearchService {
             parts.push(`isDerivative = ${!!filters.isDerivative}`);
         const expFrom = filters.expiry_from || filters.parsedExpiryFrom;
         const expTo = filters.expiry_to || filters.parsedExpiryTo;
-        if (expFrom)
-            parts.push(`expiry >= ${JSON.stringify(expFrom)}`);
-        if (expTo)
-            parts.push(`expiry <= ${JSON.stringify(expTo)}`);
+        const expFromTs = expFrom ? this.dateStringToExpiryTs(expFrom) : null;
+        const expToTs = expTo ? this.dateStringToExpiryTs(expTo) : null;
+        if (expFromTs !== null)
+            parts.push(`expiryTs >= ${expFromTs}`);
+        if (expToTs !== null)
+            parts.push(`expiryTs <= ${expToTs}`);
         if (filters.isMonthly === true) {
             parts.push('(isMonthly = true AND (optionType = "CE" OR optionType = "PE"))');
         }
@@ -343,6 +345,13 @@ let SearchService = SearchService_1 = class SearchService {
         const filterExpr = parts.length ? parts.join(' AND ') : undefined;
         (_b = (_a = this.logger).debug) === null || _b === void 0 ? void 0 : _b.call(_a, `[SearchService] buildFilter q=${filters['q']} -> ${filterExpr !== null && filterExpr !== void 0 ? filterExpr : '(none)'}`);
         return filterExpr;
+    }
+    dateStringToExpiryTs(dateStr) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+        if (!m)
+            return null;
+        const ts = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 9, 15, 0);
+        return Math.floor(ts / 1000);
     }
     dedupeById(items) {
         const seen = new Set();

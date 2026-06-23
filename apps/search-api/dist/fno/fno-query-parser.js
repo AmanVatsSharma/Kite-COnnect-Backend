@@ -101,6 +101,61 @@ class FnoQueryParserService {
                 consumed.add(tokens.indexOf(token));
                 continue;
             }
+            if (!expiryFrom && /^\d{1,2}$/.test(t)) {
+                const day = parseInt(t, 10);
+                const idx = tokens.indexOf(token);
+                const nextTok = tokens[idx + 1];
+                if (day >= 1 &&
+                    day <= 31 &&
+                    nextTok &&
+                    this.isMonthToken(nextTok.toUpperCase())) {
+                    const monthNum = this.monthFromToken(nextTok.toUpperCase());
+                    if (monthNum) {
+                        const today = new Date();
+                        let yr = today.getFullYear();
+                        const candidate = new Date(yr, monthNum - 1, day);
+                        if (candidate.getTime() < today.getTime() - 86400000) {
+                            yr += 1;
+                        }
+                        const ymd = this.toYmd(yr, monthNum, day);
+                        if (!expiryFrom)
+                            expiryFrom = ymd;
+                        if (!expiryTo)
+                            expiryTo = ymd;
+                        usedAsExpiry.add(token);
+                        usedAsExpiry.add(nextTok);
+                        consumed.add(idx);
+                        consumed.add(idx + 1);
+                        continue;
+                    }
+                }
+            }
+            if (!expiryFrom && this.isMonthToken(t)) {
+                const idx = tokens.indexOf(token);
+                const nextTok = tokens[idx + 1];
+                if (nextTok && /^\d{1,2}$/.test(nextTok)) {
+                    const day = parseInt(nextTok, 10);
+                    const monthNum = this.monthFromToken(t);
+                    if (monthNum && day >= 1 && day <= 31) {
+                        const today = new Date();
+                        let yr = today.getFullYear();
+                        const candidate = new Date(yr, monthNum - 1, day);
+                        if (candidate.getTime() < today.getTime() - 86400000) {
+                            yr += 1;
+                        }
+                        const ymd = this.toYmd(yr, monthNum, day);
+                        if (!expiryFrom)
+                            expiryFrom = ymd;
+                        if (!expiryTo)
+                            expiryTo = ymd;
+                        usedAsExpiry.add(token);
+                        usedAsExpiry.add(nextTok);
+                        consumed.add(idx);
+                        consumed.add(idx + 1);
+                        continue;
+                    }
+                }
+            }
             if (Object.prototype.hasOwnProperty.call(NL_WEEKDAYS, t)) {
                 const target = NL_WEEKDAYS[t];
                 const today = new Date();
@@ -238,7 +293,7 @@ class FnoQueryParserService {
     toYmd(year, month, day) {
         const mm = month.toString().padStart(2, '0');
         const dd = day.toString().padStart(2, '0');
-        return `${year}${mm}${dd}`;
+        return `${year}-${mm}-${dd}`;
     }
     isValidYmd(year, month, day) {
         if (!Number.isFinite(year) ||
@@ -259,18 +314,18 @@ class FnoQueryParserService {
     monthFromToken(mon) {
         var _a;
         const map = {
-            JAN: 1,
-            FEB: 2,
-            MAR: 3,
-            APR: 4,
+            JAN: 1, JANUARY: 1,
+            FEB: 2, FEBRUARY: 2,
+            MAR: 3, MARCH: 3,
+            APR: 4, APRIL: 4,
             MAY: 5,
-            JUN: 6,
-            JUL: 7,
-            AUG: 8,
-            SEP: 9,
-            OCT: 10,
-            NOV: 11,
-            DEC: 12,
+            JUN: 6, JUNE: 6,
+            JUL: 7, JULY: 7,
+            AUG: 8, AUGUST: 8,
+            SEP: 9, SEPT: 9, SEPTEMBER: 9,
+            OCT: 10, OCTOBER: 10,
+            NOV: 11, NOVEMBER: 11,
+            DEC: 12, DECEMBER: 12,
         };
         return (_a = map[mon.toUpperCase()]) !== null && _a !== void 0 ? _a : null;
     }
