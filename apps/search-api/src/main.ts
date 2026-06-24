@@ -57,8 +57,8 @@ import { TimeoutInterceptor } from './modules/common/timeout.interceptor';
  * on this list.
  */
 const DEFAULT_CORS_ORIGINS = [
-  'https://tradebazar.live',
-  'https://www.tradebazar.live',
+  'https://tradebaazar.live',
+  'https://www.tradebaazar.live',
   'https://tradifi.live',
   'https://www.tradifi.live',
   'https://stocktrade.ltd',

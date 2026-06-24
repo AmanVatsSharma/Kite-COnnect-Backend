@@ -138,8 +138,8 @@ async function bootstrap() {
     // CORS configuration (admin dashboard sends x-admin-token / x-api-key)
     // credentials: true — allowed only for specific non-wildcard origins.
     const allowedOrigins = [
-      'https://tradebazar.live',
-      'https://www.tradebazar.live',
+      'https://tradebaazar.live',
+      'https://www.tradebaazar.live',
       'https://tradifi.live',
       'https://www.tradifi.live',
       'https://stocktrade.ltd',
